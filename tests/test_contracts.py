@@ -55,7 +55,7 @@ class PluginContractTests(unittest.TestCase):
             (PLUGIN / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
         self.assertEqual(MAIN, manifest["name"])
-        self.assertEqual("0.1.0", manifest["version"])
+        self.assertEqual("0.1.1", manifest["version"])
         self.assertEqual("./skills/", manifest["skills"])
         self.assertEqual(MAIN, PLUGIN.name)
         self.assertIsInstance(manifest["interface"]["defaultPrompt"], list)
@@ -172,6 +172,17 @@ class SkillContractTests(unittest.TestCase):
         for path in ROOT.rglob("*"):
             if path.is_file() and ".git" not in path.parts and path.suffix in text_suffixes:
                 self.assertIsNone(cyrillic.search(path.read_text(encoding="utf-8")), str(path))
+
+    def test_operational_contracts_use_pcw_memory_root(self) -> None:
+        paths = (
+            SKILLS / MAIN / "SKILL.md",
+            SKILLS / MAIN / "references" / "workspace-contract.md",
+            SKILLS / "pcw-resolve-workspace" / "SKILL.md",
+            SKILLS / "pcw-open-cycle" / "SKILL.md",
+            ROOT / "tests" / "fixtures" / "valid-memory" / "tmp" / "cycle-001" / "manifest.md",
+        )
+        for path in paths:
+            self.assertIn(".pcw", path.read_text(encoding="utf-8"), str(path))
 
 
 if __name__ == "__main__":

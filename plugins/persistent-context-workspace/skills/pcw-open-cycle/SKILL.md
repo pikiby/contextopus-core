@@ -10,7 +10,7 @@ Create the minimal structure for new memory or recover exactly one unfinished cy
 ## Preconditions
 
 - A successful `pcw-resolve-workspace` receipt is available.
-- The path is inside the resolved `<work-root>/.rlm/`.
+- The path is inside the resolved `<work-root>/.pcw/`.
 - No other agent is writing to this workspace concurrently.
 
 ## Inputs
@@ -24,7 +24,7 @@ Create the minimal structure for new memory or recover exactly one unfinished cy
 ## Procedure
 
 1. If the workspace does not exist:
-   - create `<work-root>/.rlm/.gitignore` that ignores everything except itself;
+   - create `<work-root>/.pcw/.gitignore` that ignores everything except itself;
    - create `current.md` with only `# Current`, `# Pinned`, and `# References`;
    - create `knowledge/index.md`, `tmp/`, and a workspace `.gitignore` containing `tmp/`;
    - initialize local Git inside the workspace without committing.

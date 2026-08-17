@@ -44,7 +44,7 @@ This is not a summary of the entire conversation. It is a state transformation: 
 Memory lives in a hidden directory under the working project:
 
 ```text
-<work-root>/.rlm/
+<work-root>/.pcw/
 ├── project-a/
 ├── project-b/
 └── project-c/
@@ -55,7 +55,7 @@ One directory represents one semantic subproject, not one session. Consecutive s
 Proposed subproject layout:
 
 ```text
-.rlm/<subproject>/
+.pcw/<subproject>/
 ├── current.md
 ├── knowledge/
 │   ├── index.md
@@ -69,7 +69,7 @@ Proposed subproject layout:
 └── .gitignore
 ```
 
-In the first implementation, each subproject memory is its own local Git repository. This isolates memory history from source-code history and keeps service artifacts out of the source repository. The source project's own Git repository must ignore `.rlm/`.
+In the first implementation, each subproject memory is its own local Git repository. This isolates memory history from source-code history and keeps service artifacts out of the source repository. The source project's own Git repository must ignore `.pcw/`.
 
 ## 4. `current.md` contract
 

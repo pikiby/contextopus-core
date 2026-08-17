@@ -5,7 +5,7 @@
 Use one directory for each semantic subproject:
 
 ```text
-<work-root>/.rlm/<subproject>/
+<work-root>/.pcw/<subproject>/
 ├── current.md
 ├── knowledge/
 │   ├── index.md

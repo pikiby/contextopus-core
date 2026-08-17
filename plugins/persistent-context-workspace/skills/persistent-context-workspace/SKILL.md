@@ -1,6 +1,6 @@
 ---
 name: persistent-context-workspace
-description: Orchestrate persistent file-backed context for long-running or multi-session work through a .rlm workspace containing current.md, tmp, knowledge, and Git history. Use when the user invokes $persistent-context-workspace, asks to continue work across sessions, requests RLM-style external memory, or needs a bounded context layer around a large source or project. This is the only public entry point; it loads every internal pcw-* subskill from its sibling SKILL.md file.
+description: Orchestrate persistent file-backed context for long-running or multi-session work through a .pcw workspace containing current.md, tmp, knowledge, and Git history. Use when the user invokes $persistent-context-workspace, asks to continue work across sessions, requests RLM-style external memory, or needs a bounded context layer around a large source or project. This is the only public entry point; it loads every internal pcw-* subskill from its sibling SKILL.md file.
 ---
 
 # Persistent Context Workspace

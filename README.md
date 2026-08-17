@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Persistent Context Workspace is an experimental file-backed memory layer for long-running agent work. One public contract skill coordinates small internal skills and preserves continuity in `.rlm/<subproject>/` through `current.md`, `tmp/`, `knowledge/`, and Git history.
+Persistent Context Workspace is an experimental file-backed memory layer for long-running agent work. One public contract skill coordinates small internal skills and preserves continuity in `.pcw/<subproject>/` through `current.md`, `tmp/`, `knowledge/`, and Git history.
 
 The repository is also a Codex plugin marketplace, so the complete skill set can be installed and refreshed as one unit.
 
