@@ -31,6 +31,7 @@ Classify new meanings once, update durable knowledge, and prepare the compactor'
    - it remains relevant under a reasonable change of the next request within the same subproject;
    - it is not an assumed next action, old plan, or minor completed chronology;
    - primary coordinates or an explicit user statement support it.
+   An explicitly authorized unfinished operation is a factual Current candidate, not an assumed next action, when its exact target, authorized scope, and execution state have user or recorded-result evidence and its absence would break continuation.
 4. If one stable reference makes the meaning cheap to recover, store the detail in `knowledge/` and pass only a reference candidate to Current.
 5. Classify a meaning as `Pinned` only when it is a verbatim user constraint that still applies. Never infer `Pinned` from agent behavior or an old plan.
 6. Classify a meaning as durable knowledge when it is verified, useful beyond the current stage, and does not need to occupy `current.md` continuously.

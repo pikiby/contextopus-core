@@ -35,7 +35,7 @@ Rebuild the current fingerprint as a whole. Never reclassify raw results or upda
    - remove resolved operational noise;
    - shorten wording without losing constraints or decision rationale.
 7. Build `References` only from existing knowledge, `blocked_by`, and evidence links.
-8. Never add a next action, execution plan, full Completed/Open work history, or guess about the next request.
+8. Never add a next action, execution plan, full Completed/Open work history, or guess about the next request. Preserve an explicitly authorized unfinished operation classified by promotion only as a declarative factual state with its evidenced target, scope, and execution state; update or remove it when completed, revoked, replaced, paused, or materially rescoped.
 9. Replace `current.md` as a whole only after the complete candidate exists.
 10. Do not change `knowledge/`, cycle results, or the Git index.
 

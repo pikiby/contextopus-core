@@ -26,6 +26,12 @@
 
 `recovery_required` reuses the existing cycle and resumes at `pcw-promote-knowledge`. Do not create a new cycle before reaching `cycle_closed`.
 
+## Return control to user work
+
+Memory state completion does not complete the user task that caused the memory transition. After a memory-only interruption reaches a stable state, the main skill evaluates the latest unresolved and still-authorized task and resumes it when the intervening memory request was additive. This is orchestration after an internal transition, not a new memory state or an internal subskill decision.
+
+Never resume a task that the user cancelled, replaced, paused, or materially rescoped, and never reconstruct work from an agent-generated next action or stale plan. Require new authority when continuation would exceed the original target or scope.
+
 ## Repeated calls
 
 - `pcw-resolve-workspace`: return the same resolved path.

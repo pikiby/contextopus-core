@@ -55,7 +55,7 @@ class PluginContractTests(unittest.TestCase):
             (PLUGIN / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
         self.assertEqual(MAIN, manifest["name"])
-        self.assertEqual("0.1.2", manifest["version"])
+        self.assertEqual("0.1.3", manifest["version"])
         self.assertEqual("./skills/", manifest["skills"])
         self.assertEqual(MAIN, PLUGIN.name)
         self.assertIsInstance(manifest["interface"]["defaultPrompt"], list)
@@ -127,6 +127,28 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("external evidence that materially affected the result", text)
         self.assertIn("Compare `current.md` and relevant knowledge", text)
         self.assertIn("never call the PCW cycle complete", text)
+
+    def test_main_returns_to_unresolved_work_after_memory(self) -> None:
+        text = skill_text(MAIN)
+        self.assertIn("## Return to unresolved work", text)
+        self.assertIn("memory work as infrastructure", text)
+        self.assertIn("resume it without asking the user to repeat the request", text)
+        self.assertIn("explicitly cancel, replace, pause, or narrow", text)
+        self.assertIn("Never resume from an agent-generated next action", text)
+
+    def test_authorized_unfinished_work_is_current_state_not_next_action(self) -> None:
+        current_contract = (
+            SKILLS / MAIN / "references" / "workspace-contract.md"
+        ).read_text(encoding="utf-8")
+        state_machine = (
+            SKILLS / MAIN / "references" / "state-machine.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("authorized unfinished operation", current_contract)
+        self.assertIn("active state, not a next action", current_contract)
+        self.assertIn("Memory state completion does not complete the user task", state_machine)
+        for name in ("pcw-promote-knowledge", "pcw-compact-current", "pcw-validate-memory"):
+            with self.subTest(skill=name):
+                self.assertIn("authorized unfinished", skill_text(name))
 
     def test_main_uses_verified_sibling_file_loader(self) -> None:
         text = skill_text(MAIN)

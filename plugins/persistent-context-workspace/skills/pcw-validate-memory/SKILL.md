@@ -31,7 +31,7 @@ Validate the new state independently of writing operations and return only a val
 5. Resolve every local knowledge link and inspect every external evidence coordinate.
 6. Verify that each Current claim comes from promotion, knowledge, or explicit user input.
 7. Verify that conflicts remain explicit and were not collapsed into a false fact.
-8. Verify the absence of an assumed next action, imposed plan, and detailed journal.
+8. Verify the absence of an assumed next action, imposed plan, and detailed journal. When Current retains authorized unfinished work, verify its target, scope, and execution state against explicit user or accepted-result evidence and require declarative state rather than an instruction or forecast.
 9. Evaluate the `current.md` budget; treat an overrun caused only by verbatim `Pinned` as a warning and any other overrun as failure.
 10. Verify that Git tracks nothing under `tmp/`.
 11. Verify that the memory diff is limited to `current.md`, `knowledge/`, and the workspace `.gitignore`.

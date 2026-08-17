@@ -415,6 +415,14 @@ Before telling the user that a task or meaningful stage is complete, the main sk
 
 The agent may report that source work succeeded while an authorized memory checkpoint is pending, but it must state that condition explicitly. It must never report the PCW cycle as complete while final work is missing from memory, `current.md` contradicts the target, validation has not succeeded, or checkpointing remains unresolved.
 
+### Return-to-work gate
+
+A memory operation is infrastructure and does not complete or replace the source task that caused it. After recovery, checkpointing, or another memory-only interruption, the main skill must identify the latest unresolved and still-authorized user task from user messages, cycle manifests, recorded results, and supported Current facts.
+
+Treat a request to record, inspect, compact, or checkpoint memory as additive when it does not explicitly cancel, replace, pause, or narrow the unfinished source task. After memory becomes consistent, resume that task without asking the user to repeat it. Stop instead when the later request replaces the task, the user cancels or pauses it, the task is already complete, or continuation requires new authority.
+
+An explicitly authorized unfinished operation may appear in `Current` when its absence would break continuation. Describe its exact target, authorized scope, and factual execution state declaratively. This is active state, not an inferred next action. Update or remove it when the task is completed, revoked, replaced, paused, or materially rescoped.
+
 ### Stage completion
 
 1. All factual results exist in `tmp/`.

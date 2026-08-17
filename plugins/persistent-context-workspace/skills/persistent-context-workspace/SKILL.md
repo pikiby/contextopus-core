@@ -91,6 +91,18 @@ Run this chain after a meaningful stage, before a session handoff, when unabsorb
 
 Never reorder these operations or merge their responsibilities manually.
 
+## Return to unresolved work
+
+Treat memory work as infrastructure. It does not complete or replace the source task that caused it.
+
+1. After recovery, checkpointing, pruning, or another memory-only interruption, identify the latest unresolved and still-authorized user task only from explicit user messages, cycle manifests, accepted results, and supported Current facts.
+2. Treat a request to record, inspect, compact, or checkpoint memory as additive when it does not explicitly cancel, replace, pause, or narrow the unfinished source task.
+3. When the task remains authorized and memory is consistent, resume it without asking the user to repeat the request. Preserve its original target, scope, and authority boundaries.
+4. Stop instead when the user cancelled, replaced, paused, or materially rescoped the task, when the task is already complete, or when continuation requires new authority.
+5. Never resume from an agent-generated next action, stale plan, or incidental similarity to an old request.
+
+An explicitly authorized unfinished operation may remain in `Current` as a factual state when its absence would break continuation. Describe only its supported target, authorized scope, and actual execution state in declarative language. Do not turn it into a recommendation or forecast. Update or remove it when the task changes state.
+
 ## Accept an internal result
 
 For every operation, require the envelope from `workspace-contract.md` and verify:

@@ -47,6 +47,8 @@ Rules:
 
 - Do not maintain a journal or list minor completed actions.
 - Do not record an assumed next step.
+- An explicitly authorized unfinished operation may appear in `Current` when its absence would materially break continuation. Describe only its evidenced target, authorized scope, and factual execution state; this is active state, not a next action.
+- Update or remove that operation when it is completed, revoked, replaced, paused, or materially rescoped.
 - Do not duplicate details available through a stable link.
 - Do not paraphrase `Pinned` without an explicit user change.
 - Use a default budget of about 3,000 tokens unless the cycle overrides it.
