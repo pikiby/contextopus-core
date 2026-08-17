@@ -1,0 +1,6 @@
+interface:
+  display_name: "PCW Checkpoint Memory"
+  short_description: "Create an authorized memory checkpoint"
+  default_prompt: "Use $pcw-checkpoint-memory to prepare or create an authorized memory checkpoint."
+policy:
+  allow_implicit_invocation: false

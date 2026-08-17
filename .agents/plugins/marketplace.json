@@ -1,0 +1,20 @@
+{
+  "name": "persistent-context-workspace",
+  "interface": {
+    "displayName": "Persistent Context Workspace"
+  },
+  "plugins": [
+    {
+      "name": "persistent-context-workspace",
+      "source": {
+        "source": "local",
+        "path": "./plugins/persistent-context-workspace"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Persistent Context Workspace"
+  short_description: "Orchestrate persistent external context"
+  default_prompt: "Use $persistent-context-workspace to continue this work with persistent external context."
+policy:
+  allow_implicit_invocation: true

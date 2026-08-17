@@ -1,0 +1,25 @@
+{
+  "name": "persistent-context-workspace",
+  "version": "0.1.0",
+  "description": "Persistent file-backed context for long-running agent work",
+  "author": {
+    "name": "pikiby",
+    "url": "https://github.com/pikiby"
+  },
+  "homepage": "https://github.com/pikiby/persistent-context-workspace",
+  "repository": "https://github.com/pikiby/persistent-context-workspace",
+  "keywords": ["context", "memory", "agents", "rlm", "workflow"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Persistent Context Workspace",
+    "shortDescription": "Persistent external context for long-running work.",
+    "longDescription": "Maintain bounded current context, temporary cycle evidence, and linked durable knowledge across agent sessions.",
+    "developerName": "pikiby",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Continue this project with persistent context.",
+      "Build external memory for this long-running task."
+    ]
+  }
+}

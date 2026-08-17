@@ -1,0 +1,6 @@
+interface:
+  display_name: "PCW Prune Tmp"
+  short_description: "Prune an absorbed cycle tmp directory"
+  default_prompt: "Use $pcw-prune-tmp to remove only cycle material covered by a verified checkpoint."
+policy:
+  allow_implicit_invocation: false

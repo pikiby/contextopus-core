@@ -1,0 +1,3 @@
+# Knowledge index
+
+- [[architecture]]

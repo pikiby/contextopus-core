@@ -1,0 +1,6 @@
+interface:
+  display_name: "PCW Resolve Workspace"
+  short_description: "Resolve the exact memory workspace"
+  default_prompt: "Use $pcw-resolve-workspace to resolve the exact memory workspace for this task."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,6 @@
+interface:
+  display_name: "PCW Map Source"
+  short_description: "Map a large or unknown source"
+  default_prompt: "Use $pcw-map-source to map this large or structurally unknown source."
+policy:
+  allow_implicit_invocation: false
