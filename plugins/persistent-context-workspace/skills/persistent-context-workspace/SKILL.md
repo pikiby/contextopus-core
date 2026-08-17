@@ -62,8 +62,22 @@ If the sibling file is missing, unreadable, outside the skills root, or has a mi
 4. Give every Reader the original user request, one exact range, and the required evidence format.
 5. Give every Worker original target objects, relevant reduced context, and literal user constraints.
 6. Load and execute `pcw-record-result` for every accepted Reader or Worker result.
+7. Treat direct work by the primary agent as Worker activity for memory purposes. Record the final target state and checks after the work; a pre-work analysis or assignment is not its result.
+8. Include stable coordinates for external evidence that materially affected the result. Let promotion decide whether the meaning needs a knowledge record or remains recoverable through the target.
 
 Do not introduce a mandatory Verifier. Do not introduce an Integrator or Correlator unless a concrete task requires one.
+
+## Completion gate
+
+Before reporting a user task or meaningful stage as complete:
+
+1. Inventory every accepted source change and every external fact that materially affected it.
+2. Require one recorded final result for each item, including target coordinates, checks, and remaining uncertainty.
+3. Compare `current.md` and relevant knowledge with the actual target state. If either contradicts the target or retains an uncertainty resolved by the work, do not report completion.
+4. Run the memory checkpoint chain for all unabsorbed results through successful validation.
+5. If commit authorization is unavailable, distinguish completed source work from the pending memory checkpoint and return `authorization_required`; never call the PCW cycle complete.
+
+Do not let a successful source edit, direct reading mode, or the absence of subagents bypass this gate.
 
 ## Create a memory checkpoint
 

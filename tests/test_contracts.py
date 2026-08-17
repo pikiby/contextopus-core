@@ -55,7 +55,7 @@ class PluginContractTests(unittest.TestCase):
             (PLUGIN / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
         self.assertEqual(MAIN, manifest["name"])
-        self.assertEqual("0.1.1", manifest["version"])
+        self.assertEqual("0.1.2", manifest["version"])
         self.assertEqual("./skills/", manifest["skills"])
         self.assertEqual(MAIN, PLUGIN.name)
         self.assertIsInstance(manifest["interface"]["defaultPrompt"], list)
@@ -119,6 +119,14 @@ class SkillContractTests(unittest.TestCase):
         text = skill_text(MAIN)
         for name in INTERNAL:
             self.assertIn(name, text)
+
+    def test_main_blocks_completion_until_final_state_is_in_memory(self) -> None:
+        text = skill_text(MAIN)
+        self.assertIn("## Completion gate", text)
+        self.assertIn("direct work by the primary agent as Worker activity", text)
+        self.assertIn("external evidence that materially affected the result", text)
+        self.assertIn("Compare `current.md` and relevant knowledge", text)
+        self.assertIn("never call the PCW cycle complete", text)
 
     def test_main_uses_verified_sibling_file_loader(self) -> None:
         text = skill_text(MAIN)

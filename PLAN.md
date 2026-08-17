@@ -399,7 +399,21 @@ Readers receive the original task so their extraction is targeted, but their rep
 
 Workers receive both reduced context and original target objects. They modify the source project. `pcw-record-result` stores a normalized account in `tmp/`: what changed, where, which checks ran, and what remains unverified.
 
+Direct work by the primary agent is Worker activity for memory purposes even when no subagent was created. Record its final target state and checks after the work; a pre-work analysis or assignment does not satisfy this requirement. When external evidence materially affects the result, preserve its stable coordinates in the result. Promotion decides whether that meaning becomes durable knowledge, remains reachable through the changed target, or is ephemeral.
+
 A separate Verifier is not mandatory. Integrator and Correlator roles are also not introduced by default. The primary agent connects results itself or delegates a concrete complex integration only when doing so saves context or time.
+
+### Completion gate
+
+Before telling the user that a task or meaningful stage is complete, the main skill must:
+
+1. inventory every accepted source change and every external fact that materially affected the result;
+2. verify that `pcw-record-result` represents the final state, checks, coordinates, and remaining uncertainty for each item;
+3. compare `current.md` and relevant knowledge with the actual target state and reject any stale contradiction;
+4. run promotion, compaction, and validation for all unabsorbed results;
+5. distinguish completed source work from a completed PCW cycle when checkpoint authorization is unavailable.
+
+The agent may report that source work succeeded while an authorized memory checkpoint is pending, but it must state that condition explicitly. It must never report the PCW cycle as complete while final work is missing from memory, `current.md` contradicts the target, validation has not succeeded, or checkpointing remains unresolved.
 
 ### Stage completion
 
