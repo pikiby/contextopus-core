@@ -41,8 +41,8 @@ If the sibling file is missing, unreadable, outside the skills root, or has a mi
 - Never mix memory from separate semantic subprojects.
 - Do not load all of `knowledge/`; open only records found through the current request, `current.md` references, and targeted search.
 - Never treat `tmp/` as confirmed knowledge.
-- Never commit or push without explicit user authorization.
-- Never prune `tmp/` without successful validation and a confirmed checkpoint.
+- Treat a validated local commit inside the selected PCW memory repository and pruning its exact absorbed cycle as one automatic internal transaction unless the user explicitly forbids it; never stage `tmp/`.
+- Require explicit user authorization for commits outside that memory repository and every push.
 - Never add a next action, plan, or forecast to `current.md` unless the user explicitly pinned it as a durable constraint.
 
 ## Open a cycle
@@ -51,7 +51,7 @@ If the sibling file is missing, unreadable, outside the skills root, or has a mi
 2. Validate its receipt, then load and execute `pcw-open-cycle`.
 3. If the result contains `recovery_required`, finish the existing memory chain first:
    `pcw-promote-knowledge` → `pcw-compact-current` → `pcw-validate-memory` → `pcw-checkpoint-memory` → `pcw-prune-tmp`.
-4. If checkpointing requires authorization, stop for the user. Do not open a new cycle over unabsorbed material.
+4. If the user explicitly forbade the local memory transaction, stop without opening a new cycle over unabsorbed material.
 5. Read `current.md`, then retrieve only knowledge records relevant to the new request.
 
 ## Work with a source
@@ -75,7 +75,7 @@ Before reporting a user task or meaningful stage as complete:
 2. Require one recorded final result for each item, including target coordinates, checks, and remaining uncertainty.
 3. Compare `current.md` and relevant knowledge with the actual target state. If either contradicts the target or retains an uncertainty resolved by the work, do not report completion.
 4. Run the memory checkpoint chain for all unabsorbed results through successful validation.
-5. If commit authorization is unavailable, distinguish completed source work from the pending memory checkpoint and return `authorization_required`; never call the PCW cycle complete.
+5. Complete the automatic local memory transaction unless the user explicitly forbade it; never call the PCW cycle complete while it remains pending.
 
 Do not let a successful source edit, direct reading mode, or the absence of subagents bypass this gate.
 
@@ -86,8 +86,7 @@ Run this chain after a meaningful stage, before a session handoff, when unabsorb
 1. `pcw-promote-knowledge` classifies cycle material and updates only `knowledge/`.
 2. `pcw-compact-current` rebuilds only `current.md` from the promotion manifest.
 3. `pcw-validate-memory` validates the new state without writing.
-4. On `status: ok`, run `pcw-checkpoint-memory`.
-5. Only a receipt with `checkpoint_status: created` permits `pcw-prune-tmp`.
+4. On `status: ok`, run `pcw-checkpoint-memory`, then use its created receipt to run `pcw-prune-tmp` without separate permission.
 
 Never reorder these operations or merge their responsibilities manually.
 
@@ -125,6 +124,6 @@ Stop and return a verifiable blocker when:
 - `Pinned` would be changed without user evidence;
 - a required internal skill is unavailable;
 - validation fails;
-- checkpointing still needs user authorization.
+- the user explicitly forbade the pending local memory transaction.
 
 Do not delete inputs or report a completed cycle in any of these states.

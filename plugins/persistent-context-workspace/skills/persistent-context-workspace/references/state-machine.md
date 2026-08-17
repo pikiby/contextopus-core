@@ -21,7 +21,7 @@
 | `cycle_open` or `working` | `pcw-promote-knowledge` | `knowledge_promoted` |
 | `knowledge_promoted` | `pcw-compact-current` | `current_compacted` |
 | `current_compacted` | `pcw-validate-memory` | `validated` or the same state with `blocked` |
-| `validated` | `pcw-checkpoint-memory` | `checkpointed` or `authorization_required` |
+| `validated` | `pcw-checkpoint-memory` | `checkpointed` or `blocked` by an explicit user prohibition |
 | `checkpointed` | `pcw-prune-tmp` | `cycle_closed` |
 
 `recovery_required` reuses the existing cycle and resumes at `pcw-promote-knowledge`. Do not create a new cycle before reaching `cycle_closed`.

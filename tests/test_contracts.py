@@ -55,7 +55,7 @@ class PluginContractTests(unittest.TestCase):
             (PLUGIN / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
         self.assertEqual(MAIN, manifest["name"])
-        self.assertEqual("0.1.3", manifest["version"])
+        self.assertEqual("0.1.4", manifest["version"])
         self.assertEqual("./skills/", manifest["skills"])
         self.assertEqual(MAIN, PLUGIN.name)
         self.assertIsInstance(manifest["interface"]["defaultPrompt"], list)
@@ -190,11 +190,20 @@ class SkillContractTests(unittest.TestCase):
                 target = fixture / f"{link}.md" if "/" in link else markdown.parent / f"{link}.md"
                 self.assertTrue(target.is_file(), f"{markdown}: {link}")
 
-    def test_prune_contract_requires_exact_checkpoint(self) -> None:
-        text = skill_text("pcw-prune-tmp")
-        self.assertIn("checkpoint_status: created", text)
-        self.assertIn("never use a wildcard", text)
-        self.assertIn("not a symlink", text)
+    def test_local_memory_transaction_is_automatic_and_exact(self) -> None:
+        main = skill_text(MAIN)
+        checkpoint = skill_text("pcw-checkpoint-memory")
+        prune = skill_text("pcw-prune-tmp")
+        state_machine = (SKILLS / MAIN / "references" / "state-machine.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("automatic internal transaction", main)
+        self.assertNotIn("authorization_required", main + checkpoint + state_machine)
+        self.assertIn("explicitly forbade", checkpoint)
+        self.assertIn("Without requesting separate permission", prune)
+        self.assertIn("checkpoint_status: created", prune)
+        self.assertIn("never use a wildcard", prune)
+        self.assertIn("not a symlink", prune)
 
     def test_repository_text_is_english_only(self) -> None:
         cyrillic = re.compile(r"[\u0400-\u04FF]")

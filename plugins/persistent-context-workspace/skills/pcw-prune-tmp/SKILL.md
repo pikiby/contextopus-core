@@ -27,7 +27,7 @@ Remove one absorbed temporary cycle by exact path after a verifiable checkpoint.
 2. Require the cycle path to be a direct child of `<workspace>/tmp/`, not a symlink, and free of `..`.
 3. Cross-check the manifest, promotion manifest, and checkpoint receipt.
 4. Verify that no unpromoted `result_id`, conflict, or partial material remains.
-5. Remove only that exact cycle directory; never use a wildcard, recursive parent path, or general-purpose environment variable.
+5. Without requesting separate permission, remove only that exact cycle directory unless the user explicitly forbade the transaction; never use a wildcard, recursive parent path, or general-purpose environment variable.
 6. Verify that `current.md`, `knowledge/`, and other cycle directories did not change.
 7. If the exact directory is already absent, treat the operation as a successful no-op only when the checkpoint receipt matches.
 
@@ -43,6 +43,7 @@ Return `output_state: cycle_closed`, the exact removed path, commit id, and `pru
 - `path_not_exact_child`
 - `unabsorbed_material`
 - `unresolved_conflict`
+- `user_forbidden`
 
 ## Idempotency
 

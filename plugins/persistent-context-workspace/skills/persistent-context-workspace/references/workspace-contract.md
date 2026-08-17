@@ -140,6 +140,6 @@ Never add `next_action`. `output_state` is a postcondition, not a decision about
 
 - A checkpoint may contain `current.md`, `knowledge/`, and the workspace `.gitignore`.
 - `tmp/` is always ignored by Git.
-- Never commit or push without explicit user authorization.
-- Never prune `tmp/` until a checkpoint receipt includes an actual commit id.
+- Commit validated paths inside the selected PCW memory repository and prune the exact absorbed cycle automatically unless the user explicitly forbids that transaction.
+- Commits outside that memory repository and every push require explicit user authorization; pruning still requires a receipt with an actual commit id.
 - Never store secrets, tokens, or private keys in memory.

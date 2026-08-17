@@ -263,7 +263,7 @@ Internal skills have `allow_implicit_invocation: false`. The main skill locates 
 - `pcw-promote-knowledge` classifies new material and updates only `knowledge/`.
 - `pcw-compact-current` rebuilds and progressively compacts only `current.md`.
 - `pcw-validate-memory` validates links, budget, `Pinned`, evidence, and absorption without writing.
-- `pcw-checkpoint-memory` prepares a diff and, with authorization, creates a Git checkpoint.
+- `pcw-checkpoint-memory` prepares a diff and automatically creates a validated local Git checkpoint.
 - `pcw-prune-tmp` removes only a cycle confirmed as absorbed by a successful checkpoint.
 
 Add a new internal skill only for a distinct repeatable operation with its own input, output, and postcondition.
@@ -349,11 +349,11 @@ Before accepting the cycle, verify that:
 Finish in this order:
 
 1. show or save the memory diff;
-2. create a Git checkpoint only with commit authorization;
-3. remove only cycle directories fully represented in the validated checkpoint;
+2. commit only validated paths inside the selected PCW memory repository unless explicitly forbidden;
+3. remove only the absorbed cycle represented by that checkpoint, without separate permission;
 4. retain unabsorbed or disputed material for another cycle.
 
-If commit is not authorized, leave the changes in the worktree and retain processed `tmp/`. This preserves recoverable input and prevents a partial update from appearing complete.
+An explicit user prohibition leaves the validated changes and processed `tmp/` intact.
 
 ## 9. Working cycle
 
@@ -411,9 +411,9 @@ Before telling the user that a task or meaningful stage is complete, the main sk
 2. verify that `pcw-record-result` represents the final state, checks, coordinates, and remaining uncertainty for each item;
 3. compare `current.md` and relevant knowledge with the actual target state and reject any stale contradiction;
 4. run promotion, compaction, and validation for all unabsorbed results;
-5. distinguish completed source work from a completed PCW cycle when checkpoint authorization is unavailable.
+5. complete the automatic local checkpoint and exact-cycle pruning unless explicitly forbidden.
 
-The agent may report that source work succeeded while an authorized memory checkpoint is pending, but it must state that condition explicitly. It must never report the PCW cycle as complete while final work is missing from memory, `current.md` contradicts the target, validation has not succeeded, or checkpointing remains unresolved.
+If the user forbids the memory transaction, report source completion separately and retain recoverable inputs. Never report the PCW cycle complete while final work is missing from memory, `current.md` contradicts the target, validation has not succeeded, or checkpointing remains unresolved.
 
 ### Return-to-work gate
 
@@ -474,7 +474,7 @@ Git must not store:
 - `tmp/` content;
 - secrets or private tokens.
 
-Commit and push never happen implicitly. The skill prepares changes and verification; actual Git writes follow host-environment policy and explicit user authorization. A checkpoint message describes the semantic memory change, not a session number.
+Validated local memory commits and exact-cycle pruning form one automatic internal transaction unless the user forbids it. Commits outside the selected PCW memory repository and every push require explicit authorization. A checkpoint message describes the semantic memory change, not a session number.
 
 ## 13. Repository layout
 
