@@ -1,6 +1,6 @@
 ---
 name: pcw-query-context
-description: Build one focused and source-linked context packet from a resolved Persistent Context Workspace without opening a cycle or changing any file. Internal read-only subskill; use only when loaded by the persistent-context-workspace orchestration contract for an explicit ask or do command.
+description: Build one focused and source-linked context packet from a resolved Persistent Context Workspace without opening a cycle or changing any file. Internal read-only subskill; use only when loaded by the pcw contract for an explicit ask or do command.
 ---
 
 # Query context
@@ -9,7 +9,7 @@ Retrieve the smallest durable context that answers one request without turning m
 
 ## Preconditions
 
-- The `persistent-context-workspace` orchestration contract loaded this file.
+- The `pcw` contract loaded this file.
 - A successful `pcw-resolve-workspace` receipt identifies an existing workspace.
 - One exact query or task is available.
 

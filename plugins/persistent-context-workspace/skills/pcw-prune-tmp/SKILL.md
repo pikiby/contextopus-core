@@ -1,6 +1,6 @@
 ---
 name: pcw-prune-tmp
-description: Remove only the exact cycle tmp directory proven absorbed by a verified local memory checkpoint. Internal destructive subskill; use only when loaded by persistent-context-workspace with a successful pcw-checkpoint-memory receipt.
+description: Remove only the exact cycle tmp directory proven absorbed by a verified local memory checkpoint. Internal destructive subskill; use only when loaded by pcw with a successful pcw-checkpoint-memory receipt.
 ---
 
 # Prune tmp

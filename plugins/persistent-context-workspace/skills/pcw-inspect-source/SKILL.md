@@ -1,6 +1,6 @@
 ---
 name: pcw-inspect-source
-description: Perform a cheap read-only probe of a file, directory, repository, URL descriptor, or mixed source and decide whether direct targeted reading is sufficient or distributed mapping is required. Internal subskill; use only when loaded by persistent-context-workspace for an open cycle.
+description: Perform a cheap read-only probe of a file, directory, repository, URL descriptor, or mixed source and decide whether direct targeted reading is sufficient or distributed mapping is required. Internal subskill; use only when loaded by pcw for an open cycle.
 ---
 
 # Inspect source

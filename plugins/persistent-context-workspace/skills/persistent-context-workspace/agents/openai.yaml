@@ -1,6 +1,0 @@
-interface:
-  display_name: "Persistent Context Workspace"
-  short_description: "Internal PCW orchestration contract"
-  default_prompt: "Use $persistent-context-workspace only as the internal orchestration contract loaded by $pcw."
-policy:
-  allow_implicit_invocation: false

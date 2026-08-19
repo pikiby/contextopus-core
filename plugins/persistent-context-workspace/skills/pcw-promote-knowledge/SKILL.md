@@ -1,6 +1,6 @@
 ---
 name: pcw-promote-knowledge
-description: Classify every accepted result in one Persistent Context Workspace cycle, update only durable knowledge records, and write a complete promotion manifest for current compaction. Internal subskill; use only when loaded by persistent-context-workspace at a memory checkpoint or recovery boundary.
+description: Classify every accepted result in one Persistent Context Workspace cycle, update only durable knowledge records, and write a complete promotion manifest for current compaction. Internal subskill; use only when loaded by pcw at a memory checkpoint or recovery boundary.
 ---
 
 # Promote knowledge

@@ -1,6 +1,6 @@
 ---
 name: pcw-open-cycle
-description: Create or recover one Persistent Context Workspace cycle after its workspace path has been resolved. Internal subskill; use only when loaded by persistent-context-workspace after pcw-resolve-workspace or while resuming an interrupted cycle.
+description: Create or recover one Persistent Context Workspace cycle after its workspace path has been resolved. Internal subskill; use only when loaded by pcw after pcw-resolve-workspace or while resuming an interrupted cycle.
 ---
 
 # Open cycle

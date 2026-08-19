@@ -1,6 +1,6 @@
 ---
 name: pcw-compact-current
-description: Rebuild and progressively compact current.md from the existing current file and a completed promotion manifest while preserving active pinned constraints verbatim. Internal subskill; use only when loaded by persistent-context-workspace after pcw-promote-knowledge succeeds.
+description: Rebuild and progressively compact current.md from the existing current file and a completed promotion manifest while preserving active pinned constraints verbatim. Internal subskill; use only when loaded by pcw after pcw-promote-knowledge succeeds.
 ---
 
 # Compact current

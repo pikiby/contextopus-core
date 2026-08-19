@@ -1,6 +1,6 @@
 ---
 name: pcw-record-result
-description: Normalize one accepted Reader, Worker, or explicit user-memory result into the active cycle tmp directory without promoting it to current or knowledge. Internal subskill; use only when loaded by persistent-context-workspace after bounded reading, work, or a remember command.
+description: Normalize one accepted Reader, Worker, or explicit user-memory result into the active cycle tmp directory without promoting it to current or knowledge. Internal subskill; use only when loaded by pcw after bounded reading, work, or a remember command.
 ---
 
 # Record result

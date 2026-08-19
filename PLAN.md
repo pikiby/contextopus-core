@@ -200,7 +200,7 @@ A vector database, graph database, or dedicated MCP is unnecessary in the first 
 
 ## 7. Explicit interface, orchestration contract, and narrow internal skills
 
-The system is not a collection of equal large skills. It has one public, explicit-only entry point: `$pcw`. The `persistent-context-workspace` skill is an internal orchestration contract that loads small internal skills for individual operations. No PCW skill activates implicitly for an ordinary prompt.
+The system is not a collection of equal large skills. It has one public literal-command skill: `$pcw`. The same skill owns the orchestration contract and loads small internal skills for individual operations. It participates in host discovery only for prompts whose first non-whitespace token is literal `$pcw`; no PCW operation activates for an ordinary prompt.
 
 An internal skill is a separate skill with its own `SKILL.md`, not a separate process and not necessarily a separate subagent. Loading one means reading its exact instructions and executing that fixed contract. Create a subagent only when the operation itself benefits from parallel or isolated work.
 
@@ -215,7 +215,7 @@ The public skill accepts four commands:
 
 The explicit call is the continuity trigger. The primary agent does not have to remember that PCW exists, and ordinary work is not silently captured.
 
-### 7.2. `persistent-context-workspace`: process contract
+### 7.2. `$pcw`: process contract
 
 The main skill contains:
 
@@ -261,7 +261,7 @@ Each internal skill performs one narrow operation and declares:
 
 An internal skill does not select the next stage, widen scope, or load another internal skill. It returns control to the main contract skill.
 
-Every skill in the plugin has `allow_implicit_invocation: false`. `$pcw` is selected explicitly; the orchestration contract locates internal skills through exact sibling paths, not implicit matching. This makes the sequence observable and repeatable.
+The public `pcw` skill has `allow_implicit_invocation: true` solely to route raw literal `$pcw` commands into the model context. Every internal skill has `allow_implicit_invocation: false` and is loaded through an exact sibling path, not implicit matching. This keeps ordinary prompts outside PCW while making the manual command reliable.
 
 ### 7.4. Initial internal skills
 
@@ -371,7 +371,7 @@ An explicit user prohibition leaves the validated changes and processed `tmp/` i
 ### Session start
 
 1. The user invokes `$pcw` with one command and exact semantic subproject.
-2. The interface loads the orchestration contract, which resolves the workspace.
+2. The same skill applies its orchestration contract and resolves the workspace.
 3. `ask` runs only `pcw-query-context` and stops without a cycle.
 4. `do` runs `pcw-query-context` first, exposes the selected context, and then opens a cycle.
 5. `sync` retrieves context and compares read-only; it opens a cycle only when memory differs from evidenced source state.
@@ -502,9 +502,6 @@ persistent-context-workspace/
 │       └── skills/
 │           ├── pcw/
 │           │   ├── SKILL.md
-│           │   └── agents/openai.yaml
-│           ├── persistent-context-workspace/
-│           │   ├── SKILL.md
 │           │   ├── agents/openai.yaml
 │           │   └── references/
 │           │       ├── state-machine.md
@@ -526,7 +523,7 @@ persistent-context-workspace/
     └── test_contracts.py
 ```
 
-`pcw` is the only public interface. `persistent-context-workspace` is the internal process contract; all remaining skills are narrow operations, not parallel control points. Shared invariants live once in the orchestration contract; internal skills define only their inputs, outputs, and postconditions.
+`pcw` is the only public interface and owns the process contract. All remaining skills are narrow operations, not parallel control points. Shared invariants live once in `pcw`; internal skills define only their inputs, outputs, and postconditions.
 
 ## 14. Implementation phases
 
@@ -540,8 +537,8 @@ persistent-context-workspace/
 
 ### Phase B. Explicit interface and orchestration contract
 
-- create explicit-only `pcw/SKILL.md` with `ask`, `remember`, `do`, and `sync`;
-- create `persistent-context-workspace/SKILL.md`;
+- create literal-command `pcw/SKILL.md` with `ask`, `remember`, `do`, and `sync`;
+- include the orchestration contract in `pcw/SKILL.md`;
 - encode the cycle state machine;
 - define transition preconditions and postconditions;
 - define one result envelope;
@@ -558,7 +555,7 @@ persistent-context-workspace/
 - create `pcw-compact-current`;
 - create read-only `pcw-validate-memory`;
 - create `pcw-checkpoint-memory` and `pcw-prune-tmp`;
-- disable implicit invocation for every plugin skill;
+- enable host discovery only for the public literal `$pcw` command and disable it for every internal skill;
 - verify each operation's idempotency;
 - verify recovery after failure between every pair of transitions.
 
@@ -608,4 +605,4 @@ These are unnecessary for the first working prototype and must be decided from u
 - cross-machine memory synchronization;
 - automatic branching and merge policies.
 
-Until measured evidence requires more, prefer one explicit public command interface, one internal orchestration contract, narrow operations, a simple file contract, and Git.
+Until measured evidence requires more, prefer one literal-command skill containing the orchestration contract, narrow operations, a simple file contract, and Git.

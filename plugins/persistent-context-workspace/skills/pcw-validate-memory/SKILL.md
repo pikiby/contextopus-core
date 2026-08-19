@@ -1,6 +1,6 @@
 ---
 name: pcw-validate-memory
-description: Validate one compacted Persistent Context Workspace state without modifying files, the Git index, or external systems. Internal read-only subskill; use only when loaded by persistent-context-workspace immediately after pcw-compact-current.
+description: Validate one compacted Persistent Context Workspace state without modifying files, the Git index, or external systems. Internal read-only subskill; use only when loaded by pcw immediately after pcw-compact-current.
 ---
 
 # Validate memory
