@@ -12,7 +12,9 @@
 | Input state | Internal subskill | Postcondition |
 |---|---|---|
 | `unresolved` | `pcw-resolve-workspace` | `workspace_resolved` |
+| `workspace_resolved` | `pcw-query-context` | `context_returned` |
 | `workspace_resolved` | `pcw-open-cycle` | `cycle_open` or `recovery_required` |
+| `context_returned` for `do` or a changed `sync` | `pcw-open-cycle` | `cycle_open` or `recovery_required` |
 | `cycle_open` | `pcw-inspect-source` | `source_inspected` |
 | `source_inspected` with `decision: map` | `pcw-map-source` | `source_mapped` |
 | `source_inspected` with `decision: direct` | agent work | `working` |
@@ -26,6 +28,8 @@
 
 `recovery_required` reuses the existing cycle and resumes at `pcw-promote-knowledge`. Do not create a new cycle before reaching `cycle_closed`.
 
+`context_returned` is a read-only terminal state for `ask` and an unchanged `sync`. For `do` or a `sync` with evidenced differences, it remains an input receipt while the cycle starts from the same resolved workspace.
+
 ## Return control to user work
 
 Memory state completion does not complete the user task that caused the memory transition. After a memory-only interruption reaches a stable state, the main skill evaluates the latest unresolved and still-authorized task and resumes it when the intervening memory request was additive. This is orchestration after an internal transition, not a new memory state or an internal subskill decision.
@@ -35,6 +39,7 @@ Never resume a task that the user cancelled, replaced, paused, or materially res
 ## Repeated calls
 
 - `pcw-resolve-workspace`: return the same resolved path.
+- `pcw-query-context`: remain read-only and select the same records for equivalent inputs.
 - `pcw-open-cycle`: recover the existing `cycle_id`; never create a second cycle.
 - `pcw-record-result`: same id and content is a no-op; different content is `blocked`.
 - `pcw-promote-knowledge`: do not create duplicate records, relations, or manifest entries.

@@ -10,7 +10,7 @@ Classify new meanings once, update durable knowledge, and prepare the compactor'
 ## Preconditions
 
 - Exactly one open or recovering cycle exists.
-- Every accepted Reader or Worker result was recorded through `pcw-record-result` or uses the same canonical format.
+- Every accepted Reader, Worker, or explicit user-memory result was recorded through `pcw-record-result` or uses the same canonical format.
 - `current.md` and `knowledge/` are readable.
 
 ## Inputs
@@ -33,7 +33,7 @@ Classify new meanings once, update durable knowledge, and prepare the compactor'
    - primary coordinates or an explicit user statement support it.
    An explicitly authorized unfinished operation is a factual Current candidate, not an assumed next action, when its exact target, authorized scope, and execution state have user or recorded-result evidence and its absence would break continuation.
 4. If one stable reference makes the meaning cheap to recover, store the detail in `knowledge/` and pass only a reference candidate to Current.
-5. Classify a meaning as `Pinned` only when it is a verbatim user constraint that still applies. Never infer `Pinned` from agent behavior or an old plan.
+5. Classify a meaning as `Pinned` only when it is a verbatim user constraint that still applies. Never infer `Pinned` from agent behavior or an old plan. A user statement about external state remains attributed unless primary evidence verifies the external claim.
 6. Classify a meaning as durable knowledge when it is verified, useful beyond the current stage, and does not need to occupy `current.md` continuously.
 7. Classify a meaning as ephemeral when it is an intermediate command, repetition, closed detail, tool output without durable value, or a detail already reachable through a reference.
 8. Put incompatible supported meanings in `conflicts`; never choose one silently.

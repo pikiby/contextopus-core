@@ -1,0 +1,6 @@
+interface:
+  display_name: "PCW"
+  short_description: "Call persistent project context explicitly"
+  default_prompt: "Use $pcw ask <subproject> <question> to retrieve a focused context packet."
+policy:
+  allow_implicit_invocation: false

@@ -1,11 +1,11 @@
 ---
 name: persistent-context-workspace
-description: Orchestrate persistent file-backed context for long-running or multi-session work through a .pcw workspace containing current.md, tmp, knowledge, and Git history. Use when the user invokes $persistent-context-workspace, asks to continue work across sessions, requests RLM-style external memory, or needs a bounded context layer around a large source or project. This is the only public entry point; it loads every internal pcw-* subskill from its sibling SKILL.md file.
+description: Internal orchestration contract for the explicit pcw command interface. Coordinate persistent file-backed context through a .pcw workspace containing current.md, tmp, knowledge, and Git history, and load each narrow pcw-* operation from its verified sibling SKILL.md file. Do not invoke implicitly for ordinary work.
 ---
 
 # Persistent Context Workspace
 
-Manage long-running work through bounded external context. Do not perform memory operations ad hoc. Select one state transition, load its narrow internal subskill, execute it, and verify its result before continuing.
+Manage long-running work through bounded external context after the explicit `$pcw` interface selects a command. Do not perform memory operations ad hoc. Select one state transition, load its narrow internal subskill, execute it, and verify its result before continuing.
 
 ## Required contract
 
@@ -36,7 +36,7 @@ If the sibling file is missing, unreadable, outside the skills root, or has a mi
 
 ## Boundaries
 
-- Use this skill as the only user-facing entry point.
+- Treat `$pcw` as the only user-facing entry point. This skill is its internal orchestration contract.
 - Do not let an internal subskill change scope or choose the following transition.
 - Never mix memory from separate semantic subprojects.
 - Do not load all of `knowledge/`; open only records found through the current request, `current.md` references, and targeted search.
@@ -45,6 +45,25 @@ If the sibling file is missing, unreadable, outside the skills root, or has a mi
 - Require explicit user authorization for commits outside that memory repository and every push.
 - Never add a next action, plan, or forecast to `current.md` unless the user explicitly pinned it as a durable constraint.
 
+## Command routing
+
+Accept the exact verb, work root, subproject, and payload already parsed by `$pcw`. Never replace the selected verb.
+
+- `ask`: run `pcw-resolve-workspace` and `pcw-query-context`, return the packet, and stop without opening a cycle.
+- `remember`: resolve and open or recover a cycle, record one `kind: user` result, then complete the memory checkpoint chain.
+- `do`: resolve the workspace, run `pcw-query-context` for the task, expose the loaded workspace and selected references, then open or recover a cycle, perform and record the actual work, and complete the checkpoint chain.
+- `sync`: resolve and query memory, compare it with the exact named scope read-only, and stop without a cycle when no evidenced difference exists. Otherwise open or recover a cycle, record only evidenced differences, and complete the checkpoint chain. Do not mutate the compared source.
+
+Return `unsupported_command` for any other verb. An `ask` result is terminal for that invocation; `context_returned` is an input receipt, not a completed user task, for `do`.
+
+## Query context
+
+1. Load and execute `pcw-resolve-workspace` with the exact work root, subproject, and payload.
+2. If the workspace does not exist, return `workspace_missing`; do not create memory for `ask`.
+3. Load and execute `pcw-query-context` with the exact question or task.
+4. Verify that the receipt is read-only, names the same workspace, has `cycle_id: null`, and contains `output_state: context_returned`.
+5. For `ask`, return the complete visible packet and stop. For `do`, retain the packet as explicit task input before opening a cycle. For `sync`, retain it as comparison input and open a cycle only when the read-only comparison finds an evidenced difference.
+
 ## Open a cycle
 
 1. Load and execute `pcw-resolve-workspace` with the work path, semantic subproject, and current request.
@@ -52,7 +71,9 @@ If the sibling file is missing, unreadable, outside the skills root, or has a mi
 3. If the result contains `recovery_required`, finish the existing memory chain first:
    `pcw-promote-knowledge` → `pcw-compact-current` → `pcw-validate-memory` → `pcw-checkpoint-memory` → `pcw-prune-tmp`.
 4. If the user explicitly forbade the local memory transaction, stop without opening a new cycle over unabsorbed material.
-5. Read `current.md`, then retrieve only knowledge records relevant to the new request.
+5. Read `current.md`, then retrieve only knowledge records relevant to the selected command.
+
+For `remember`, record the statement through `pcw-record-result` as `kind: user`, with the user message as its source coordinate. User-provided constraints may be promoted to `Pinned` verbatim. Treat other user-provided external claims as attributed statements until supported by primary evidence.
 
 ## Work with a source
 

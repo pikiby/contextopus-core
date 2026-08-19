@@ -74,14 +74,14 @@ absorbed: false
 
 Allowed `status` values are `open`, `working`, `promotion_ready`, `knowledge_promoted`, `current_compacted`, `validated`, `checkpointed`, `closed`, and `blocked`.
 
-## 4. Reader or Worker result
+## 4. Reader, Worker, or user-memory result
 
 Store every accepted result in its own Markdown file:
 
 ```yaml
 ---
 result_id: <caller-provided-stable-id>
-kind: reader | worker
+kind: reader | worker | user
 cycle_id: <cycle-id>
 scope: <exact path, range, or object>
 status: complete | partial | blocked
@@ -90,7 +90,7 @@ sources:
 ---
 ```
 
-The body contains only facts, changes, checks, uncertainty, and coordinates. Do not copy an entire source unless necessary.
+The body contains only facts, changes, checks, uncertainty, and coordinates. A `kind: user` result preserves the explicit remember payload verbatim and distinguishes user authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
 
 ## 5. Knowledge record
 

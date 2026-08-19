@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Persistent file-backed context for long-running agent work",
   "author": {
     "name": "pikiby",
@@ -18,8 +18,8 @@
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
-      "Continue this project with persistent context.",
-      "Build external memory for this long-running task."
+      "Use $pcw ask <subproject> <question> to retrieve persistent context.",
+      "Use $pcw do <subproject> <task> to load context, perform work, and save the result."
     ]
   }
 }
