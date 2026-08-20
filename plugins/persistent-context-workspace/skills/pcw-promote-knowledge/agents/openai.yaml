@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Promote Knowledge"
-  short_description: "Promote durable cycle knowledge"
-  default_prompt: "Use $pcw-promote-knowledge to classify cycle material and update durable knowledge."
-policy:
-  allow_implicit_invocation: false

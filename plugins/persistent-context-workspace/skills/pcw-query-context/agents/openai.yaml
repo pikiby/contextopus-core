@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Query Context"
-  short_description: "Build a focused read-only context packet"
-  default_prompt: "Use $pcw-query-context to build a focused read-only context packet."
-policy:
-  allow_implicit_invocation: false

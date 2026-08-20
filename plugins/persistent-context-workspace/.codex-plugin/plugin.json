@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Persistent file-backed context for long-running agent work",
   "author": {
     "name": "pikiby",
@@ -13,13 +13,13 @@
   "interface": {
     "displayName": "Persistent Context Workspace",
     "shortDescription": "Persistent external context for long-running work.",
-    "longDescription": "Maintain bounded current context, temporary cycle evidence, and linked durable knowledge across agent sessions.",
+    "longDescription": "Maintain linked durable knowledge, prepare task-specific context, and execute it through a clean agent context.",
     "developerName": "pikiby",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
-      "Use $pcw ask <subproject> <question> to retrieve persistent context.",
-      "Use $pcw do <subproject> <task> to load context, perform work, and save the result."
+      "Use $pcw with a natural-language request to create or refine linked knowledge and task-specific current context.",
+      "Use $pcw-run with a natural-language request to execute the prepared current context through a clean Controller."
     ]
   }
 }

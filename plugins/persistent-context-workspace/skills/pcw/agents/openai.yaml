@@ -1,6 +1,6 @@
 interface:
   display_name: "PCW"
-  short_description: "Route explicit PCW memory commands"
-  default_prompt: "Use $pcw ask <subproject> <question> to retrieve a focused context packet."
+  short_description: "Build and refine persistent context"
+  default_prompt: "Use $pcw with a natural-language request to create or refine project knowledge and current context."
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

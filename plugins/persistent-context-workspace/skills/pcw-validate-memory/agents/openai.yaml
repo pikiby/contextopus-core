@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Validate Memory"
-  short_description: "Validate memory without changing it"
-  default_prompt: "Use $pcw-validate-memory to validate the memory update without changing it."
-policy:
-  allow_implicit_invocation: false

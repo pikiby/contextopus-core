@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Compact Current"
-  short_description: "Rebuild and compact current context"
-  default_prompt: "Use $pcw-compact-current to rebuild and compact current.md from classified evidence."
-policy:
-  allow_implicit_invocation: false

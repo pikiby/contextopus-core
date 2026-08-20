@@ -1,5 +1,6 @@
 ---
 id: current-contract
+kind: rule
 status: active
 tags: [memory, current]
 supersedes: []
@@ -9,4 +10,4 @@ sources:
 
 # Current contract
 
-`current.md` contains only the active snapshot, verbatim `Pinned` constraints, and references.
+`current.md` contains only the self-contained context and plan for one active task plus stable references.

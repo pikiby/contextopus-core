@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Open Cycle"
-  short_description: "Open or recover a memory cycle"
-  default_prompt: "Use $pcw-open-cycle to open or recover the current memory cycle."
-policy:
-  allow_implicit_invocation: false

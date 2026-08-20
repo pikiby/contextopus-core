@@ -1,8 +1,3 @@
----
-name: pcw-map-source
-description: Build a lossless temporary navigation map for a large or structurally unknown source after pcw-inspect-source returns decision map. Internal subskill; use only when loaded by pcw for the active cycle.
----
-
 # Map source
 
 Create a temporary complete-source map and adaptive work boundaries without promoting the map to durable knowledge.

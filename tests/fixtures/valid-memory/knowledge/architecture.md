@@ -1,5 +1,6 @@
 ---
 id: architecture
+kind: decision
 status: active
 tags: [memory]
 supersedes: []
@@ -9,7 +10,7 @@ sources:
 
 # Architecture
 
-One public contract skill loads narrow internal skills through verified sibling paths.
+Two public entry skills load narrow internal operation references through verified paths.
 
 ## Relations
 

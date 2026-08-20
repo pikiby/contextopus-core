@@ -9,7 +9,7 @@ Use one directory for each semantic subproject:
 ├── current.md
 ├── knowledge/
 │   ├── index.md
-│   └── <topic>.md
+│   └── <object>.md
 ├── tmp/
 │   └── <cycle-id>/
 │       ├── manifest.md
@@ -21,40 +21,65 @@ Use one directory for each semantic subproject:
 └── .gitignore
 ```
 
-A directory represents a semantic subproject, not a session. Once resolved, the workspace path must remain fixed throughout the cycle.
+A directory represents a semantic subproject, not a session. Once resolved, the workspace path remains fixed throughout the transaction.
 
-## 2. `current.md`
+## 2. `knowledge/`
+
+`knowledge/` is the only durable system memory. It stores linked objects, facts, rules, constraints, blockers, decisions, and relations that may remain useful when the active task changes.
+
+Each record uses:
+
+```yaml
+---
+id: <stable-slug>
+kind: object | fact | rule | constraint | blocker | decision | relation
+status: active | resolved | superseded
+tags: []
+supersedes: []
+sources: []
+---
+```
+
+One record covers one coherent meaning. Update an existing record instead of duplicating it. Express relations as `depends_on`, `affects`, `blocked_by`, or `supersedes`. Preserve user constraints verbatim. Keep user claims about external state attributed until primary evidence verifies them.
+
+## 3. `current.md`
+
+`current.md` is the persistent compressed context and plan for one active task. It is not general project memory and must contain nothing that does not materially affect that task.
 
 Required minimal format:
 
 ```markdown
 # Current
 
-A dense description of what is currently true and required for correct continuation.
+Task: <active task identity and outcome>
+Status: draft | ready | running | blocked | complete | closed
 
-# Pinned
-
-Verbatim active user constraints.
+<self-contained task context and plan: exact scope, relevant facts, rules,
+constraints, blockers, ordered execution logic, and factual execution state>
 
 # References
 
 - knowledge: [[knowledge/<id>]]
-- blocked_by: [[knowledge/<id>]]
 - evidence: <stable coordinate>
 ```
 
 Rules:
 
-- Do not maintain a journal or list minor completed actions.
-- Do not record an assumed next step.
-- An explicitly authorized unfinished operation may appear in `Current` when its absence would materially break continuation. Describe only its evidenced target, authorized scope, and factual execution state; this is active state, not a next action.
-- Update or remove that operation when it is completed, revoked, replaced, paused, or materially rescoped.
-- Do not duplicate details available through a stable link.
-- Do not paraphrase `Pinned` without an explicit user change.
-- Use a default budget of about 3,000 tokens unless the cycle overrides it.
-- If `Pinned` alone exceeds the budget, preserve it completely and return a warning instead of shortening it.
+- Build `current.md` only through `$pcw` from the user's natural request, relevant `knowledge/`, and supported evidence.
+- A user may refine it repeatedly. Preserve supported task, scope, constraints, and plan changes until the user changes, replaces, or closes them.
+- Do not include unrelated history or knowledge merely because it exists.
+- Do not delete it after a run. A run may update only factual execution state and status; it must not independently replan.
+- Replacing or closing the active task requires user meaning supplied through `$pcw`.
+- Keep stable detail in `knowledge/` and link it instead of copying it into Current.
+- Use a default budget of about 3,000 tokens. Never meet the budget by dropping a relevant user constraint.
 
-## 3. Cycle manifest
+## 4. `tmp/`
+
+`tmp/` is the transaction buffer for one active or interrupted context update or run. It stores raw findings, Controller and Worker results, source maps, receipts, promotion input, and the pre-change Current snapshot.
+
+Nothing in `tmp/` is durable fact merely because it was written. After validation, selected meanings move into `knowledge/` and the permitted factual state moves into `current.md`; rejected or transient material is discarded. The exact absorbed cycle directory is then removed. The `tmp/` directory itself remains and is always ignored by Git so an interrupted operation can be recovered before pruning.
+
+## 5. Cycle manifest
 
 Store `tmp/<cycle-id>/manifest.md` as:
 
@@ -62,6 +87,7 @@ Store `tmp/<cycle-id>/manifest.md` as:
 ---
 cycle_id: <stable-id>
 workspace: <absolute-path>
+entry_skill: pcw | pcw-run
 status: open
 started_at: <ISO-8601 UTC>
 request: <verbatim user request>
@@ -74,57 +100,41 @@ absorbed: false
 
 Allowed `status` values are `open`, `working`, `promotion_ready`, `knowledge_promoted`, `current_compacted`, `validated`, `checkpointed`, `closed`, and `blocked`.
 
-## 4. Reader, Worker, or user-memory result
+## 6. Accepted result
 
 Store every accepted result in its own Markdown file:
 
 ```yaml
 ---
 result_id: <caller-provided-stable-id>
-kind: reader | worker | user
+kind: reader | controller | worker | user
 cycle_id: <cycle-id>
-scope: <exact path, range, or object>
+scope: <exact path, range, object, or user message>
 status: complete | partial | blocked
 sources:
   - <path:line, byte range, object id, or URL>
 ---
 ```
 
-The body contains only facts, changes, checks, uncertainty, and coordinates. A `kind: user` result preserves the explicit remember payload verbatim and distinguishes user authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
+The body contains only user-provided meaning, facts, changes, checks, uncertainty, and coordinates. A `kind: user` result preserves exact user meaning and distinguishes authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
 
-## 5. Knowledge record
+## 7. Promotion manifest
 
-```yaml
----
-id: <stable-slug>
-status: active | resolved | superseded
-tags: []
-supersedes: []
-sources: []
----
-```
+`promotion.md` lists every accepted `result_id` exactly once and classifies its meanings:
 
-One record covers one coherent subject. Create a record only when no suitable existing record exists. Express relations as `depends_on`, `affects`, `blocked_by`, or `supersedes`.
-
-## 6. Promotion manifest
-
-`promotion.md` must list every accepted `result_id` exactly once and classify its meanings:
-
-- `current_candidates`: concise confirmed meanings for `Current`;
-- `pinned_additions`: only verbatim new user constraints;
-- `pinned_removals`: only verbatim revoked constraints with revocation evidence;
-- `knowledge_changes`: created or changed knowledge records;
-- `references`: links for the compactor to consider;
+- `knowledge_changes`: created, updated, superseded, or resolved knowledge records;
+- `current_changes`: user-authorized context-plan changes for `$pcw`, or factual execution-state changes for `$pcw-run`;
+- `references`: links for Current to retain;
 - `ephemeral`: discarded transient details with a short reason;
-- `conflicts`: incompatible claims that must not be silently collapsed.
+- `conflicts`: incompatible claims that remain explicit.
 
-## 7. Internal subskill envelope
+## 8. Internal operation envelope
 
-Every internal subskill returns:
+Every internal operation returns:
 
 ```yaml
 status: ok | blocked
-operation: <skill-name>
+operation: <operation-name>
 workspace: <absolute-path-or-null>
 cycle_id: <id-or-null>
 input_state: <state>
@@ -134,12 +144,12 @@ warnings: []
 reason: <required when blocked>
 ```
 
-Never add `next_action`. `output_state` is a postcondition, not a decision about the next transition.
+Never add `next_action`. `output_state` is a postcondition, not a decision about the following transition.
 
-## 8. Git
+## 9. Git
 
 - A checkpoint may contain `current.md`, `knowledge/`, and the workspace `.gitignore`.
 - `tmp/` is always ignored by Git.
 - Commit validated paths inside the selected PCW memory repository and prune the exact absorbed cycle automatically unless the user explicitly forbids that transaction.
-- Commits outside that memory repository and every push require explicit user authorization; pruning still requires a receipt with an actual commit id.
+- Commits outside that memory repository and every push require explicit user authorization.
 - Never store secrets, tokens, or private keys in memory.

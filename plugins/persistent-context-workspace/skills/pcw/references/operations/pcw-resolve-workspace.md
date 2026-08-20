@@ -1,15 +1,10 @@
----
-name: pcw-resolve-workspace
-description: Resolve the exact .pcw memory workspace for one semantic subproject without changing files. Internal subskill; use only when loaded by pcw at the start of a cycle or after the user changes project scope.
----
-
 # Resolve workspace
 
 Select exactly one memory path without writing anything.
 
 ## Preconditions
 
-- The active `pcw` contract loaded this file.
+- One of the two public PCW skills loaded the shared contract and this operation.
 - A work path, current request, and optional subproject name are available.
 
 ## Inputs

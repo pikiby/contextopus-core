@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Record Result"
-  short_description: "Normalize a result into cycle tmp"
-  default_prompt: "Use $pcw-record-result to record this Reader or Worker result in the active cycle."
-policy:
-  allow_implicit_invocation: false

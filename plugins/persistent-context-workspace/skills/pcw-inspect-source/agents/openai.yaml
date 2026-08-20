@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Inspect Source"
-  short_description: "Inspect a source before deep reading"
-  default_prompt: "Use $pcw-inspect-source to decide whether this source needs distributed mapping."
-policy:
-  allow_implicit_invocation: false

@@ -1,8 +1,3 @@
----
-name: pcw-checkpoint-memory
-description: Prepare a reviewable memory diff and automatically create a local Git checkpoint after successful validation. Internal subskill; use only when loaded by pcw for a validated cycle. Never push.
----
-
 # Checkpoint memory
 
 Commit only validated durable memory and never include `tmp/`.

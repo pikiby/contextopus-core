@@ -1,10 +1,9 @@
 # Current
 
-The subproject uses external file-backed context; the current memory passed link validation.
+Task: Validate the PCW memory contract.
+Status: ready
 
-# Pinned
-
-"Do not add an assumed next step."
+Verify that linked durable knowledge, task-specific Current, and temporary transactions remain separate. "Do not add an assumed next step."
 
 # References
 

@@ -1,72 +1,86 @@
 # Persistent Context Workspace
 
-Persistent Context Workspace is an experimental file-backed memory layer for long-running agent work. The explicit `$pcw` skill retrieves, records, uses, or reconciles one named `.pcw/<subproject>/` and coordinates narrow operations over `current.md`, `tmp/`, `knowledge/`, and Git history.
-
-The repository is also a Codex plugin marketplace, so the complete skill set can be installed and refreshed as one unit.
+Persistent Context Workspace is an experimental file-backed memory and execution boundary for long-running agent work. Version 0.2.0 exposes two explicit skills. Everything after either skill is interpreted as natural language; paths, context identity, scope, constraints, and requested meaning may appear in any order.
 
 ## Install from GitHub
-
-Add this repository as a marketplace, then install the plugin:
 
 ```bash
 codex plugin marketplace add pikiby/persistent-context-workspace --ref main
 codex plugin add persistent-context-workspace@persistent-context-workspace
 ```
 
-Start a new Codex thread after installation. All PCW behavior is explicit:
+Start a new Codex thread after installation.
+
+## User interface
+
+### Build or refine context
 
 ```text
-$pcw ask <subproject> <question>
-$pcw remember <subproject> <statement>
-$pcw do <subproject> <task>
-$pcw sync <subproject> [scope]
+$pcw Create context for the project at /path/to/project. Record its architecture and prepare a plan for fixing the validator.
 ```
 
-`ask` is read-only. `remember` changes memory only. `do` loads a visible context packet before performing and recording the task. `sync` reconciles memory with a named source through read-only inspection. PCW does not activate for ordinary prompts.
+```text
+$pcw In the validator context, keep the existing task but add that the virtual machine is reachable only through VPN and narrow the plan to Debezium.
+```
 
-The public `pcw` skill keeps host discovery enabled so a raw command beginning with literal `$pcw` reaches it. Its description and contract reject ordinary prompts and later incidental mentions. Every internal operation keeps implicit invocation disabled.
+`$pcw` creates a missing context when the request clearly asks for one, or updates an existing context. It maintains linked durable knowledge and builds `current.md`: a compressed, self-contained context and plan for one task. It may inspect named source material read-only, but it never executes the prepared task or changes the source project.
 
-## Update
+The user can refine, replace, or close Current through later natural-language `$pcw` requests. No positional arguments, fixed verbs, or mandatory request order are required.
 
-Refresh the Git marketplace snapshot and reinstall the plugin:
+### Execute prepared context
+
+```text
+$pcw-run Run the prepared validator task in the data-platform context.
+```
+
+`$pcw-run` starts a clean Controller with no inherited conversation. The Controller reads the complete prepared `current.md` first, receives only the current run request, exact paths, source coordinates, and current authority, and then performs the task itself or delegates bounded work to Workers.
+
+The Controller does not search `knowledge/` to repair an incomplete Current and does not use earlier chat. If Current is insufficient or does not cover the requested run, it returns a blocker so the user can refine it with `$pcw`. A run may record verified results in knowledge and update only factual execution state in Current; it cannot independently change the task, scope, constraints, or plan.
+
+## Memory model
+
+Each semantic subproject uses:
+
+```text
+<work-root>/.pcw/<subproject>/
+├── current.md
+├── knowledge/
+├── tmp/
+└── .gitignore
+```
+
+- `knowledge/` is the only durable system memory. It contains linked objects, facts, rules, constraints, blockers, decisions, and relations.
+- `current.md` is a persistent task-specific compression of only the knowledge and evidence required to perform one active task. It remains available for user refinement and recovery after a run.
+- `tmp/` is not another memory layer. It is the ignored raw transaction buffer for one active or interrupted `$pcw` or `$pcw-run` operation: findings, maps, Controller and Worker results, receipts, promotion input, and the pre-change Current snapshot. After validated results are absorbed, only that exact cycle directory is removed; the empty `tmp/` directory remains for future operations.
+
+Each subproject memory is a local Git repository. A validated memory checkpoint and exact-cycle cleanup are automatic unless the user explicitly forbids that memory transaction. Source-repository commits and every push still require normal explicit authorization.
+
+## Update plugin
 
 ```bash
 codex plugin marketplace upgrade persistent-context-workspace
 codex plugin add persistent-context-workspace@persistent-context-workspace
 ```
 
-Start a new thread so the refreshed skill definitions are loaded.
+Start a new thread so Codex loads the refreshed skill definitions.
 
-## Local development
-
-Register a checkout as a local marketplace:
-
-```bash
-codex plugin marketplace add /absolute/path/to/persistent-context-workspace
-codex plugin add persistent-context-workspace@persistent-context-workspace
-```
-
-The `$pcw` skill is both the public command interface and the orchestration contract. It loads each narrow operation through `<plugin-skills-root>/<pcw-name>/SKILL.md`, verifies path containment and frontmatter identity, and executes it in the current agent context. It does not depend on a generated `$pcw-*` invocation being recognized as a new skill call.
-
-## Repository layout
+## Plugin structure
 
 ```text
-persistent-context-workspace/
-├── .agents/plugins/marketplace.json
-├── plugins/persistent-context-workspace/
-│   ├── .codex-plugin/plugin.json
-│   └── skills/
-│       ├── pcw/
-│       │   └── references/
-│       ├── pcw-query-context/
-│       └── pcw-*/
-├── PLAN.md
-└── tests/
+plugins/persistent-context-workspace/
+├── .codex-plugin/plugin.json
+└── skills/
+    ├── pcw/
+    │   ├── SKILL.md
+    │   ├── agents/openai.yaml
+    │   └── references/
+    │       ├── workspace-contract.md
+    │       ├── state-machine.md
+    │       ├── agent-routing.md
+    │       └── operations/
+    └── pcw-run/
+        ├── SKILL.md
+        └── agents/openai.yaml
 ```
 
-- `pcw` is the only user-facing skill, the orchestration contract, and the only skill exposed for host discovery, limited to literal `$pcw` command prefixes.
-- `pcw-*` skills are narrow, repeatable internal operations.
-- `PLAN.md` is the architecture and implementation plan.
-- `tests/` verifies the plugin, skill contracts, loader rules, and memory fixtures.
-
-No separate runtime or project-specific CLI is required. The skills use the host agent's ordinary file, search, Git, and delegation tools.
+Only `pcw` and `pcw-run` are registered as skills. Technical state transitions are Markdown reference contracts under `pcw/references/operations/`, so they do not appear as separate user commands.

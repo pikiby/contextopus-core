@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Checkpoint Memory"
-  short_description: "Create a validated local memory checkpoint"
-  default_prompt: "Use $pcw-checkpoint-memory to create a validated local memory checkpoint without pushing."
-policy:
-  allow_implicit_invocation: false
