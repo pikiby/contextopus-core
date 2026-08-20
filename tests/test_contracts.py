@@ -65,7 +65,9 @@ class PluginContractTests(unittest.TestCase):
             (PLUGIN / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
         self.assertEqual(PLUGIN_NAME, manifest["name"])
-        self.assertRegex(manifest["version"], r"^0\.2\.0(?:\+codex\.[a-z0-9-]+)?$")
+        self.assertRegex(manifest["version"], r"^0\.2\.1(?:\+codex\.[a-z0-9-]+)?$")
+        self.assertIn("Version 0.2.1", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("Version 0.2.1", (ROOT / "PLAN.md").read_text(encoding="utf-8"))
         self.assertEqual("./skills/", manifest["skills"])
         self.assertEqual(PLUGIN_NAME, PLUGIN.name)
         self.assertIsInstance(manifest["interface"]["defaultPrompt"], list)
@@ -146,13 +148,17 @@ class SkillContractTests(unittest.TestCase):
 
     def test_pcw_run_requires_clean_current_first_execution(self) -> None:
         text = skill_text("pcw-run")
-        self.assertIn("primary agent is only the user interface and authority boundary", text)
+        self.assertIn(
+            "primary agent is the user interface, authority boundary, and later semantic acceptance boundary",
+            text,
+        )
         self.assertIn("no inherited conversation turns", text)
         self.assertIn("reads `current.md` before any source inspection or delegation", text)
-        self.assertIn("immutable task root", text)
+        self.assertIn("Task lock as immutable", text)
         self.assertIn("starts from Current's explicit knowledge links", text)
         self.assertIn("Controller receives only the merged result", text)
         self.assertIn("context_insufficient", text)
+        self.assertIn("context_scope_conflict", text)
         self.assertIn("clean_controller_unavailable", text)
 
     def test_reader_retrieval_is_question_driven_compact_and_recursive(self) -> None:
@@ -167,6 +173,13 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn(f"`{verdict}`", routing)
         self.assertIn("Missing evidence is `unverified`, not `contradicted`", routing)
         self.assertIn("manual requirement with workflow automation", routing)
+        for relevance in (
+            "required_for_task",
+            "supporting_detail",
+            "out_of_scope",
+            "unresolved_relevance",
+        ):
+            self.assertIn(f"`{relevance}`", routing)
 
     def test_reader_cannot_change_the_prepared_task(self) -> None:
         routing = (REFERENCES / "agent-routing.md").read_text(encoding="utf-8")
@@ -176,6 +189,55 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn(meaning, run)
         self.assertIn("does not audit the whole system", routing)
         self.assertIn("rewrite instructions", routing)
+
+    def test_task_lock_preserves_user_meaning_and_provenance(self) -> None:
+        contract = (REFERENCES / "workspace-contract.md").read_text(encoding="utf-8")
+        pcw = skill_text("pcw")
+        validation = operation_text("pcw-validate-memory")
+        for field in (
+            "Verbatim request:",
+            "Required outcome:",
+            "In scope:",
+            "Out of scope:",
+            "User constraints:",
+            "Authority:",
+            "Open questions:",
+        ):
+            self.assertIn(field, contract)
+        for provenance in ("`user`", "`derived`", "`fact`", "`unresolved`"):
+            self.assertIn(provenance, contract)
+            self.assertIn(provenance, pcw)
+        self.assertIn("Never treat Reader findings", contract)
+        self.assertIn("Reject unresolved inference presented as a requirement", validation)
+        self.assertIn("knowledge-only request leaves the existing lock unchanged", pcw)
+        self.assertIn("existing Task lock to remain unchanged", validation)
+
+    def test_discovered_facts_cannot_expand_repository_onboarding(self) -> None:
+        routing = (REFERENCES / "agent-routing.md").read_text(encoding="utf-8")
+        query = operation_text("pcw-query-context")
+        promotion = operation_text("pcw-promote-knowledge")
+        self.assertIn("onboarding one repository to an already running service", routing)
+        for unrelated in ("cluster bootstrap", "shared RBAC", "platform-wide secrets"):
+            self.assertIn(unrelated, routing)
+        self.assertIn("explicit `out_of_scope` findings", query)
+        self.assertIn("never place it in Current", promotion)
+
+    def test_semantic_acceptance_precedes_promotion_checkpoint_and_prune(self) -> None:
+        run = skill_text("pcw-run")
+        routing = (REFERENCES / "agent-routing.md").read_text(encoding="utf-8")
+        record = operation_text("pcw-record-result")
+        promotion = operation_text("pcw-promote-knowledge")
+        validation = operation_text("pcw-validate-memory")
+        checkpoint = operation_text("pcw-checkpoint-memory")
+        prune = operation_text("pcw-prune-tmp")
+        state = (REFERENCES / "state-machine.md").read_text(encoding="utf-8")
+        self.assertIn("reads the complete changed target", run)
+        self.assertIn("A mechanical diff", routing)
+        self.assertNotIn("verifies only the returned scope", run)
+        self.assertIn("semantic_acceptance: passed", record)
+        for text in (promotion, validation, checkpoint, prune, state):
+            self.assertIn("semantic acceptance", text.lower())
+        self.assertIn("forbid promotion, checkpoint, prune, and completion", run)
 
     def test_query_context_is_read_only_and_visible(self) -> None:
         text = operation_text("pcw-query-context")
@@ -230,6 +292,16 @@ class SkillContractTests(unittest.TestCase):
         headings = re.findall(r"^# .+$", current, re.MULTILINE)
         self.assertEqual(["# Current", "# References"], headings)
         self.assertIn("Task:", current)
+        for field in (
+            "Verbatim request:",
+            "Required outcome:",
+            "In scope:",
+            "Out of scope:",
+            "User constraints:",
+            "Authority:",
+            "Open questions:",
+        ):
+            self.assertIn(field, current)
         status_match = re.search(r"^Status:\s*(\S+)\s*$", current, re.MULTILINE)
         self.assertIsNotNone(status_match)
         self.assertIn(status_match.group(1), CURRENT_STATUSES)

@@ -5,6 +5,7 @@ Commit only validated durable memory and never include `tmp/`.
 ## Preconditions
 
 - A fresh `status: ok`, `output_state: validated` result exists for the same workspace and cycle.
+- That validation confirms the Task lock, requirement provenance, and, for a run, semantic acceptance of the complete target.
 - No writes occurred between validation and this operation.
 - The workspace is its own local Git repository.
 
@@ -17,7 +18,7 @@ Commit only validated durable memory and never include `tmp/`.
 
 ## Procedure
 
-1. Reject any blocked validation, mismatched cycle, or result without `output_state: validated`.
+1. Reject any blocked validation, mismatched cycle, missing semantic-acceptance check, or result without `output_state: validated`.
 2. Read Git status again and compare it with the validation result.
 3. Show a diff limited to `current.md`, `knowledge/`, and the permitted `.gitignore`.
 4. Only when the user explicitly forbade this local memory transaction, stage nothing and return `user_forbidden`.
@@ -43,6 +44,7 @@ After commit, return `output_state: checkpointed`, `checkpoint_status: created`,
 
 - `user_forbidden`
 - `validation_failed`
+- `semantic_acceptance_missing`
 - `cycle_mismatch`
 - `validation_stale`
 - `unexpected_diff`

@@ -14,6 +14,8 @@ Both accept natural-language requests. Ask only when unresolved ambiguity would 
 - Repeating an operation with identical inputs must be a no-op or return the same semantic result.
 - An internal operation never selects the following transition.
 - `pcw-run` never falls back from a clean Controller to the primary agent.
+- Task-defining meaning may come only from exact user meaning recorded in Current's Task lock. Evidence may prove a necessary in-scope implementation step but never broaden that lock.
+- No final run result is accepted, promoted, checkpointed, pruned, or reported complete before semantic acceptance against the Task lock.
 
 ## Transitions
 
@@ -26,8 +28,9 @@ Both accept natural-language requests. Ask only when unresolved ambiguity would 
 | `pcw` | `source_inspected` with `decision: map` | `pcw-map-source` | `source_mapped` |
 | `pcw` | `cycle_open`, `source_inspected`, or `source_mapped` | Reader or context-building activity | `working` |
 | `pcw-run` | `workspace_resolved` with valid Current | `pcw-open-cycle` | `cycle_open` or `recovery_required` |
-| `pcw-run` | `cycle_open` | clean Controller activity | `working` or `blocked` |
-| both | `cycle_open` or `working` | `pcw-record-result` | `working` with one accepted result |
+| `pcw-run` | `cycle_open` | clean Controller activity and Task-lock mapping | `working` with a proposed result or `blocked` |
+| `pcw-run` | `working` with proposed final result | primary semantic acceptance against Current | `working` with an accepted proposal or `blocked` |
+| both | `cycle_open` or `working` | `pcw-record-result` for a non-final result or semantically accepted final proposal | `working` with one accepted result |
 | both | `cycle_open` or `working` | `pcw-promote-knowledge` | `knowledge_promoted` |
 | both | `knowledge_promoted` | `pcw-compact-current` | `current_compacted` |
 | both | `current_compacted` | `pcw-validate-memory` | `validated` or the same state with `blocked` |
@@ -38,7 +41,9 @@ Both accept natural-language requests. Ask only when unresolved ambiguity would 
 
 ## Run isolation
 
-The primary agent passes the clean Controller only the exact current run request, workspace and source roots, complete `current.md`, its knowledge links, referenced source coordinates, and current authority. The Controller reads Current first. It may ask Readers bounded questions that start from those links and follow relevant knowledge relations or primary coordinates, but retrieved detail cannot change the prepared task, scope, authority, user constraints, or plan. `context_insufficient`, `needs_input`, or broader authority returns control to the primary agent without execution beyond the supported boundary.
+The primary agent passes the clean Controller only the exact current run request, workspace and source roots, complete `current.md`, its knowledge links, referenced source coordinates, and current authority. The Controller reads Current first and maps planned work to its Task lock. It may ask Readers bounded questions that start from those links and follow relevant knowledge relations or primary coordinates, but retrieved detail cannot change the prepared task, scope, exclusions, authority, user constraints, audience, deliverables, or quality criteria. `context_insufficient`, `context_scope_conflict`, `needs_input`, or broader authority returns control to the primary agent without execution beyond the supported boundary.
+
+After the Controller proposes its complete result, the primary reads the complete changed target and accepts it only when every material addition maps to the Task lock and no out-of-scope subject entered the result. Failed semantic acceptance preserves the same cycle in `working`; it forbids promotion, checkpoint, prune, and completion.
 
 ## Repeated calls
 

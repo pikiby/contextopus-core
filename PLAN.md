@@ -24,15 +24,15 @@ The system must not become a log of every message, a copy of the source project,
 Each semantic subproject has one durable memory, one prepared task context, and one temporary transaction buffer:
 
 1. `knowledge/` is the only durable system memory. It stores linked objects, facts, rules, constraints, blockers, decisions, and relations.
-2. `current.md` is a persistent compact root for one active task. It contains task-defining meaning directly and links supporting knowledge and evidence for bounded retrieval. The user can refine it before execution.
+2. `current.md` is a persistent compact root for one active task. It preserves a Task lock derived only from exact user meaning and links supporting knowledge and evidence for bounded retrieval. The user can refine it before execution.
 3. `tmp/` contains raw and intermediate material from exactly one active or interrupted transaction. It is recoverable but not durable knowledge.
 
 The context transformation is:
 
 ```text
-user meaning + relevant knowledge + supported evidence
+verbatim user meaning + relevant knowledge + supported evidence
                          ↓
-           task-specific current.md
+ task-locked, task-specific current.md
 ```
 
 The execution transformation is:
@@ -87,8 +87,17 @@ In the first implementation, each subproject memory is its own local Git reposit
 Task: <active task identity and outcome>
 Status: draft | ready | running | blocked | complete | closed
 
-<compact task root: exact outcome, scope, authority, critical rules and
-constraints, blockers, ordered execution logic, and factual execution state>
+## Task lock
+
+Verbatim request: <exact task-establishing user wording>
+Required outcome: <meaning entailed by that wording>
+In scope: <explicit scope or not further specified>
+Out of scope: <explicit exclusions or not further specified>
+User constraints: <verbatim constraints or none stated>
+Authority: <explicit mutation and external-action authority>
+Open questions: <material unresolved choices or none>
+
+<supported execution logic, blockers, and factual execution state>
 
 # References
 
@@ -96,7 +105,9 @@ constraints, blockers, ordered execution logic, and factual execution state>
 - evidence: <path, URL, or source coordinate>
 ```
 
-Only two top-level headings are generated. Task identity, outcome, scope, authority, critical user constraints, blockers, and execution logic remain directly in Current. Stable supporting detail may stay in linked knowledge. During a run, Readers may traverse those links for one exact question without changing the prepared task.
+Only two top-level headings are generated. The verbatim request, task identity, outcome, scope, exclusions, authority, critical user constraints, blockers, and execution logic remain directly in Current. Stable supporting detail may stay in linked knowledge. During a run, Readers may traverse those links for one exact question without changing the prepared task.
+
+Task-defining meaning has `user` provenance. A `derived` implementation step is permitted only when primary evidence proves it necessary to an explicit user outcome inside the locked scope. A `fact` is supporting evidence, not a requirement. An `unresolved` inference remains an open question. Existing knowledge, broad audits, adjacent defects, best practices, and discovered infrastructure never expand Current by themselves.
 
 The user may create, refine, replace, or close Current through `$pcw`. It persists after execution so the user can inspect and refine the same prepared context or recover an interrupted run. `$pcw-run` may update only supported factual execution state and status; it cannot independently change task identity, scope, constraints, or plan.
 
@@ -175,7 +186,7 @@ A vector database, graph database, or dedicated MCP is unnecessary in the first 
 
 ## 7. Two natural-language entry skills
 
-Version 0.2.0 exposes exactly two explicit-only skills:
+Version 0.2.1 exposes exactly two explicit-only skills:
 
 - `$pcw` creates or updates linked knowledge and creates, refines, replaces, or closes the persistent task-specific Current. It does not execute the source task.
 - `$pcw-run` executes the prepared Current through a clean Controller and persists verified results. It does not independently replan.
@@ -218,12 +229,14 @@ The active public skill assembles one transaction from narrow internal operation
 2. `$pcw` uses `pcw-query-context` to select only existing knowledge relevant to the requested Current change.
 3. `pcw-open-cycle` creates or recovers one transaction and snapshots the input state.
 4. Optional `pcw-inspect-source` and `pcw-map-source` gather bounded read-only evidence.
-5. `pcw-record-result` writes each accepted user, Reader, Controller, or Worker result to `tmp/` with exact scope and coordinates.
-6. `pcw-promote-knowledge` classifies every accepted meaning as a knowledge change, permitted Current change, reference, ephemeral detail, or conflict. It writes durable knowledge before Current.
-7. `pcw-compact-current` rebuilds the whole Current from the promotion manifest, removes duplication and operational noise, and retains every task-relevant rule and constraint.
-8. `pcw-validate-memory` checks support, completeness, links, Current shape, scope, conflicts, and the untracked status of `tmp/` without writing.
-9. `pcw-checkpoint-memory` commits only validated paths inside the selected memory repository unless explicitly forbidden.
-10. `pcw-prune-tmp` removes only the exact absorbed cycle represented by that checkpoint, without requesting separate permission.
+5. `pcw-record-result` writes accepted user, Reader, and intermediate Worker results to `tmp/` with exact scope and coordinates.
+6. For a run, the primary reads the complete changed target and semantically accepts it against Current's Task lock. Every material addition must map to a user outcome or evidenced in-scope derived necessity.
+7. Only after that acceptance, `pcw-record-result` writes the final Controller result with its requirement mapping and semantic-acceptance evidence.
+8. `pcw-promote-knowledge` classifies every accepted meaning as a knowledge change, permitted Current change, reference, ephemeral detail, or conflict. It writes durable knowledge before Current.
+9. `pcw-compact-current` rebuilds the whole Current from the promotion manifest, removes duplication and operational noise, and retains every task-relevant rule and constraint.
+10. `pcw-validate-memory` checks the Task lock, provenance, semantic acceptance, support, completeness, links, Current shape, scope, conflicts, and the untracked status of `tmp/` without writing.
+11. `pcw-checkpoint-memory` commits only validated paths inside the selected memory repository unless explicitly forbidden.
+12. `pcw-prune-tmp` removes only the exact absorbed cycle represented by that checkpoint, without requesting separate permission.
 
 For `$pcw`, Current changes require support from the current user request. For `$pcw-run`, promotion, compaction, and validation reject any independent change to task identity, scope, constraints, or plan and permit only evidenced execution state and status.
 
@@ -262,9 +275,9 @@ The map is temporary navigation material in `tmp/`, not mandatory durable knowle
 
 ### Execution
 
-The primary agent acts only as user interface and authority gate. It passes the clean Controller the exact current run request, complete Current, exact roots and coordinates, and current authority. It does not add old conversation summaries or execute the prepared task itself.
+The primary agent acts as user interface, authority gate, and semantic acceptance boundary. It passes the clean Controller the exact current run request, complete Current, exact roots and coordinates, and current authority. It does not add old conversation summaries, execute the prepared task itself, or author preferred requirements.
 
-The Controller reads Current first and treats it as the immutable task root. It reads a small precise target directly. For missing supporting detail in a large or ambiguous area, it gives one Reader one exact question. The Reader starts from Current's knowledge links, follows only relevant active relations and primary coordinates, and may recursively delegate bounded subquestions. Each parent Reader merges its children and returns one compact result, so the Controller never receives every raw report. Retrieval cannot fill a missing task definition, expand authority, or change the prepared task. Missing task-defining context or unresolved required evidence returns `context_insufficient`; missing user input or authority returns `needs_input` through the primary agent.
+The Controller reads Current first and treats its Task lock as immutable. Before work, it maps every planned section, action, and mutation to an explicit requested outcome or an evidenced necessary implementation step inside that outcome. It reads a small precise target directly. For missing supporting detail in a large or ambiguous area, it gives one Reader one exact question. The Reader starts from Current's knowledge links, follows only relevant active relations and primary coordinates, classifies relevance, and may recursively delegate bounded subquestions. Each parent Reader merges its children and returns one compact result, so the Controller never receives every raw report. Retrieval cannot fill a missing task definition, expand authority, or change the prepared task. Missing task-defining context or unresolved required evidence returns `context_insufficient`; a scope conflict returns `context_scope_conflict`; missing user input or authority returns `needs_input` through the primary agent.
 
 `pcw-record-result` stores a normalized account in `tmp/`: what changed, where, which checks ran, and what remains unverified. Promotion decides whether each verified meaning becomes durable knowledge, factual Current state, or ephemeral transaction material.
 
@@ -274,11 +287,14 @@ A separate Verifier is not part of the architecture. Add another coordination ro
 
 Before telling the user that a run or meaningful stage is complete, `$pcw-run` must:
 
-1. inventory every accepted source change and every external fact that materially affected the result;
-2. verify that `pcw-record-result` represents the final state, checks, coordinates, and remaining uncertainty for each item;
-3. reject any stale contradiction between the prepared Current, actual targets, and verified result;
-4. run promotion, compaction, and validation for all unabsorbed results;
-5. complete the automatic local checkpoint and exact-cycle pruning unless explicitly forbidden.
+1. read the complete changed target, not only a diff summary or mechanical checks;
+2. map every material output section and change to the Task lock;
+3. reject unrelated subjects, invented requirements, and out-of-scope Reader findings;
+4. inventory every accepted source change and every external fact that materially affected the result;
+5. verify that `pcw-record-result` represents the final state, semantic acceptance, checks, coordinates, and remaining uncertainty for each item;
+6. reject any stale contradiction between the prepared Current, actual targets, and verified result;
+7. run promotion, compaction, and validation for all unabsorbed results;
+8. complete the automatic local checkpoint and exact-cycle pruning unless explicitly forbidden.
 
 If the user forbids the memory transaction, report source completion separately and retain recoverable inputs. Never report the PCW cycle complete while final work is missing from memory, Current contradicts the target, validation has not succeeded, or checkpointing remains unresolved.
 
@@ -296,7 +312,7 @@ The next session can refine the persistent Current with `$pcw`, rerun it with `$
 
 For `$pcw`, the primary agent manages the context transaction and may use Readers for bounded source reduction.
 
-For `$pcw-run`, a clean Controller is mandatory. It starts with no inherited conversation and receives only the prepared run package. This separation prevents the primary agent's old assumptions from being mixed back into Current during execution. If the host cannot provide that isolation, execution stops rather than silently degrading to normal mode.
+For `$pcw-run`, a clean Controller is mandatory. It starts with no inherited conversation and receives only the prepared run package. This separation prevents the primary agent's old assumptions from being mixed back into Current during execution. The primary still reads the complete result for semantic fidelity, but may compare it only with the Task lock and may not introduce old context or preferred requirements. If the host cannot provide isolation or the primary cannot perform that bounded acceptance, execution stops rather than silently degrading.
 
 ## 11. Model selection
 
@@ -416,6 +432,8 @@ The MVP is ready when:
 
 - a new session creates or refines Current without the complete chat;
 - a clean Controller executes from Current without inherited conversation and receives only compact results from bounded knowledge and source retrieval;
+- every Current preserves a verbatim Task lock, and facts or agent inferences cannot silently expand it;
+- every final run result maps its material additions to the Task lock and passes semantic acceptance before promotion or checkpoint;
 - missing task context produces `context_insufficient` instead of improvisation;
 - active user constraints survive repeated compaction;
 - `current.md` remains bounded and task-specific after dozens of cycles;

@@ -54,8 +54,17 @@ Required minimal format:
 Task: <active task identity and outcome>
 Status: draft | ready | running | blocked | complete | closed
 
-<compact task root: exact outcome, scope, authority, critical rules and
-constraints, blockers, ordered execution logic, and factual execution state>
+## Task lock
+
+Verbatim request: <exact user wording that established or last changed the task>
+Required outcome: <meaning entailed by that wording>
+In scope: <explicit scope, or "not further specified">
+Out of scope: <explicit exclusions, or "not further specified">
+User constraints: <verbatim constraints, or "none stated">
+Authority: <explicit mutation and external-action authority>
+Open questions: <material unresolved choices, or "none">
+
+<compact supported execution logic, blockers, and factual execution state>
 
 # References
 
@@ -66,7 +75,15 @@ constraints, blockers, ordered execution logic, and factual execution state>
 Rules:
 
 - Build `current.md` only through `$pcw` from the user's natural request, relevant `knowledge/`, and supported evidence.
-- Keep task identity, intended outcome, scope, mutation authority, critical user constraints, blockers, and execution logic directly in Current. Retrieval must never be required to discover or change them.
+- Preserve the request that establishes or changes task meaning verbatim in the Task lock. A summary may clarify it but must not replace, narrow, broaden, or improve it.
+- Keep task identity, intended outcome, scope, exclusions, mutation authority, critical user constraints, blockers, and execution logic directly in Current. Retrieval must never be required to discover or change them.
+- Use these provenance classes when building or validating Current:
+  - `user`: task identity, outcome, scope, exclusion, constraint, authority, audience, deliverable, or quality criterion explicitly supplied by the user;
+  - `derived`: an implementation step supported by primary evidence and necessary to achieve a `user` outcome without adding a new subject or lifecycle phase;
+  - `fact`: supporting evidence that may guide execution but cannot become a task requirement by itself;
+  - `unresolved`: an inference or material choice that remains non-binding until the user resolves it.
+- Never treat Reader findings, adjacent defects, general best practices, existing knowledge, or implementation inventory as `user` meaning. A `derived` step must retain its evidence and mapping to the exact requested outcome.
+- When the request leaves a material boundary unspecified, write it as an open question and ask. Do not silently select the broader, more complete, or more elaborate interpretation.
 - A user may refine it repeatedly. Preserve supported task, scope, constraints, and plan changes until the user changes, replaces, or closes them.
 - Do not include unrelated history or knowledge merely because it exists.
 - Do not delete it after a run. A run may update only factual execution state and status; it must not independently replan.
@@ -117,7 +134,7 @@ sources:
 ---
 ```
 
-The body contains only user-provided meaning, facts, changes, checks, uncertainty, and coordinates. A `kind: reader` result records its exact question, claim verdicts, compact answer, primary coordinates, conflicts, uncovered scope, and uncertainty; a parent Reader records one merged result rather than forwarding every child report. A `kind: user` result preserves exact user meaning and distinguishes authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
+The body contains only user-provided meaning, facts, changes, checks, uncertainty, and coordinates. A `kind: reader` result records its exact question, claim verdicts, relevance classification, compact answer, primary coordinates, conflicts, uncovered scope, and uncertainty; a parent Reader records one merged result rather than forwarding every child report. A final `kind: controller` result records a mapping from every material change or output section to a `user` outcome or evidenced `derived` necessity, the findings excluded as `out_of_scope`, and the primary agent's semantic acceptance. A `kind: user` result preserves exact user meaning and distinguishes authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
 
 ## 7. Promotion manifest
 

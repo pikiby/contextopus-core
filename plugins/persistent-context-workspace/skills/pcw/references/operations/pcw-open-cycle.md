@@ -21,7 +21,7 @@ Create the minimal structure for new memory or recover exactly one unfinished tr
 1. If the workspace does not exist, require `entry_skill: pcw` and explicit creation meaning in the request.
 2. For permitted creation:
    - create `<work-root>/.pcw/.gitignore` that ignores everything except itself;
-   - create `current.md` containing `# Current`, `Task: None`, `Status: closed`, and `# References`;
+   - create `current.md` containing `# Current`, `Task: None`, `Status: closed`, an empty Task lock with `Verbatim request: none`, `Required outcome: none`, `In scope: none`, `Out of scope: none`, `User constraints: none stated`, `Authority: none`, and `Open questions: none`, followed by `# References`;
    - create `knowledge/index.md`, `tmp/`, and a workspace `.gitignore` containing `tmp/`;
    - initialize local Git inside the workspace without committing.
 3. Inspect existing `tmp/<cycle-id>/manifest.md` files.
