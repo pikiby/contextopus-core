@@ -5,6 +5,7 @@ Remove one absorbed temporary cycle by exact path after a verifiable checkpoint.
 ## Preconditions
 
 - The receipt contains `checkpoint_status: created` and an actual commit id.
+- The successful validation and checkpoint receipts identify the same workspace and cycle.
 - That commit is the current memory HEAD.
 - The receipt matches the same `workspace` and `cycle_id`.
 - Validation covered every result in the removable cycle.
@@ -20,7 +21,7 @@ Remove one absorbed temporary cycle by exact path after a verifiable checkpoint.
 
 1. Canonicalize the workspace and cycle path.
 2. Require the cycle path to be a direct child of `<workspace>/tmp/`, not a symlink, and free of `..`.
-3. Cross-check the manifest, promotion manifest, and checkpoint receipt.
+3. Cross-check the manifest, promotion manifest, successful validation receipt, and checkpoint receipt.
 4. Verify that no unpromoted `result_id`, conflict, or partial material remains.
 5. Without requesting separate permission, remove only that exact cycle directory unless the user explicitly forbade the transaction; never use a wildcard, recursive parent path, or general-purpose environment variable.
 6. Verify that `current.md`, `knowledge/`, and other cycle directories did not change.
@@ -33,6 +34,7 @@ Return `output_state: cycle_closed`, the exact removed path, commit id, and `pru
 ## Blockers
 
 - `checkpoint_missing`
+- `validation_missing`
 - `checkpoint_not_head`
 - `cycle_mismatch`
 - `path_not_exact_child`

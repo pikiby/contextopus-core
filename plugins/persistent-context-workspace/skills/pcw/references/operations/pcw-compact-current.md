@@ -25,15 +25,16 @@ Rebuild the persistent task-specific `current.md` from the promotion manifest wi
    - omit all unrelated knowledge and history;
    - mark an explicitly closed task as `Status: closed` without deleting Current.
 4. For `entry_skill: pcw-run`, preserve task identity, outcome, scope, constraints, and plan from the snapshot. Update only evidenced factual execution state and status.
-5. Replace detailed durable meaning with stable knowledge links while keeping Current self-contained enough for a clean Controller to execute without searching `knowledge/`.
+5. Keep task identity, outcome, scope, authority, critical user constraints, blockers, and execution logic directly in Current. Replace stable supporting detail with knowledge links that Readers may traverse for exact run-time questions.
 6. Keep conflicts and blockers visible. Preserve relevant user constraints verbatim.
 7. Compact by removing duplicates, merging equivalent wording, replacing evidence detail with coordinates, and dropping transient operational noise.
 8. Produce exactly `# Current` followed by `# References` and replace the file only after the full candidate exists.
-9. Do not change knowledge, cycle results, or the Git index.
+9. Measure `sizes_before` and `sizes_after` from the actual snapshot and written Current as UTF-8 byte counts; never estimate them from generated text.
+10. Do not change knowledge, cycle results, or the Git index.
 
 ## Output
 
-Return `output_state: current_compacted`, snapshot path, entry skill, sizes before and after, used references, and any budget warning.
+Return `output_state: current_compacted`, snapshot path, entry skill, exact UTF-8 byte sizes before and after, used references, and any budget warning.
 
 ## Blockers
 

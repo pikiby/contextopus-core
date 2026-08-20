@@ -4,7 +4,7 @@ Commit only validated durable memory and never include `tmp/`.
 
 ## Preconditions
 
-- A fresh successful `pcw-validate-memory` result exists.
+- A fresh `status: ok`, `output_state: validated` result exists for the same workspace and cycle.
 - No writes occurred between validation and this operation.
 - The workspace is its own local Git repository.
 
@@ -17,14 +17,15 @@ Commit only validated durable memory and never include `tmp/`.
 
 ## Procedure
 
-1. Read Git status again and compare it with the validation result.
-2. Show a diff limited to `current.md`, `knowledge/`, and the permitted `.gitignore`.
-3. Only when the user explicitly forbade this local memory transaction, stage nothing and return `user_forbidden`.
-4. Otherwise stage only explicitly validated paths. Never use a broad glob and never stage `tmp/`.
-5. Check the staged diff for secrets, conflict markers, and whitespace errors.
-6. Create one local commit describing the semantic memory change.
-7. Read the actual commit id and confirm that `tmp/` remains untracked.
-8. Never push.
+1. Reject any blocked validation, mismatched cycle, or result without `output_state: validated`.
+2. Read Git status again and compare it with the validation result.
+3. Show a diff limited to `current.md`, `knowledge/`, and the permitted `.gitignore`.
+4. Only when the user explicitly forbade this local memory transaction, stage nothing and return `user_forbidden`.
+5. Otherwise stage only explicitly validated paths. Never use a broad glob and never stage `tmp/`.
+6. Check the staged diff for secrets, conflict markers, and whitespace errors.
+7. Create one local commit describing the semantic memory change.
+8. Read the actual commit id and confirm that `tmp/` remains untracked.
+9. Never push.
 
 ## Output
 
@@ -41,6 +42,8 @@ After commit, return `output_state: checkpointed`, `checkpoint_status: created`,
 ## Blockers
 
 - `user_forbidden`
+- `validation_failed`
+- `cycle_mismatch`
 - `validation_stale`
 - `unexpected_diff`
 - `tmp_staged`

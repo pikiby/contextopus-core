@@ -39,7 +39,7 @@ Stop with `shared_contract_unavailable` rather than reconstructing a missing ope
 5. Record exact user-provided meaning. Preserve user constraints verbatim; keep claims about external state attributed until primary evidence verifies them.
 6. When the request needs project evidence, run `pcw-inspect-source` and, only when required, `pcw-map-source`. Source inspection is read-only.
 7. Update `knowledge/` as linked durable objects. Modify an existing object instead of duplicating it; keep superseded and conflicting meanings explicit.
-8. Build or revise `current.md` as the self-contained compressed context and plan for one active task. Select only knowledge and evidence that materially affect that task. Include no unrelated history or project detail.
+8. Build or revise `current.md` as the compact task root for one active task. Keep task identity, outcome, scope, authority, critical user constraints, blockers, and execution logic directly in Current; link stable knowledge and evidence detail instead of copying it. Include no unrelated history or project detail.
 9. A user may refine `current.md` repeatedly. Preserve those supported refinements until the user changes, replaces, or closes the task.
 10. Complete `pcw-promote-knowledge` → `pcw-compact-current` → `pcw-validate-memory` → `pcw-checkpoint-memory` → `pcw-prune-tmp`.
 

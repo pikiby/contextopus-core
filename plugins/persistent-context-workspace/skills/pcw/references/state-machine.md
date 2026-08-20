@@ -34,11 +34,11 @@ Both accept natural-language requests. Ask only when unresolved ambiguity would 
 | both | `validated` | `pcw-checkpoint-memory` | `checkpointed` or `blocked` by explicit user prohibition |
 | both | `checkpointed` | `pcw-prune-tmp` | `cycle_closed` |
 
-`recovery_required` reuses the existing cycle and resumes from the last evidenced state. Do not create a new cycle before reaching `cycle_closed`.
+`recovery_required` reuses the existing cycle and resumes from the last evidenced state. A blocked validation also remains in that cycle and returns to the earliest faulty operation; it never creates a correction request or cycle. Do not create a new cycle before reaching `cycle_closed`.
 
 ## Run isolation
 
-The primary agent passes the clean Controller only the exact current run request, workspace and source roots, complete `current.md`, referenced source coordinates, and current authority. The Controller reads Current first and does not search `knowledge/` to fill a missing plan. `context_insufficient`, `needs_input`, or broader authority returns control to the primary agent without execution beyond the supported boundary.
+The primary agent passes the clean Controller only the exact current run request, workspace and source roots, complete `current.md`, its knowledge links, referenced source coordinates, and current authority. The Controller reads Current first. It may ask Readers bounded questions that start from those links and follow relevant knowledge relations or primary coordinates, but retrieved detail cannot change the prepared task, scope, authority, user constraints, or plan. `context_insufficient`, `needs_input`, or broader authority returns control to the primary agent without execution beyond the supported boundary.
 
 ## Repeated calls
 
@@ -48,7 +48,7 @@ The primary agent passes the clean Controller only the exact current run request
 - `pcw-record-result`: same id and content is a no-op; different content is `blocked`.
 - `pcw-promote-knowledge`: do not duplicate objects, facts, relations, or manifest entries.
 - `pcw-compact-current`: identical snapshot, user meaning, and promotion manifest produce identical Current.
-- `pcw-validate-memory`: never change the file system.
+- `pcw-validate-memory`: never change the file system; a failure stays `current_compacted` in the same cycle.
 - `pcw-checkpoint-memory`: return an existing checkpoint for the same validated tree.
 - `pcw-prune-tmp`: an already absent exact cycle directory is a successful no-op.
 

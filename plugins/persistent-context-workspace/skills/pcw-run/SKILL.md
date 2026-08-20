@@ -32,7 +32,7 @@ The primary agent is only the user interface and authority boundary. It must not
 4. Give the Controller only:
    - the exact current `$pcw-run` request verbatim;
    - the absolute workspace and source roots;
-   - the complete prepared `current.md` and its referenced source coordinates;
+   - the complete prepared `current.md`, its knowledge links, and referenced source coordinates;
    - the exact mutation scope and authority available for this run;
    - the shared operation contracts needed to record and finalize results.
 5. Do not pass chat summaries, earlier messages, unrelated memory, or the primary agent's interpretation.
@@ -40,13 +40,15 @@ The primary agent is only the user interface and authority boundary. It must not
 ## Execute
 
 1. The clean Controller reads `current.md` before any source inspection or delegation.
-2. It works only from that context and the original target objects named by it. It does not search `knowledge/` to repair missing task context.
-3. If `current.md` is insufficient, contradictory, or does not cover the requested run, return `context_insufficient` to the primary agent. Do not improvise a plan.
-4. The Controller may execute a simple task itself or create Workers from its clean context. Every Worker receives the complete `current.md`, exact target objects, and authority boundaries.
-5. New user input or broader authority is requested through the primary agent with `needs_input`; the Controller never expands scope itself.
-6. Record actual changed objects, checks, evidence, failures, blockers, and remaining uncertainty in the active `tmp/` cycle.
-7. Promote durable results into `knowledge/`. Update `current.md` only with factual execution state; do not change its task, scope, constraints, or plan independently.
-8. Complete `pcw-promote-knowledge` → `pcw-compact-current` → `pcw-validate-memory` → `pcw-checkpoint-memory` → `pcw-prune-tmp` before reporting the run complete.
+2. It treats Current as the immutable task root. Retrieval may add evidence and detail, but never task identity, scope, authority, user constraints, or an independently invented plan.
+3. It reads a small precise target directly. For missing detail in a large or ambiguous area, it gives one Reader one exact question under `agent-routing.md`.
+4. A Reader starts from Current's explicit knowledge links, may follow only relevant knowledge relations and source coordinates, and returns one compact answer with facts, coordinates, conflicts, uncovered scope, and uncertainty. Recursive child reports stay below the parent Reader and in `tmp/`; the Controller receives only the merged result.
+5. If task identity, scope, authority, or a required fact remains insufficient or contradictory after bounded retrieval, return `context_insufficient` to the primary agent. Do not improvise or broaden the search.
+6. The Controller may execute a simple task itself or create Workers from its clean context. Every Worker receives the complete `current.md`, the compact relevant Reader result, exact target objects, and authority boundaries.
+7. New user input or broader authority is requested through the primary agent with `needs_input`; the Controller never expands scope itself.
+8. Record accepted compact Reader results, actual changed objects, checks, evidence, failures, blockers, and remaining uncertainty in the active `tmp/` cycle.
+9. Promote durable results into `knowledge/`. Update `current.md` only with factual execution state; do not change its task, scope, constraints, authority, or plan independently.
+10. Complete `pcw-promote-knowledge` → `pcw-compact-current` → `pcw-validate-memory` → `pcw-checkpoint-memory` → `pcw-prune-tmp` before reporting the run complete. A blocked validation stays in the same cycle and forbids checkpoint, prune, and completion; repair the faulty operation without inventing a correction request or cycle.
 
 ## Control and output
 

@@ -24,7 +24,7 @@ The system must not become a log of every message, a copy of the source project,
 Each semantic subproject has one durable memory, one prepared task context, and one temporary transaction buffer:
 
 1. `knowledge/` is the only durable system memory. It stores linked objects, facts, rules, constraints, blockers, decisions, and relations.
-2. `current.md` is a persistent, self-contained compression of only the knowledge and evidence needed to execute one active task. The user can refine it before execution.
+2. `current.md` is a persistent compact root for one active task. It contains task-defining meaning directly and links supporting knowledge and evidence for bounded retrieval. The user can refine it before execution.
 3. `tmp/` contains raw and intermediate material from exactly one active or interrupted transaction. It is recoverable but not durable knowledge.
 
 The context transformation is:
@@ -87,7 +87,7 @@ In the first implementation, each subproject memory is its own local Git reposit
 Task: <active task identity and outcome>
 Status: draft | ready | running | blocked | complete | closed
 
-<self-contained task context and plan: exact scope, relevant facts, rules,
+<compact task root: exact outcome, scope, authority, critical rules and
 constraints, blockers, ordered execution logic, and factual execution state>
 
 # References
@@ -96,7 +96,7 @@ constraints, blockers, ordered execution logic, and factual execution state>
 - evidence: <path, URL, or source coordinate>
 ```
 
-Only two top-level headings are generated. Rules, constraints, and blockers are durable knowledge objects, but every item that materially affects execution is represented inside Current or through an explicit stable coordinate. Current must be complete enough for a clean Controller to execute without searching `knowledge/`.
+Only two top-level headings are generated. Task identity, outcome, scope, authority, critical user constraints, blockers, and execution logic remain directly in Current. Stable supporting detail may stay in linked knowledge. During a run, Readers may traverse those links for one exact question without changing the prepared task.
 
 The user may create, refine, replace, or close Current through `$pcw`. It persists after execution so the user can inspect and refine the same prepared context or recover an interrupted run. `$pcw-run` may update only supported factual execution state and status; it cannot independently change task identity, scope, constraints, or plan.
 
@@ -128,7 +128,7 @@ After success, remove only the exact absorbed cycle directory. Keep the ignored 
 
 ## 6. `knowledge/`: durable knowledge
 
-`knowledge/` is the only durable system memory. It stores information that may matter after a task or stage changes:
+`knowledge/` is the only durable system memory. It stores compact source-backed information that may matter after a task or stage changes:
 
 - architecture decisions and their reasons;
 - stable domain constraints;
@@ -264,7 +264,7 @@ The map is temporary navigation material in `tmp/`, not mandatory durable knowle
 
 The primary agent acts only as user interface and authority gate. It passes the clean Controller the exact current run request, complete Current, exact roots and coordinates, and current authority. It does not add old conversation summaries or execute the prepared task itself.
 
-The Controller reads Current first. It may inspect the original targets and execute a simple task itself, or give Workers the same complete Current plus bounded target objects. It cannot search knowledge to fill a missing plan, expand authority, or change the prepared task. Missing context returns `context_insufficient`; missing user input or authority returns `needs_input` through the primary agent.
+The Controller reads Current first and treats it as the immutable task root. It reads a small precise target directly. For missing supporting detail in a large or ambiguous area, it gives one Reader one exact question. The Reader starts from Current's knowledge links, follows only relevant active relations and primary coordinates, and may recursively delegate bounded subquestions. Each parent Reader merges its children and returns one compact result, so the Controller never receives every raw report. Retrieval cannot fill a missing task definition, expand authority, or change the prepared task. Missing task-defining context or unresolved required evidence returns `context_insufficient`; missing user input or authority returns `needs_input` through the primary agent.
 
 `pcw-record-result` stores a normalized account in `tmp/`: what changed, where, which checks ran, and what remains unverified. Promotion decides whether each verified meaning becomes durable knowledge, factual Current state, or ephemeral transaction material.
 
@@ -374,7 +374,7 @@ Exactly two public skills exist: `pcw` and `pcw-run`. Shared invariants and inte
 - accept natural-language requests without positional arguments or fixed verbs;
 - keep all technical operations outside the registered skill set;
 - require a clean Controller for execution;
-- prevent run-time knowledge search and independent replanning;
+- permit bounded question-driven run-time retrieval from Current links while preventing independent replanning;
 - load internal operation references through exact verified paths.
 
 ### Phase C. Narrow memory operations
@@ -415,7 +415,7 @@ Implement reliable memory updates before complete source analysis; otherwise res
 The MVP is ready when:
 
 - a new session creates or refines Current without the complete chat;
-- a clean Controller executes from Current without inherited conversation or exploratory knowledge retrieval;
+- a clean Controller executes from Current without inherited conversation and receives only compact results from bounded knowledge and source retrieval;
 - missing task context produces `context_insufficient` instead of improvisation;
 - active user constraints survive repeated compaction;
 - `current.md` remains bounded and task-specific after dozens of cycles;

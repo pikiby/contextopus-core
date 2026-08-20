@@ -25,7 +25,7 @@ A directory represents a semantic subproject, not a session. Once resolved, the 
 
 ## 2. `knowledge/`
 
-`knowledge/` is the only durable system memory. It stores linked objects, facts, rules, constraints, blockers, decisions, and relations that may remain useful when the active task changes.
+`knowledge/` is the only durable system memory. It stores compact, source-backed objects, facts, rules, constraints, blockers, decisions, and relations that may remain useful when the active task changes. It is neither a raw source copy nor a task-specific Current.
 
 Each record uses:
 
@@ -40,7 +40,7 @@ sources: []
 ---
 ```
 
-One record covers one coherent meaning. Update an existing record instead of duplicating it. Express relations as `depends_on`, `affects`, `blocked_by`, or `supersedes`. Preserve user constraints verbatim. Keep user claims about external state attributed until primary evidence verifies them.
+One record covers one coherent meaning and retains stable primary coordinates. Update an existing record instead of duplicating it. Express relations as `depends_on`, `affects`, `blocked_by`, or `supersedes`. Preserve user constraints verbatim. Keep user claims about external state attributed until primary evidence verifies them.
 
 ## 3. `current.md`
 
@@ -54,7 +54,7 @@ Required minimal format:
 Task: <active task identity and outcome>
 Status: draft | ready | running | blocked | complete | closed
 
-<self-contained task context and plan: exact scope, relevant facts, rules,
+<compact task root: exact outcome, scope, authority, critical rules and
 constraints, blockers, ordered execution logic, and factual execution state>
 
 # References
@@ -66,11 +66,12 @@ constraints, blockers, ordered execution logic, and factual execution state>
 Rules:
 
 - Build `current.md` only through `$pcw` from the user's natural request, relevant `knowledge/`, and supported evidence.
+- Keep task identity, intended outcome, scope, mutation authority, critical user constraints, blockers, and execution logic directly in Current. Retrieval must never be required to discover or change them.
 - A user may refine it repeatedly. Preserve supported task, scope, constraints, and plan changes until the user changes, replaces, or closes them.
 - Do not include unrelated history or knowledge merely because it exists.
 - Do not delete it after a run. A run may update only factual execution state and status; it must not independently replan.
 - Replacing or closing the active task requires user meaning supplied through `$pcw`.
-- Keep stable detail in `knowledge/` and link it instead of copying it into Current.
+- Keep stable detail in `knowledge/` and link it instead of copying it into Current. These links are permitted run-time retrieval entry points for exact Reader questions.
 - Use a default budget of about 3,000 tokens. Never meet the budget by dropping a relevant user constraint.
 
 ## 4. `tmp/`
@@ -116,7 +117,7 @@ sources:
 ---
 ```
 
-The body contains only user-provided meaning, facts, changes, checks, uncertainty, and coordinates. A `kind: user` result preserves exact user meaning and distinguishes authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
+The body contains only user-provided meaning, facts, changes, checks, uncertainty, and coordinates. A `kind: reader` result records its exact question, claim verdicts, compact answer, primary coordinates, conflicts, uncovered scope, and uncertainty; a parent Reader records one merged result rather than forwarding every child report. A `kind: user` result preserves exact user meaning and distinguishes authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
 
 ## 7. Promotion manifest
 

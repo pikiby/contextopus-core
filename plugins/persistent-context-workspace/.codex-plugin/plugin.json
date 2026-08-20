@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.2.0",
+  "version": "0.2.0+codex.20260820210644",
   "description": "Persistent file-backed context for long-running agent work",
   "author": {
     "name": "pikiby",
@@ -8,7 +8,13 @@
   },
   "homepage": "https://github.com/pikiby/persistent-context-workspace",
   "repository": "https://github.com/pikiby/persistent-context-workspace",
-  "keywords": ["context", "memory", "agents", "rlm", "workflow"],
+  "keywords": [
+    "context",
+    "memory",
+    "agents",
+    "rlm",
+    "workflow"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Persistent Context Workspace",
@@ -16,7 +22,10 @@
     "longDescription": "Maintain linked durable knowledge, prepare task-specific context, and execute it through a clean agent context.",
     "developerName": "pikiby",
     "category": "Productivity",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
     "defaultPrompt": [
       "Use $pcw with a natural-language request to create or refine linked knowledge and task-specific current context.",
       "Use $pcw-run with a natural-language request to execute the prepared current context through a clean Controller."

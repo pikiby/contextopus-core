@@ -12,6 +12,7 @@ SKILLS = PLUGIN / "skills"
 PLUGIN_NAME = "persistent-context-workspace"
 ENTRY_SKILLS = ("pcw", "pcw-run")
 PUBLIC = "pcw"
+CURRENT_STATUSES = {"draft", "ready", "running", "blocked", "complete", "closed"}
 OPERATIONS = (
     "pcw-resolve-workspace",
     "pcw-query-context",
@@ -64,7 +65,7 @@ class PluginContractTests(unittest.TestCase):
             (PLUGIN / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
         self.assertEqual(PLUGIN_NAME, manifest["name"])
-        self.assertEqual("0.2.0", manifest["version"])
+        self.assertRegex(manifest["version"], r"^0\.2\.0(?:\+codex\.[a-z0-9-]+)?$")
         self.assertEqual("./skills/", manifest["skills"])
         self.assertEqual(PLUGIN_NAME, PLUGIN.name)
         self.assertIsInstance(manifest["interface"]["defaultPrompt"], list)
@@ -148,9 +149,33 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("primary agent is only the user interface and authority boundary", text)
         self.assertIn("no inherited conversation turns", text)
         self.assertIn("reads `current.md` before any source inspection or delegation", text)
-        self.assertIn("does not search `knowledge/` to repair missing task context", text)
+        self.assertIn("immutable task root", text)
+        self.assertIn("starts from Current's explicit knowledge links", text)
+        self.assertIn("Controller receives only the merged result", text)
         self.assertIn("context_insufficient", text)
         self.assertIn("clean_controller_unavailable", text)
+
+    def test_reader_retrieval_is_question_driven_compact_and_recursive(self) -> None:
+        routing = (REFERENCES / "agent-routing.md").read_text(encoding="utf-8")
+        self.assertIn("one atomic question", routing)
+        self.assertIn("starts with knowledge links explicitly present in Current", routing)
+        self.assertIn("targeted `knowledge/index.md`", routing)
+        self.assertIn("recursively assign bounded subquestions", routing)
+        self.assertIn("returns one compact result", routing)
+        self.assertIn("Do not forward their raw text through every ancestor", routing)
+        for verdict in ("confirmed", "contradicted", "unverified"):
+            self.assertIn(f"`{verdict}`", routing)
+        self.assertIn("Missing evidence is `unverified`, not `contradicted`", routing)
+        self.assertIn("manual requirement with workflow automation", routing)
+
+    def test_reader_cannot_change_the_prepared_task(self) -> None:
+        routing = (REFERENCES / "agent-routing.md").read_text(encoding="utf-8")
+        run = skill_text("pcw-run")
+        for meaning in ("task identity", "scope", "authority", "user constraints", "plan"):
+            self.assertIn(meaning, routing)
+            self.assertIn(meaning, run)
+        self.assertIn("does not audit the whole system", routing)
+        self.assertIn("rewrite instructions", routing)
 
     def test_query_context_is_read_only_and_visible(self) -> None:
         text = operation_text("pcw-query-context")
@@ -179,9 +204,11 @@ class SkillContractTests(unittest.TestCase):
     def test_knowledge_current_and_tmp_have_distinct_roles(self) -> None:
         contract = (REFERENCES / "workspace-contract.md").read_text(encoding="utf-8")
         self.assertIn("`knowledge/` is the only durable system memory", contract)
+        self.assertIn("compact, source-backed", contract)
         for kind in ("object", "fact", "rule", "constraint", "blocker", "decision", "relation"):
             self.assertIn(kind, contract)
         self.assertIn("persistent compressed context and plan for one active task", contract)
+        self.assertIn("permitted run-time retrieval entry points", contract)
         self.assertIn("transaction buffer", contract)
         self.assertIn("Nothing in `tmp/` is durable fact", contract)
         self.assertIn("exact absorbed cycle directory is then removed", contract)
@@ -189,7 +216,10 @@ class SkillContractTests(unittest.TestCase):
 
     def test_run_cannot_replan_current(self) -> None:
         run = skill_text("pcw-run")
-        self.assertIn("do not change its task, scope, constraints, or plan independently", run)
+        self.assertIn(
+            "do not change its task, scope, constraints, authority, or plan independently",
+            run,
+        )
         for name in ("pcw-promote-knowledge", "pcw-compact-current", "pcw-validate-memory"):
             with self.subTest(operation=name):
                 self.assertIn("run_attempted_replan", operation_text(name))
@@ -200,11 +230,43 @@ class SkillContractTests(unittest.TestCase):
         headings = re.findall(r"^# .+$", current, re.MULTILINE)
         self.assertEqual(["# Current", "# References"], headings)
         self.assertIn("Task:", current)
-        self.assertIn("Status:", current)
+        status_match = re.search(r"^Status:\s*(\S+)\s*$", current, re.MULTILINE)
+        self.assertIsNotNone(status_match)
+        self.assertIn(status_match.group(1), CURRENT_STATUSES)
         links = re.findall(r"\[\[([^\]]+)\]\]", current)
         self.assertTrue(links)
         for link in links:
             self.assertTrue((fixture / f"{link}.md").is_file(), link)
+
+    def test_current_status_contract_and_validator_use_the_exact_enum(self) -> None:
+        contract = (REFERENCES / "workspace-contract.md").read_text(encoding="utf-8")
+        status_line = re.search(r"^Status:\s*(.+)$", contract, re.MULTILINE)
+        self.assertIsNotNone(status_line)
+        self.assertEqual(CURRENT_STATUSES, {item.strip() for item in status_line.group(1).split("|")})
+        validation = operation_text("pcw-validate-memory")
+        validator_statuses = set(
+            re.findall(
+                r"`(draft|ready|running|blocked|complete|closed)`",
+                validation,
+            )
+        )
+        self.assertEqual(CURRENT_STATUSES, validator_statuses)
+        self.assertNotIn("completed", contract + validation)
+
+    def test_current_knowledge_links_form_a_retrievable_graph(self) -> None:
+        fixture = ROOT / "tests" / "fixtures" / "valid-memory"
+        pending = re.findall(r"\[\[([^\]]+)\]\]", (fixture / "current.md").read_text())
+        visited: set[str] = set()
+        while pending:
+            link = pending.pop()
+            if link in visited:
+                continue
+            visited.add(link)
+            target = fixture / f"{link}.md"
+            self.assertTrue(target.is_file(), link)
+            for child in re.findall(r"\[\[([^\]]+)\]\]", target.read_text()):
+                pending.append(child if "/" in child else f"knowledge/{child}")
+        self.assertEqual({"knowledge/architecture", "knowledge/current-contract"}, visited)
 
     def test_all_fixture_wiki_links_resolve(self) -> None:
         fixture = ROOT / "tests" / "fixtures" / "valid-memory"
@@ -226,6 +288,26 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("checkpoint_status: created", prune)
         self.assertIn("never use a wildcard", prune)
         self.assertIn("not a symlink", prune)
+
+    def test_failed_validation_cannot_checkpoint_prune_or_open_a_correction_cycle(self) -> None:
+        validation = operation_text("pcw-validate-memory")
+        checkpoint = operation_text("pcw-checkpoint-memory")
+        prune = operation_text("pcw-prune-tmp")
+        open_cycle = operation_text("pcw-open-cycle")
+        state_machine = (REFERENCES / "state-machine.md").read_text(encoding="utf-8")
+        self.assertIn("never checkpoint, prune, report completion, or open a correction cycle", validation)
+        self.assertIn("`status: ok`, `output_state: validated`", checkpoint)
+        self.assertIn("successful validation and checkpoint receipts", prune)
+        self.assertIn("same cycle", state_machine)
+        self.assertIn("exact user request that opened the cycle", open_cycle)
+        self.assertIn("Never synthesize an internal correction request", open_cycle)
+
+    def test_compaction_receipt_uses_verified_file_sizes(self) -> None:
+        compaction = operation_text("pcw-compact-current")
+        validation = operation_text("pcw-validate-memory")
+        self.assertIn("actual snapshot and written Current as UTF-8 byte counts", compaction)
+        self.assertIn("Recompute the snapshot and Current UTF-8 byte sizes", validation)
+        self.assertIn("receipt_mismatch", validation)
 
     def test_repository_text_is_english_only(self) -> None:
         cyrillic = re.compile(r"[\u0400-\u04FF]")

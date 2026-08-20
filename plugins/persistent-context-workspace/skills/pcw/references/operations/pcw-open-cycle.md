@@ -29,7 +29,8 @@ Create the minimal structure for new memory or recover exactly one unfinished tr
 5. If multiple unfinished cycles exist, return `multiple_open_cycles`.
 6. Otherwise create `tmp/<cycle-id>/` with `findings/`, `work/`, `receipts/`, and a canonical manifest including `entry_skill`.
 7. Use a UTC id shaped as `YYYYMMDDTHHMMSSZ-<request-slug>`; recover an existing exact id rather than overwriting it.
-8. Do not change existing `current.md` or `knowledge/` content.
+8. Store `manifest.request` as the exact user request that opened the cycle. Never synthesize an internal correction request or replace the opening request during recovery; record any real later user message as its own user result.
+9. Do not change existing `current.md` or `knowledge/` content.
 
 ## Output
 
@@ -46,4 +47,4 @@ For a new transaction, return `output_state: cycle_open`. For unabsorbed earlier
 
 ## Idempotency
 
-A repeated call must not create a second cycle, reset a manifest, or overwrite memory. Treat an existing valid structure as a successful no-op.
+A repeated call must not create a second cycle, reset a manifest, replace its opening request, or overwrite memory. Treat an existing valid structure as a successful no-op.

@@ -23,7 +23,7 @@ $pcw Create context for the project at /path/to/project. Record its architecture
 $pcw In the validator context, keep the existing task but add that the virtual machine is reachable only through VPN and narrow the plan to Debezium.
 ```
 
-`$pcw` creates a missing context when the request clearly asks for one, or updates an existing context. It maintains linked durable knowledge and builds `current.md`: a compressed, self-contained context and plan for one task. It may inspect named source material read-only, but it never executes the prepared task or changes the source project.
+`$pcw` creates a missing context when the request clearly asks for one, or updates an existing context. It maintains linked durable knowledge and builds `current.md`: a compact task root containing the outcome, scope, authority, critical constraints, blockers, and execution logic for one task. Stable detail remains linked in knowledge. `$pcw` may inspect named source material read-only, but it never executes the prepared task or changes the source project.
 
 The user can refine, replace, or close Current through later natural-language `$pcw` requests. No positional arguments, fixed verbs, or mandatory request order are required.
 
@@ -33,9 +33,9 @@ The user can refine, replace, or close Current through later natural-language `$
 $pcw-run Run the prepared validator task in the data-platform context.
 ```
 
-`$pcw-run` starts a clean Controller with no inherited conversation. The Controller reads the complete prepared `current.md` first, receives only the current run request, exact paths, source coordinates, and current authority, and then performs the task itself or delegates bounded work to Workers.
+`$pcw-run` starts a clean Controller with no inherited conversation. The Controller reads the complete prepared `current.md` first, receives only the current run request, exact paths, linked knowledge, source coordinates, and current authority, and then performs the task itself or delegates bounded work.
 
-The Controller does not search `knowledge/` to repair an incomplete Current and does not use earlier chat. If Current is insufficient or does not cover the requested run, it returns a blocker so the user can refine it with `$pcw`. A run may record verified results in knowledge and update only factual execution state in Current; it cannot independently change the task, scope, constraints, or plan.
+For missing supporting detail, the Controller gives one Reader one exact question. That Reader starts from Current's knowledge links, follows only relevant relations and primary coordinates, and may recursively delegate bounded subquestions. The Controller receives one compact merged result; raw child reports remain in `tmp/`. Retrieval cannot change the prepared task, scope, authority, constraints, or plan. If those task-defining meanings or a required fact remain insufficient, the run returns a blocker so the user can refine Current with `$pcw`.
 
 ## Memory model
 
@@ -49,8 +49,8 @@ Each semantic subproject uses:
 └── .gitignore
 ```
 
-- `knowledge/` is the only durable system memory. It contains linked objects, facts, rules, constraints, blockers, decisions, and relations.
-- `current.md` is a persistent task-specific compression of only the knowledge and evidence required to perform one active task. It remains available for user refinement and recovery after a run.
+- `knowledge/` is the only durable system memory. It contains compact source-backed objects, facts, rules, constraints, blockers, decisions, relations, and primary coordinates.
+- `current.md` is the persistent compact root of one active task. It contains task-defining meaning directly and links supporting detail for bounded retrieval.
 - `tmp/` is not another memory layer. It is the ignored raw transaction buffer for one active or interrupted `$pcw` or `$pcw-run` operation: findings, maps, Controller and Worker results, receipts, promotion input, and the pre-change Current snapshot. After validated results are absorbed, only that exact cycle directory is removed; the empty `tmp/` directory remains for future operations.
 
 Each subproject memory is a local Git repository. A validated memory checkpoint and exact-cycle cleanup are automatic unless the user explicitly forbids that memory transaction. Source-repository commits and every push still require normal explicit authorization.
