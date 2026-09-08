@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Persistent Context Workspace is an experimental file-backed memory and execution boundary for long-running agent work. Version 0.2.1 exposes two explicit skills. Everything after either skill is interpreted as natural language; paths, context identity, scope, constraints, and requested meaning may appear in any order.
+Persistent Context Workspace is an experimental file-backed memory and execution boundary for long-running agent work. Version 0.3.0 exposes two explicit skills. Everything after either skill is interpreted as natural language; paths, context identity, scope, constraints, and requested meaning may appear in any order.
 
 ## Install from GitHub
 
@@ -29,6 +29,8 @@ Source facts do not expand the task. PCW distinguishes exact `user` meaning, evi
 
 The user can refine, replace, or close Current through later natural-language `$pcw` requests. No positional arguments, fixed verbs, or mandatory request order are required.
 
+`$pcw` is deliberately direct. It reads the relevant Current and knowledge, optionally gathers bounded read-only evidence, edits the durable owner of each requested meaning, and creates the local memory checkpoint. A refinement replaces equivalent active wording instead of appending message history, and it changes knowledge only when the user actually asks to retain durable cross-task meaning.
+
 ### Execute prepared context
 
 ```text
@@ -37,9 +39,15 @@ $pcw-run Run the prepared validator task in the data-platform context.
 
 `$pcw-run` starts a clean Controller with no inherited conversation. The Controller reads the complete prepared `current.md` first, receives only the current run request, exact paths, linked knowledge, source coordinates, and current authority, and then performs the task itself or delegates bounded work.
 
-For missing supporting detail, the Controller gives one Reader one exact question. That Reader starts from Current's knowledge links, follows only relevant relations and primary coordinates, classifies each finding as required, supporting, out of scope, or unresolved, and may recursively delegate bounded subquestions. The Controller receives one compact merged result; raw child reports remain in `tmp/`. Retrieval cannot change the prepared task, scope, exclusions, authority, constraints, audience, deliverables, or quality criteria. If those task-defining meanings or a required fact remain insufficient, the run returns a blocker so the user can refine Current with `$pcw`.
+For missing supporting detail, the Controller gives one Reader one exact question. That Reader starts from Current's knowledge links, follows only relevant relations and primary coordinates, classifies each finding as required, supporting, out of scope, or unresolved, and may recursively delegate bounded subquestions. The Controller receives one compact merged result directly; child reports are not written to a separate buffer. Retrieval cannot change the prepared task, scope, exclusions, authority, constraints, audience, deliverables, or quality criteria. If those task-defining meanings or a required fact remain insufficient, the run returns a blocker so the user can refine Current with `$pcw`.
 
-Before any final result is recorded, the Controller maps every material change or output section to the Task lock. The primary agent then reads the complete changed target and performs semantic acceptance against that lock. Mechanical checks cannot replace this review. An unmapped or out-of-scope addition blocks promotion, checkpoint, pruning, and completion; the same clean Controller repairs the result, or the user supplies missing meaning.
+The Controller performs only the locked task and writes durable knowledge and factual execution state directly to memory. The primary agent relays its compact result to the user. Neither skill adds a mandatory validation, result rereading, or semantic-acceptance stage. Tests and other checks run only when they are part of the user's task, not automatically because PCW was invoked. Attribution and task boundaries remain rules for producing content, not a separate review workflow.
+
+## Required instructions
+
+The plugin defines the required reading in advance: shared memory rules, a separate procedure for each skill, and the specified operation and Reader references. Every required document is read in full. The agent does not decide which required sections to skip.
+
+`pcw/references/workspace-contract.md` contains shared memory, provenance, scope, and authority rules. `pcw/references/state-machine.md` describes only context editing. `pcw-run/references/state-machine.md` contains execution and clean-Controller rules, which `$pcw` does not load. Shared Reader routing contains only bounded source-retrieval rules.
 
 ## Memory model
 
@@ -48,16 +56,15 @@ Each semantic subproject uses:
 ```text
 <work-root>/.pcw/<subproject>/
 ├── current.md
-├── knowledge/
-├── tmp/
-└── .gitignore
+└── knowledge/
 ```
 
 - `knowledge/` is the only durable system memory. It contains compact source-backed objects, facts, rules, constraints, blockers, decisions, relations, and primary coordinates.
 - `current.md` is the persistent compact root of one active task. It preserves the user's Task lock directly and links supporting detail for bounded retrieval.
-- `tmp/` is not another memory layer. It is the ignored raw transaction buffer for one active or interrupted `$pcw` or `$pcw-run` operation: findings, maps, Controller and Worker results, receipts, promotion input, and the pre-change Current snapshot. After validated results are absorbed, only that exact cycle directory is removed; the empty `tmp/` directory remains for future operations.
 
-Each subproject memory is a local Git repository. A semantically accepted and validated memory checkpoint and exact-cycle cleanup are automatic unless the user explicitly forbids that memory transaction. Source-repository commits and every push still require normal explicit authorization.
+Neither skill uses `tmp/`, cycles, manifests, intermediate result files, receipts, promotion files, snapshots, or pruning. No replacement journal or temporary memory directory is introduced.
+
+Each subproject memory is a local Git repository. A local memory checkpoint is automatic unless the user explicitly forbids it. Source-repository commits and every push still require normal explicit authorization. After interruption, saved commits and any remaining file changes are available, but there is no record of the exact execution stage and no guarantee of automatic recovery or rollback.
 
 ## Update plugin
 
@@ -84,7 +91,8 @@ plugins/persistent-context-workspace/
     │       └── operations/
     └── pcw-run/
         ├── SKILL.md
-        └── agents/openai.yaml
+        ├── agents/openai.yaml
+        └── references/state-machine.md
 ```
 
-Only `pcw` and `pcw-run` are registered as skills. Technical state transitions are Markdown reference contracts under `pcw/references/operations/`, so they do not appear as separate user commands.
+Only `pcw` and `pcw-run` are registered as skills. Four internal Markdown operation references remain under `pcw/references/operations/`: workspace selection, context retrieval, source inspection, and local memory checkpointing. They do not appear as separate user commands.

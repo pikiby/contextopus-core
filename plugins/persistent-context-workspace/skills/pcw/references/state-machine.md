@@ -1,62 +1,50 @@
-# State machine
+# Context editing rules
 
-## Entry skills
+These instructions belong only to `pcw`. They define context creation and editing, not task execution.
 
-- `pcw` creates or updates durable knowledge and the persistent task-specific `current.md`; it never executes the source task.
-- `pcw-run` executes an existing prepared `current.md` through a clean Controller and persists verified results; it never replans independently.
+## Interpret the request
 
-Both accept natural-language requests. Ask only when unresolved ambiguity would select a materially different workspace, context change, or execution target.
+Take project identity, paths, requested knowledge, task changes, exclusions, constraints, and authority from the complete current user request.
 
-## Transition invariants
+Do not improve, broaden, complete, or reinterpret the request on the user's behalf. An old plan, adjacent defect, best practice, or discovered infrastructure detail does not create a new goal, audience, deliverable, or lifecycle phase. Ask only when missing meaning would select a materially different workspace, task, or result.
 
-- Execute one internal operation at a time and read its exact reference first.
-- On `blocked`, preserve the input state and every input artifact.
-- Repeating an operation with identical inputs must be a no-op or return the same semantic result.
-- An internal operation never selects the following transition.
-- `pcw-run` never falls back from a clean Controller to the primary agent.
-- Task-defining meaning may come only from exact user meaning recorded in Current's Task lock. Evidence may prove a necessary in-scope implementation step but never broaden that lock.
-- No final run result is accepted, promoted, checkpointed, pruned, or reported complete before semantic acceptance against the Task lock.
+Distinguish meaning while writing:
 
-## Transitions
+- `user`: an outcome, scope, exclusion, constraint, or authority explicitly supplied by the user;
+- `derived`: an implementation detail grounded in available evidence and necessary inside the requested outcome;
+- `fact`: supporting information, not a new requirement;
+- `unresolved`: an inference or material choice that remains non-binding until the user resolves it.
 
-| Entry | Input state | Internal operation or activity | Postcondition |
-|---|---|---|---|
-| both | `unresolved` | `pcw-resolve-workspace` | `workspace_resolved` |
-| `pcw` | `workspace_resolved` with existing memory | `pcw-query-context` | `context_selected` |
-| `pcw` | `workspace_resolved` for new memory, or `context_selected` | `pcw-open-cycle` | `cycle_open` or `recovery_required` |
-| `pcw` | `cycle_open` with source evidence scope | `pcw-inspect-source` | `source_inspected` |
-| `pcw` | `source_inspected` with `decision: map` | `pcw-map-source` | `source_mapped` |
-| `pcw` | `cycle_open`, `source_inspected`, or `source_mapped` | Reader or context-building activity | `working` |
-| `pcw-run` | `workspace_resolved` with valid Current | `pcw-open-cycle` | `cycle_open` or `recovery_required` |
-| `pcw-run` | `cycle_open` | clean Controller activity and Task-lock mapping | `working` with a proposed result or `blocked` |
-| `pcw-run` | `working` with proposed final result | primary semantic acceptance against Current | `working` with an accepted proposal or `blocked` |
-| both | `cycle_open` or `working` | `pcw-record-result` for a non-final result or semantically accepted final proposal | `working` with one accepted result |
-| both | `cycle_open` or `working` | `pcw-promote-knowledge` | `knowledge_promoted` |
-| both | `knowledge_promoted` | `pcw-compact-current` | `current_compacted` |
-| both | `current_compacted` | `pcw-validate-memory` | `validated` or the same state with `blocked` |
-| both | `validated` | `pcw-checkpoint-memory` | `checkpointed` or `blocked` by explicit user prohibition |
-| both | `checkpointed` | `pcw-prune-tmp` | `cycle_closed` |
+This is a writing rule, not an additional review phase or a requirement-mapping report.
 
-`recovery_required` reuses the existing cycle and resumes from the last evidenced state. A blocked validation also remains in that cycle and returns to the earliest faulty operation; it never creates a correction request or cycle. Do not create a new cycle before reaching `cycle_closed`.
+## Create missing memory
 
-## Run isolation
+Create a workspace only when the user clearly asks to establish new context. Otherwise return `workspace_missing`.
 
-The primary agent passes the clean Controller only the exact current run request, workspace and source roots, complete `current.md`, its knowledge links, referenced source coordinates, and current authority. The Controller reads Current first and maps planned work to its Task lock. It may ask Readers bounded questions that start from those links and follow relevant knowledge relations or primary coordinates, but retrieved detail cannot change the prepared task, scope, exclusions, authority, user constraints, audience, deliverables, or quality criteria. `context_insufficient`, `context_scope_conflict`, `needs_input`, or broader authority returns control to the primary agent without execution beyond the supported boundary.
+Initialize the semantic directory, its local Git repository, request-derived `current.md`, and `knowledge/index.md`. Add the parent ignore rule needed to keep `.pcw/` out of source-project Git. Do not create placeholder process files.
 
-After the Controller proposes its complete result, the primary reads the complete changed target and accepts it only when every material addition maps to the Task lock and no out-of-scope subject entered the result. Failed semantic acceptance preserves the same cycle in `working`; it forbids promotion, checkpoint, prune, and completion.
+An incomplete user task may remain `Status: draft` with its open questions; do not invent the missing outcome.
 
-## Repeated calls
+## Choose the durable owner
 
-- `pcw-resolve-workspace`: return the same resolved path.
-- `pcw-query-context`: remain read-only and select the same knowledge for equivalent inputs.
-- `pcw-open-cycle`: recover the existing `cycle_id`; never create a second cycle.
-- `pcw-record-result`: same id and content is a no-op; different content is `blocked`.
-- `pcw-promote-knowledge`: do not duplicate objects, facts, relations, or manifest entries.
-- `pcw-compact-current`: identical snapshot, user meaning, and promotion manifest produce identical Current.
-- `pcw-validate-memory`: never change the file system; a failure stays `current_compacted` in the same cycle.
-- `pcw-checkpoint-memory`: return an existing checkpoint for the same validated tree.
-- `pcw-prune-tmp`: an already absent exact cycle directory is a successful no-op.
+- For a request to retain durable cross-task knowledge or correct an existing record, edit `knowledge/` and its entry links.
+- For a task, scope, constraint, authority, plan, blocker, or status change, edit Current.
+- A knowledge-only request does not establish a new task, replace its Task lock, or trigger automatic rebuilding of Current.
+- A task-only refinement does not also create a duplicate knowledge record.
+- Save supplied content with its attribution and requested division. Do not turn a save request into research, idea evaluation, or an unsolicited rewrite.
 
-## Recovery
+## Refine Current
 
-Derive the last completed operation from `tmp/`, durable files, Git, and receipts, never from chat history. If the manifest and actual artifacts disagree, return `blocked: state_mismatch` and preserve both for diagnosis.
+Preserve the task-establishing `Verbatim request`. Apply later refinements by replacing the affected active field or paragraph, not by appending message history, a `Latest verbatim refinement` field, or another copy of the same meaning. A user-established replacement task supplies a new verbatim request.
+
+Keep explicit user constraints verbatim. Preserve unaffected task, scope, authority, and plan fields. Keep unresolved material as an open question instead of choosing a broader interpretation.
+
+Keep only meaning needed for the task. A simple clarification should not materially grow Current; new active meaning may. Do not remove a required constraint to meet the size budget.
+
+Replacing or closing an active task requires the user's request. An explicitly closed task remains in Current with `Status: closed`.
+
+## Workflow
+
+Resolve workspace → select relevant existing context → gather source information only if needed → write the requested durable changes → local memory commit.
+
+No additional review or temporary process stage lies between writing and the commit. A tool error remains an error; do not report the corresponding operation as completed.

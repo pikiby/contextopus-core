@@ -1,8 +1,10 @@
-# Workspace contract
+# Shared memory contract
 
-## 1. Memory root
+This document contains memory rules used by both entrypoints, not their separate workflows.
 
-Use one directory for each semantic subproject:
+## Memory root
+
+Use one semantic subproject directory, not one directory per session:
 
 ```text
 <work-root>/.pcw/<subproject>/
@@ -10,22 +12,14 @@ Use one directory for each semantic subproject:
 ├── knowledge/
 │   ├── index.md
 │   └── <object>.md
-├── tmp/
-│   └── <cycle-id>/
-│       ├── manifest.md
-│       ├── findings/
-│       ├── work/
-│       ├── receipts/
-│       ├── promotion.md
-│       └── current.before.md
-└── .gitignore
+└── .git/
 ```
 
-A directory represents a semantic subproject, not a session. Once resolved, the workspace path remains fixed throughout the transaction.
+The selected path stays fixed for the request. Memory has its own local Git repository and stays outside source-project Git.
 
-## 2. `knowledge/`
+## Knowledge
 
-`knowledge/` is the only durable system memory. It stores compact, source-backed objects, facts, rules, constraints, blockers, decisions, and relations that may remain useful when the active task changes. It is neither a raw source copy nor a task-specific Current.
+`knowledge/` holds compact durable objects, facts, rules, constraints, blockers, decisions, and relations useful beyond one task. It is neither raw source storage nor an execution log.
 
 Each record uses:
 
@@ -40,13 +34,13 @@ sources: []
 ---
 ```
 
-One record covers one coherent meaning and retains stable primary coordinates. Update an existing record instead of duplicating it. Express relations as `depends_on`, `affects`, `blocked_by`, or `supersedes`. Preserve user constraints verbatim. Keep user claims about external state attributed until primary evidence verifies them.
+One record covers one coherent meaning. Update an existing record instead of duplicating it. Retain available source coordinates and attribution; a proposal stays a proposal, a user claim stays attributed, and uncertainty stays explicit. Do not invent facts or sources.
 
-## 3. `current.md`
+Use `[[knowledge/<id>]]` for workspace-relative links. Relations use `depends_on`, `affects`, `blocked_by`, or `supersedes`. Conflicting and superseded meanings remain explicit; irrelevant-to-task knowledge is not deleted merely to shorten Current.
 
-`current.md` is the persistent compressed context and plan for one active task. It is not general project memory and must contain nothing that does not materially affect that task.
+## Current
 
-Required minimal format:
+`current.md` is the persistent compact context and plan for one active task.
 
 ```markdown
 # Current
@@ -56,15 +50,15 @@ Status: draft | ready | running | blocked | complete | closed
 
 ## Task lock
 
-Verbatim request: <exact user wording that established or last changed the task>
-Required outcome: <meaning entailed by that wording>
+Verbatim request: <exact user wording that established or replaced the task>
+Required outcome: <outcome supplied by that wording>
 In scope: <explicit scope, or "not further specified">
 Out of scope: <explicit exclusions, or "not further specified">
 User constraints: <verbatim constraints, or "none stated">
 Authority: <explicit mutation and external-action authority>
 Open questions: <material unresolved choices, or "none">
 
-<compact supported execution logic, blockers, and factual execution state>
+<compact execution logic, blockers, and factual execution state>
 
 # References
 
@@ -72,102 +66,37 @@ Open questions: <material unresolved choices, or "none">
 - evidence: <stable coordinate>
 ```
 
-Rules:
+Task identity, outcome, scope, exclusions, authority, critical user constraints, blockers, and execution logic belong directly in Current. Linked detail cannot create or expand them. Only the user establishes or changes task meaning.
 
-- Build `current.md` only through `$pcw` from the user's natural request, relevant `knowledge/`, and supported evidence.
-- Preserve the request that establishes or changes task meaning verbatim in the Task lock. A summary may clarify it but must not replace, narrow, broaden, or improve it.
-- Keep task identity, intended outcome, scope, exclusions, mutation authority, critical user constraints, blockers, and execution logic directly in Current. Retrieval must never be required to discover or change them.
-- Use these provenance classes when building or validating Current:
-  - `user`: task identity, outcome, scope, exclusion, constraint, authority, audience, deliverable, or quality criterion explicitly supplied by the user;
-  - `derived`: an implementation step supported by primary evidence and necessary to achieve a `user` outcome without adding a new subject or lifecycle phase;
-  - `fact`: supporting evidence that may guide execution but cannot become a task requirement by itself;
-  - `unresolved`: an inference or material choice that remains non-binding until the user resolves it.
-- Never treat Reader findings, adjacent defects, general best practices, existing knowledge, or implementation inventory as `user` meaning. A `derived` step must retain its evidence and mapping to the exact requested outcome.
-- When the request leaves a material boundary unspecified, write it as an open question and ask. Do not silently select the broader, more complete, or more elaborate interpretation.
-- A user may refine it repeatedly. Preserve supported task, scope, constraints, and plan changes until the user changes, replaces, or closes them.
-- Do not include unrelated history or knowledge merely because it exists.
-- Do not delete it after a run. A run may update only factual execution state and status; it must not independently replan.
-- Replacing or closing the active task requires user meaning supplied through `$pcw`.
-- Keep stable detail in `knowledge/` and link it instead of copying it into Current. These links are permitted run-time retrieval entry points for exact Reader questions.
-- Use a default budget of about 3,000 tokens. Never meet the budget by dropping a relevant user constraint.
+Give each meaning one durable owner: task-specific meaning belongs in Current, cross-task meaning in knowledge. Link stable detail instead of duplicating it. The default Current budget is about 3,000 tokens, without dropping relevant user constraints. Keep Current after work ends.
 
-## 4. `tmp/`
+## Direct persistence
 
-`tmp/` is the transaction buffer for one active or interrupted context update or run. It stores raw findings, Controller and Worker results, source maps, receipts, promotion input, and the pre-change Current snapshot.
+Write durable changes directly. Neither entrypoint creates or uses `tmp/`, cycle manifests, intermediate result files, receipts, promotion files, snapshots, or cleanup phases. Keep intermediate responses in the agents' working contexts; do not introduce a replacement process journal elsewhere.
 
-Nothing in `tmp/` is durable fact merely because it was written. After validation, selected meanings move into `knowledge/` and the permitted factual state moves into `current.md`; rejected or transient material is discarded. The exact absorbed cycle directory is then removed. The `tmp/` directory itself remains and is always ignored by Git so an interrupted operation can be recovered before pruning.
+Existing legacy temporary files are not a recovery protocol for these skills. Leave them untouched unless the user separately requests their removal.
 
-## 5. Cycle manifest
+Git holds committed memory versions. Interrupted writes may remain uncommitted; no exact-stage recovery, all-or-nothing transaction, automatic rollback, or restoration of lost agent context is promised. Do not overwrite or discard pre-existing changes. If their ownership overlaps the request and is unclear, ask the user.
 
-Store `tmp/<cycle-id>/manifest.md` as:
+## Authority and Git
 
-```yaml
----
-cycle_id: <stable-id>
-workspace: <absolute-path>
-entry_skill: pcw | pcw-run
-status: open
-started_at: <ISO-8601 UTC>
-request: <verbatim user request>
-source_roots:
-  - <absolute path or URL>
-current_budget_tokens: 3000
-absorbed: false
----
-```
+- A local memory commit is automatic unless the user explicitly forbids it.
+- Commit only this request's durable memory paths. Permitted memory paths are `current.md`, `knowledge/`, and a workspace `.gitignore` when actually needed.
+- Source-project commits and every push require explicit user authorization.
+- Never store secrets, tokens, or private keys in memory.
+- Do not add automatic validation, semantic acceptance, rereading for review, comparison, or tests. Such actions belong only to an explicit user task, not to routine memory handling.
+- Report actual operation failures and unresolved questions without inventing success.
 
-Allowed `status` values are `open`, `working`, `promotion_ready`, `knowledge_promoted`, `current_compacted`, `validated`, `checkpointed`, `closed`, and `blocked`.
+## Operation results
 
-## 6. Accepted result
-
-Store every accepted result in its own Markdown file:
-
-```yaml
----
-result_id: <caller-provided-stable-id>
-kind: reader | controller | worker | user
-cycle_id: <cycle-id>
-scope: <exact path, range, object, or user message>
-status: complete | partial | blocked
-sources:
-  - <path:line, byte range, object id, or URL>
----
-```
-
-The body contains only user-provided meaning, facts, changes, checks, uncertainty, and coordinates. A `kind: reader` result records its exact question, claim verdicts, relevance classification, compact answer, primary coordinates, conflicts, uncovered scope, and uncertainty; a parent Reader records one merged result rather than forwarding every child report. A final `kind: controller` result records a mapping from every material change or output section to a `user` outcome or evidenced `derived` necessity, the findings excluded as `out_of_scope`, and the primary agent's semantic acceptance. A `kind: user` result preserves exact user meaning and distinguishes authority or constraints from unverified external claims. Do not copy an entire source unless necessary.
-
-## 7. Promotion manifest
-
-`promotion.md` lists every accepted `result_id` exactly once and classifies its meanings:
-
-- `knowledge_changes`: created, updated, superseded, or resolved knowledge records;
-- `current_changes`: user-authorized context-plan changes for `$pcw`, or factual execution-state changes for `$pcw-run`;
-- `references`: links for Current to retain;
-- `ephemeral`: discarded transient details with a short reason;
-- `conflicts`: incompatible claims that remain explicit.
-
-## 8. Internal operation envelope
-
-Every internal operation returns:
+Operations return compact results directly to their caller, not files:
 
 ```yaml
 status: ok | blocked
 operation: <operation-name>
 workspace: <absolute-path-or-null>
-cycle_id: <id-or-null>
-input_state: <state>
-output_state: <state>
-artifacts: []
-warnings: []
-reason: <required when blocked>
+output_state: <resulting-state>
+reason: <when blocked>
 ```
 
-Never add `next_action`. `output_state` is a postcondition, not a decision about the following transition.
-
-## 9. Git
-
-- A checkpoint may contain `current.md`, `knowledge/`, and the workspace `.gitignore`.
-- `tmp/` is always ignored by Git.
-- Commit validated paths inside the selected PCW memory repository and prune the exact absorbed cycle automatically unless the user explicitly forbids that transaction.
-- Commits outside that memory repository and every push require explicit user authorization.
-- Never store secrets, tokens, or private keys in memory.
+Add only operation-specific result fields. Do not add a `next_action`; the calling entrypoint owns the workflow.

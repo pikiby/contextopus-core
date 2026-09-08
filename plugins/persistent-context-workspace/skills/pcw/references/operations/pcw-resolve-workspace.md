@@ -1,36 +1,24 @@
 # Resolve workspace
 
-Select exactly one memory path without writing anything.
-
-## Preconditions
-
-- One of the two public PCW skills loaded the shared contract and this operation.
-- A work path, current request, and optional subproject name are available.
+Select one memory path without writing files.
 
 ## Inputs
 
-- An absolute or resolvable `work_root` path.
-- The verbatim current user request.
-- An optional `subproject_hint`.
-- Existing `<work-root>/.pcw/*/current.md` candidates, if already discovered.
+The current user request, an absolute or resolvable work root, and any explicit subproject identity.
 
 ## Procedure
 
-1. Canonicalize `work_root` read-only and verify that it exists.
-2. Search for `.pcw/` only inside that root; never scan the entire home directory for memory.
-3. If the user named a subproject, normalize it to a safe slug and select only that slug.
-4. If no name was provided:
-   - select the only existing candidate that clearly belongs to the current project;
-   - return `ambiguous_workspace` when multiple candidates remain possible;
-   - when no candidate exists, propose a slug from the stable semantic purpose and return `exists: false`.
-5. Resolve links and require the final path to remain inside `<work-root>/.pcw/`.
-6. Do not create `.pcw`, directories, files, or a Git repository.
+1. Resolve the work root and look for memory only inside its `.pcw/` directory, never across the home directory.
+2. An explicit workspace or subproject selects that exact target. Otherwise select the only existing candidate belonging unambiguously to this project and request.
+3. When several candidates remain possible, return `ambiguous_workspace`. When none exists, propose a stable semantic slug and return `exists: false`.
+4. The selected canonical workspace belongs inside `<work-root>/.pcw/`. A missing root or escaping path returns `work_root_missing` or `path_escapes_work_root`.
+5. Do not create, rename, or replace any directory. The context-editing entrypoint owns authorized creation.
 
-Never select a workspace from an old next action or incidental word similarity in chat history.
+Do not select a workspace from an old next action or incidental similarity in conversation.
 
 ## Output
 
-Return the standard envelope plus:
+Return the shared operation result with `output_state: workspace_resolved` and:
 
 ```yaml
 resolved:
@@ -40,16 +28,3 @@ resolved:
   exists: true | false
   basis: explicit | unique_existing | proposed_new
 ```
-
-Set `output_state` to `workspace_resolved`.
-
-## Blockers
-
-- `work_root_missing`
-- `ambiguous_workspace`
-- `path_escapes_work_root`
-- `insufficient_scope`
-
-## Idempotency
-
-Return the same path for identical inputs. Never rename an existing subproject or create a variant slug.

@@ -10,7 +10,7 @@ sources:
 
 # Architecture
 
-Two public entry skills load narrow internal operation references through verified paths.
+Two public entry skills read shared memory rules and their own workflow instructions in full.
 
 ## Relations
 

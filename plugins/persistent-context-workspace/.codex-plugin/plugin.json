@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.2.1+codex.20260820214718",
+  "version": "0.3.0",
   "description": "Persistent file-backed context for long-running agent work",
   "author": {
     "name": "pikiby",
