@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pcw": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "-c",
+        "import os, runpy; from pathlib import Path; root = os.environ.get('PLUGIN_ROOT') or os.environ.get('CLAUDE_PLUGIN_ROOT'); root or exit('PCW requires PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT from the plugin host.'); runpy.run_path(str(Path(root) / 'scripts' / 'launch.py'), run_name='__main__')"
+      ]
+    }
+  }
+}

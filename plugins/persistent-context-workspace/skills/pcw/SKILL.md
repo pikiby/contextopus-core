@@ -1,38 +1,22 @@
 ---
 name: pcw
-description: Create or update one Persistent Context Workspace from a natural-language request. Use only when the user explicitly invokes $pcw to maintain linked knowledge or create, refine, replace, or close a persistent task-specific current context and plan.
+description: Maintain and use a Persistent Context Workspace from a natural-language request. Use only when the user explicitly invokes $pcw to prepare context, retain knowledge, or execute or continue a task using that memory.
 ---
 
 # PCW
 
-Manage context without executing the source task. Interpret the entire invocation as natural language; paths, project identity, facts, scope, and requested changes may appear in any order.
+Remain the user's collaborator and owner of knowledge content. Search and read memory yourself; delegate real-source investigation and authorized source changes to native subagents. Prepare-only requests end with the requested memory result. A saved task or a bare invocation does not authorize execution; an explicit execution request includes necessary preparation without another command.
 
-## Required reading
+## Working flow
 
-Read this fixed set completely before working. Do not skip documents or sections based on your own judgment of relevance. Paths are relative to this skill directory.
+1. Resolve one work root and semantic workspace from the request. Memory belongs at `<work-root>/.pcw/<workspace>/`. Reuse an unambiguous existing workspace; create one only when authorized by the request. For selection, creation, writes, or recovery, read [Memory operations](references/memory-operations.md).
+2. Read `pcw_current_get` into your working context at task start or recovery. Use `pcw_status` to distinguish available memory and pending preparation. Keep the user's goal, constraints, and completion condition in focus.
+3. Use `pcw_search` for a bounded selection and `pcw_read` to open full materials by ID. Follow useful IDs in `links`; stop when enough is known. Empty knowledge starts with source investigation. An empty search is not proof that knowledge is absent. Refine the query when needed; do not add a search-only agent or browse the entire graph.
+4. When evidence or source changes are needed, read [Native assignments](references/native-assignments.md) and delegate a concrete bounded task. Pass relevant knowledge IDs so corrections can be returned precisely. Remain responsible for subsequent assignments and the user's result.
+5. Incorporate accepted results and corrections into the affected knowledge yourself. Preserve conditions, version distinctions, sources, and uncertainty. Replace duplicated content instead of adding another summary. Extract a shared material only when total text and navigation overhead justify it; do not claim measured reading savings without observations. Choose links and explicit replacements yourself.
+6. Use the memory tools for material changes. For new or changed content, read [Prepare search](references/prepare-search.md), start its native helper, and submit literal parts. A saved material with pending preparation is not yet fully indexed. Links-only edits and renames need no preparation.
+7. Keep Current concise: update its working step or blocker when that changes; change task meaning only when the user's instruction changes. Checkpoint the exact request-owned durable paths unless the user forbids the local memory commit. Report actual results, unresolved preparation or failures, and the checkpoint when created.
 
-- [Shared memory contract](references/workspace-contract.md)
-- [Context editing rules](references/state-machine.md)
-- [Shared Reader routing](references/agent-routing.md)
-- [Resolve workspace](references/operations/pcw-resolve-workspace.md)
-- [Query context](references/operations/pcw-query-context.md)
-- [Inspect source](references/operations/pcw-inspect-source.md)
-- [Checkpoint memory](references/operations/pcw-checkpoint-memory.md)
+Use [Embedding configuration](references/embeddings.md) only for connection setup, provider changes, threshold configuration, or embedding errors. Tool schemas are authoritative for arguments; the bundled MCP server is `pcw`. If it is unavailable, report the actual setup error and the relevant README instructions.
 
-These are instruction references, not separate skills. Stop with `shared_contract_unavailable` if any required document cannot be read completely; do not reconstruct it from memory. Execution-only instructions belong to the other entrypoint and are not part of this set.
-
-## Update context
-
-1. Resolve the workspace from the current request with `pcw-resolve-workspace`.
-2. For existing memory, use `pcw-query-context`. For missing memory, create it only when the request clearly asks to establish context; follow the context editing rules.
-3. Use `pcw-inspect-source` only when the request needs source information. Read a small precise target directly or use bounded Readers for broad sources.
-4. Write the requested meaning directly to its durable owner under the context editing rules. Saving already supplied text does not call for new research or rewriting.
-5. Use `pcw-checkpoint-memory` unless the user forbids the local memory commit.
-
-Do not add a validation, review, rereading, comparison, or test phase to this workflow. Perform such work only when it is itself requested by the user. Do not create temporary process documents.
-
-## Boundaries and output
-
-Do not execute the prepared task or mutate the source project. Do not independently replace, broaden, or close an active task. Keep the request's authority and explicit constraints.
-
-Return the selected workspace, changed durable paths, the requested context result, unresolved questions, and local memory commit id when one was created. Do not claim completion when an operation reports failure.
+Do not create temporary process documents, raw subagent archives, or a replacement journal. Do not add routine semantic-validation, rereading-for-acceptance, or test phases to memory handling. Checks required by the actual source task still belong to that task. Source facts and agent proposals do not expand task authority.

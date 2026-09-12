@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Run"
-  short_description: "Run the prepared PCW task context"
-  default_prompt: "Use $pcw-run with a natural-language request to execute the prepared current context."
-policy:
-  allow_implicit_invocation: false
