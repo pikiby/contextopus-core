@@ -55,12 +55,19 @@ def server_tools() -> set[str]:
 class PluginContractTests(unittest.TestCase):
     def test_package_versions_and_components_agree(self):
         manifest = json.loads((PLUGIN / ".codex-plugin" / "plugin.json").read_text())
+        portable = json.loads((PLUGIN / "plugin.json").read_text())
         package = tomllib.loads((PLUGIN / "pyproject.toml").read_text())
         self.assertEqual(PLUGIN.name, manifest["name"])
         self.assertEqual(manifest["name"], package["project"]["name"])
         self.assertEqual(manifest["version"], package["project"]["version"])
         self.assertEqual("./skills/", manifest["skills"])
-        self.assertEqual("./.mcp.json", manifest["mcpServers"])
+        self.assertEqual(manifest["name"], portable["name"])
+        self.assertEqual(manifest["version"], portable["version"])
+        self.assertEqual(manifest["interface"], portable["extensions"]["com.openai"]["interface"])
+        self.assertEqual(manifest["skills"], portable["extensions"]["com.openai"]["skills"])
+        self.assertNotIn("mcpServers", manifest)
+        self.assertNotIn("mcpServers", portable["extensions"]["com.openai"])
+        self.assertFalse((PLUGIN / ".mcp.json").exists())
         for document in ("README.md", "PLAN.md"):
             self.assertIn(f"Version {manifest['version']}", (ROOT / document).read_text())
         self.assertTrue((PLUGIN / "pcw_runtime" / "__main__.py").is_file())
@@ -131,19 +138,14 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual("", result.stdout)
             self.assertEqual([], list(Path(directory).iterdir()))
 
-    def test_missing_bootstrap_root_is_actionable(self):
-        config = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["pcw"]
+    def test_portable_mcp_declares_a_host_resolved_script_argument(self):
+        document = json.loads((PLUGIN / "mcp.json").read_text())
+        self.assertEqual("https://agent-plugins.org/schemas/1.0.0/mcp.schema.json", document["$schema"])
+        config = document["mcpServers"]["pcw"]
         self.assertEqual("stdio", config["type"])
-        environment = dict(os.environ)
-        environment.pop("PLUGIN_ROOT", None)
-        environment.pop("CLAUDE_PLUGIN_ROOT", None)
-        result = subprocess.run(
-            [config["command"], *config["args"]], env=environment,
-            text=True, capture_output=True, timeout=10,
-        )
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn("PLUGIN_ROOT", result.stderr)
-        self.assertEqual("", result.stdout)
+        self.assertEqual("sh", config["command"])
+        self.assertEqual(["${PLUGIN_ROOT}/scripts/launch.sh"], config["args"])
+        self.assertNotIn("env", config)
 
     def test_missing_dependencies_fail_with_installation_guidance(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -160,8 +162,7 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual("", result.stdout)
             self.assertFalse((Path(directory) / "packages").exists())
 
-    def test_actual_packaged_stdio_initializes_and_lists_tools(self):
-        config = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["pcw"]
+    def test_launcher_stdio_initializes_and_lists_tools(self):
         check = subprocess.run(
             ["/bin/sh", str(SHELL_LAUNCHER), "--check"],
             env={**os.environ, "PCW_PYTHON": sys.executable},
@@ -176,9 +177,8 @@ class LauncherTests(unittest.TestCase):
             text=True, capture_output=True, timeout=30,
         )
         self.assertEqual(0, imports.returncode, imports.stdout + imports.stderr)
-        cases = ((root_variable, explicit) for root_variable in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT") for explicit in (False, True))
-        for root_variable, explicit in cases:
-            with self.subTest(root_variable=root_variable, explicit=explicit), tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as cache:
+        for explicit in (False, True):
+            with self.subTest(explicit_python=explicit), tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as cache:
                 environment = {
                     **os.environ,
                     "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
@@ -194,9 +194,8 @@ class LauncherTests(unittest.TestCase):
                     environment.pop("PCW_PYTHON", None)
                 active_plugin = Path(cache) / "installed plugin with spaces"
                 shutil.copytree(PLUGIN, active_plugin, ignore=shutil.ignore_patterns("__pycache__", ".venv", "*.egg-info", "build"))
-                environment[root_variable] = str(active_plugin)
                 process = subprocess.Popen(
-                    [config["command"], *config["args"]], env=environment, cwd=directory,
+                    ["/bin/sh", str(active_plugin / "scripts" / "launch.sh")], env=environment, cwd=directory,
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, bufsize=1,
                 )

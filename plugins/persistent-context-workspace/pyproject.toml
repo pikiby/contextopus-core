@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "persistent-context-workspace"
-version = "0.4.1"
+version = "0.4.2"
 description = "Local knowledge memory and LanceDB MCP tools for Codex"
 requires-python = ">=3.11"
 dependencies = ["lancedb>=0.20,<1", "mcp>=1.10,<2", "PyYAML>=6,<7"]

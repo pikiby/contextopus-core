@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.4.1 provides one explicit `$pcw` skill, linked Markdown knowledge, and local semantic search. The primary agent manages memory and task decisions; native subagents investigate real sources, make authorized changes, and prepare literal search parts.
+Version 0.4.2 provides one explicit `$pcw` skill, linked Markdown knowledge, and local semantic search. The primary agent manages memory and task decisions; native subagents investigate real sources, make authorized changes, and prepare literal search parts.
 
 ```text
 $pcw Prepare context for the validator project at /path/to/project. Record its architecture and the task constraints.
@@ -28,7 +28,7 @@ Dependencies can be supplied by the selected interpreter or installed with its p
 
 After consent, install only the reported missing or incompatible distributions and their required dependencies into the agreed destination. Do not override system package protections or create a virtual environment automatically. The `[local]` package extra describes sentence-transformers and its runtime dependencies; it does not download the Qwen weights. Existing remote embedding configurations need only the base runtime requirements. Git commits use your configured Git identity.
 
-The bundled stdio configuration uses `PLUGIN_ROOT`, with `CLAUDE_PLUGIN_ROOT` compatibility, to locate the launcher. The host starts the persistent MCP process; a loaded model is reused for that process's lifetime. Startup never installs packages or downloads weights. Before a first embedding request that would download weights, the agent discloses model/cache and resource scope and requests permission unless already authorized. Refused or failed setup remains a concrete blocker.
+The portable root `plugin.json` and `mcp.json` let Codex resolve `${PLUGIN_ROOT}/scripts/launch.sh` into an absolute script argument before starting `sh`. This is plugin-path substitution, not a shell lookup of an assumed environment variable. The host starts the persistent MCP process; a loaded model is reused for that process's lifetime. Startup never installs packages or downloads weights. Before a first embedding request that would download weights, the agent discloses model/cache and resource scope and requests permission unless already authorized. Refused or failed setup remains a concrete blocker.
 
 For a checkout you intend to register as a local marketplace:
 
@@ -41,7 +41,7 @@ Use the marketplace entry that points to this checkout if already configured. Th
 
 After dependency repair, retry the bundled server through a supported host reload if one is available and verify that PCW tools are exposed. A successful standalone check or stdio handshake does not reconnect an existing failed host connection. If the current host cannot reload, preserve the original task and next action in the conversation and resume them after restarting the host session. A newly installed plugin copy may require a new thread to expose updated skills/tools; that continues the same task without a new assignment. There is no automatic live reconnect promise or separate manual `codex mcp add` step.
 
-The legacy `.codex-plugin/plugin.json` manifest includes the bundled `.mcp.json` configuration. See the [official bundled MCP documentation](https://developers.openai.com/plugins/build/plugins#bundled-mcp-servers-and-lifecycle-hooks) for plugin-host configuration.
+The `.codex-plugin/plugin.json` compatibility metadata remains, but does not redeclare MCP through the legacy `mcpServers` field. Codex loads the portable root manifest and resolves the root `mcp.json` transport. `codex mcp get pcw --json` must show an absolute launcher argument, not an unresolved placeholder. See the [official bundled MCP documentation](https://developers.openai.com/plugins/build/plugins#bundled-mcp-servers-and-lifecycle-hooks) for plugin-host configuration.
 
 ## Memory and task flow
 
@@ -112,5 +112,14 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 ```
 
 The pytest command collects both unittest cases and the runtime's pytest functions; unittest discovery alone is not the full suite. Contract tests cover packaging and fixture links, including real stdio initialization when dependencies are available. Runtime tests exercise local LanceDB with deterministic embedding fixtures. Adapter tests check provider protocols and failure behavior without external credentials or model downloads. These tests do not measure real Qwen quality, latency, or memory consumption. Report any integration skips explicitly.
+
+Before release, install the matching candidate and run the actual Codex-host regression:
+
+```bash
+PCW_TEST_CODEX=1 PCW_TEST_QWEN=1 PYTHONDONTWRITEBYTECODE=1 \
+  python3 -B -m unittest discover -s tests -p test_codex_host.py -v
+```
+
+This requires Codex and already provisioned Qwen weights. It reads the transport from `codex mcp get`, starts an ephemeral Codex app-server thread, checks its MCP tool inventory, and invokes PCW through `mcpServer/tool/call`. The test makes no language-model turns, downloads, installations, or persistent configuration changes; it writes only temporary test knowledge. It needs normal Codex state-directory access. Other configured MCP servers/plugins are disabled only for this test process. The parent process has no manually supplied plugin-root variables. Omitting `PCW_TEST_QWEN=1` skips the embedding case; omitting `PCW_TEST_CODEX=1` skips both host cases. A direct launcher test does not replace this host regression.
 
 Routine memory handling does not add semantic acceptance, source rereading, or tests. Verification required by the actual task still applies.

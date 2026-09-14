@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.4.1 retains one explicit `$pcw` skill and a local Python MCP runtime, and repairs startup without requiring a virtual environment. This is the implementation plan for the approved LanceDB and Qwen3 embedding design. Record architecture changes here before implementation.
+Version 0.4.2 retains one explicit `$pcw` skill and a local Python MCP runtime, and uses portable plugin-path resolution for startup without requiring a virtual environment. This is the implementation plan for the approved LanceDB and Qwen3 embedding design. Record architecture changes here before implementation.
 
 ## Ownership and task authority
 
@@ -50,6 +50,8 @@ Git records Current and knowledge history. Runtime configuration, LanceDB files,
 
 The plugin bundles the runtime, one skill, its conditional references, the declared stdio MCP configuration, and a POSIX shell launcher. The shell accepts an explicit absolute `PCW_PYTHON` or selects `python3` from PATH; it can report missing Python without requiring Python to launch that diagnosis. Runtime code comes from the active plugin copy, including installed cache copies. Reusable dependencies may live in the selected interpreter or a private packages directory reported by readiness checks. That directory contains packages, not a Python environment. No virtual environment, system-package override, dependency installation, or model download is created automatically at startup.
 
+The portable root `plugin.json` selects the supported plugin loader, and root `mcp.json` declares `sh` with `${PLUGIN_ROOT}/scripts/launch.sh` as one argument. Codex resolves the argument before launching the process. The compatibility `.codex-plugin/plugin.json` retains matching metadata but does not redeclare a legacy MCP transport. A shell expression that merely reads `PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` from an assumed environment is not the path-resolution mechanism.
+
 Cheap readiness checks report the selected interpreter, required distributions, version compatibility, pip availability, and exact dependency installation target. Base readiness, local embedding dependencies, deeper imports, and model availability are separate results. Successful startup or dependency checks do not establish that model weights are cached. Before a first download, the primary discloses the selected model, cache destination, and download/storage/compute scope and obtains any still-missing permission.
 
 Dependency repair and a standalone stdio handshake do not establish a live host connection. Retry through a supported host reload only when it is actually available, then verify the host exposes PCW tools. Otherwise preserve the task and its next action in the conversation and resume it after the current host session restarts; do not require a new assignment, fabricate an automatic reconnect, or add a second manual MCP registration.
@@ -61,7 +63,7 @@ Local memory checkpoints cover only the request's intended durable paths unless 
 1. Replace the two entry skills and legacy Controller instructions with one concise natural-language workflow and conditional references.
 2. Implement durable material operations, ID navigation, Current, pending preparation, LanceDB search, provider switching, and Git checkpoints/restoration.
 3. Package persistent stdio startup using existing Python, actionable readiness reports, and consent-based repair of missing dependencies without requiring a virtual environment.
-4. Verify runtime behavior with deterministic adapters and real local LanceDB. Verify adapters without external credentials or model downloads. Verify the actual stdio initialization and tool-list handshake.
+4. Verify runtime behavior with deterministic adapters and real local LanceDB. Verify adapters without external credentials or model downloads. Verify standalone stdio separately from a fresh Codex-host thread that loads the installed plugin and calls PCW tools through Codex. Host tests must use Codex's resolved transport rather than manually injecting plugin-root variables. Exercise cached local Qwen in the opt-in release check without requesting a language-model turn.
 5. Validate skill and plugin metadata and reconcile documentation against implemented tool signatures.
 
 Contract checks cover packaged entrypoints and resolvable references. Startup checks exercise absent Python, missing dependencies, interpreter overrides, and installed paths containing spaces. Runtime tests cover observable memory and search behavior rather than matching instruction wording. Run the complete suite with pytest, which collects both unittest cases and the runtime's pytest functions. Adapter tests cover provider protocols and errors. Real Qwen retrieval quality, target-machine latency and memory use, and long-running multi-session behavior remain separate measurements until actually run.

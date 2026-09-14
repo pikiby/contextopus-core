@@ -33,7 +33,6 @@ class StartupTests(unittest.TestCase):
         (self.plugin / "scripts").mkdir(parents=True)
         for filename in ("launch.sh", "launch.py", "check_runtime.py"):
             shutil.copyfile(SCRIPTS / filename, self.plugin / "scripts" / filename)
-        shutil.copyfile(PLUGIN / ".mcp.json", self.plugin / ".mcp.json")
         runtime = self.plugin / "pcw_runtime"
         runtime.mkdir()
         (runtime / "__init__.py").write_text("")
@@ -62,13 +61,9 @@ class StartupTests(unittest.TestCase):
         self.environment.pop("PLUGIN_ROOT", None)
         self.environment.pop("CLAUDE_PLUGIN_ROOT", None)
 
-    def launch(self, *arguments, environment=None, via_mcp=False, input=None):
+    def launch(self, *arguments, environment=None, input=None):
         environment = environment if environment is not None else self.environment
-        if via_mcp:
-            config = json.loads((self.plugin / ".mcp.json").read_text())["mcpServers"]["pcw"]
-            command = [config["command"], *config["args"], *arguments]
-        else:
-            command = ["/bin/sh", str(self.plugin / "scripts" / "launch.sh"), *arguments]
+        command = ["/bin/sh", str(self.plugin / "scripts" / "launch.sh"), *arguments]
         return subprocess.run(command, env=environment, cwd=self.project, input=input,
                               text=True, capture_output=True, timeout=15)
 
@@ -101,24 +96,22 @@ class StartupTests(unittest.TestCase):
         ):
             self.distribution(name, module, version, body=body)
 
-    def test_no_python_is_diagnosed_from_actual_mcp_command(self):
-        environment = {**self.environment, "PATH": str(self.root / "absent-bin"), "PLUGIN_ROOT": str(self.plugin)}
+    def test_no_python_is_diagnosed_by_launcher(self):
+        environment = {**self.environment, "PATH": str(self.root / "absent-bin")}
         environment.pop("PCW_PYTHON")
-        result = self.launch("--check", environment=environment, via_mcp=True)
+        result = self.launch("--check", environment=environment)
         self.assertEqual(2, result.returncode)
         self.assertIn("No python3", result.stderr)
         self.assertEqual("", result.stdout)
         self.assertFalse(self.packages.exists())
 
-    def test_explicit_python_needs_no_python3_on_path_and_both_roots_work(self):
-        for variable in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
-            with self.subTest(variable=variable):
-                environment = {**self.environment, "PATH": str(self.root / "absent-bin"), variable: str(self.plugin)}
-                result = self.launch("--check", environment=environment, via_mcp=True)
-                self.assertEqual(3, result.returncode, result.stderr)
-                report = json.loads(result.stdout)
-                self.assertEqual(str(self.plugin), report["plugin_root"])
-                self.assertEqual("missing_dependencies", report["status"])
+    def test_explicit_python_needs_no_python3_or_plugin_root_environment(self):
+        environment = {**self.environment, "PATH": str(self.root / "absent-bin")}
+        result = self.launch("--check", environment=environment)
+        self.assertEqual(3, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(str(self.plugin), report["plugin_root"])
+        self.assertEqual("missing_dependencies", report["status"])
 
     def test_path_python_is_used_without_looking_for_a_venv(self):
         binary_directory = self.root / "bin"
@@ -266,8 +259,8 @@ class StartupTests(unittest.TestCase):
             (stale / "__init__.py").write_text("raise RuntimeError('OLD_OR_PROJECT_RUNTIME')\n")
         (self.project / "json.py").write_text("raise RuntimeError('PROJECT_STDLIB_SHADOW')\n")
         (self.project / "sitecustomize.py").write_text("raise RuntimeError('PROJECT_SITECUSTOMIZE')\n")
-        environment = {**self.environment, "PYTHONPATH": str(self.project), "PLUGIN_ROOT": str(self.plugin)}
-        result = self.launch(environment=environment, via_mcp=True, input="first\nsecond\n")
+        environment = {**self.environment, "PYTHONPATH": str(self.project)}
+        result = self.launch(environment=environment, input="first\nsecond\n")
         self.assertEqual(0, result.returncode, result.stderr)
         outputs = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(["first", "second"], [item["input"] for item in outputs])

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "persistent-context-workspace",
+  "version": "0.4.2",
+  "description": "Linked project memory with local semantic search and bounded agent work",
+  "extensions": {
+    "com.openai": {
+      "skills": "./skills/",
+      "interface": {
+        "displayName": "Persistent Context Workspace",
+        "shortDescription": "Persistent external context for long-running work.",
+        "longDescription": "Use one PCW skill to maintain linked knowledge, search it locally, and coordinate bounded source work.",
+        "developerName": "pikiby",
+        "category": "Productivity",
+        "capabilities": [
+          "Interactive",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use $pcw to prepare project knowledge and the current task.",
+          "Use $pcw to continue the task using existing project memory."
+        ]
+      }
+    }
+  }
+}
