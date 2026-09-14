@@ -1,12 +1,14 @@
 # Persistent Context Workspace
 
-Version 0.4.0 introduces one explicit `$pcw` skill and a local Python MCP runtime. This is the implementation plan for the approved LanceDB and Qwen3 embedding design. Record architecture changes here before implementation.
+Version 0.4.1 retains one explicit `$pcw` skill and a local Python MCP runtime, and repairs startup without requiring a virtual environment. This is the implementation plan for the approved LanceDB and Qwen3 embedding design. Record architecture changes here before implementation.
 
 ## Ownership and task authority
 
 The primary agent remains the user's collaborator. It searches and reads knowledge, defines bounded assignments, accepts returned evidence, writes durable content, removes duplication, and chooses navigation links. Native subagents investigate real sources and make authorized source changes. They return results and corrections identified by the knowledge IDs supplied with their assignments.
 
 A request to prepare or refine context authorizes memory work and necessary read-only investigation. It does not execute a task recorded in Current. An explicit execution or continuation request includes the necessary preparation; there is no second launch command or separate Controller.
+
+The primary checks runtime readiness before loading task-specific references or delegating source work. Missing Python or dependencies trigger a concrete installation proposal and permission request unless the same installation is already authorized. After approval, install the missing requirements, repeat readiness checks, and continue the same user task. Refusal, denied execution, or an installation failure leaves an explicit blocker; it does not establish that memory or a checkpoint was saved.
 
 A separate native helper divides supplied knowledge content into literal semantic parts for search. It does not inspect external files, summarize, infer missing facts, choose links, or compact knowledge. The Python runtime requests this preparation through tool results; the host agent starts the helper. Python does not spawn native agents.
 
@@ -46,7 +48,11 @@ Changing vector compatibility rebuilds into an inactive table from stored litera
 
 Git records Current and knowledge history. Runtime configuration, LanceDB files, caches, credentials, and locks are excluded. Restoration and reconciliation make the active search representation match restored knowledge; missing or changed parts return to preparation instead of reusing stale vectors. Physical database cleanup is maintenance, not a requirement for every mutation. No separate seven-day index archive, source-checksum freshness scheme, daemon, or operation journal is introduced.
 
-The plugin bundles the runtime, one skill, its conditional references, a stdio configuration, and a launcher. Dependencies are installed explicitly into an isolated environment. The launcher resolves a dedicated interpreter and imports the runtime from the active plugin copy, including installed cache copies. It never installs dependencies or downloads a model at process startup. The embedding model is obtained only on a subsequent embedding request under the selected connection policy.
+The plugin bundles the runtime, one skill, its conditional references, the declared stdio MCP configuration, and a POSIX shell launcher. The shell accepts an explicit absolute `PCW_PYTHON` or selects `python3` from PATH; it can report missing Python without requiring Python to launch that diagnosis. Runtime code comes from the active plugin copy, including installed cache copies. Reusable dependencies may live in the selected interpreter or a private packages directory reported by readiness checks. That directory contains packages, not a Python environment. No virtual environment, system-package override, dependency installation, or model download is created automatically at startup.
+
+Cheap readiness checks report the selected interpreter, required distributions, version compatibility, pip availability, and exact dependency installation target. Base readiness, local embedding dependencies, deeper imports, and model availability are separate results. Successful startup or dependency checks do not establish that model weights are cached. Before a first download, the primary discloses the selected model, cache destination, and download/storage/compute scope and obtains any still-missing permission.
+
+Dependency repair and a standalone stdio handshake do not establish a live host connection. Retry through a supported host reload only when it is actually available, then verify the host exposes PCW tools. Otherwise preserve the task and its next action in the conversation and resume it after the current host session restarts; do not require a new assignment, fabricate an automatic reconnect, or add a second manual MCP registration.
 
 Local memory checkpoints cover only the request's intended durable paths unless the user forbids them. Source commits and publishing remain separately authorized actions. Multi-file failures are reported with partial effects; Git does not undo external actions or recover lost agent context.
 
@@ -54,11 +60,11 @@ Local memory checkpoints cover only the request's intended durable paths unless 
 
 1. Replace the two entry skills and legacy Controller instructions with one concise natural-language workflow and conditional references.
 2. Implement durable material operations, ID navigation, Current, pending preparation, LanceDB search, provider switching, and Git checkpoints/restoration.
-3. Package persistent stdio startup with actionable dependency failures and explicit isolated installation.
+3. Package persistent stdio startup using existing Python, actionable readiness reports, and consent-based repair of missing dependencies without requiring a virtual environment.
 4. Verify runtime behavior with deterministic adapters and real local LanceDB. Verify adapters without external credentials or model downloads. Verify the actual stdio initialization and tool-list handshake.
 5. Validate skill and plugin metadata and reconcile documentation against implemented tool signatures.
 
-Contract checks cover packaged entrypoints and resolvable references. Runtime tests cover observable memory and search behavior rather than matching instruction wording. Adapter tests cover provider protocols and errors. Real Qwen retrieval quality, target-machine latency and memory use, and long-running multi-session behavior remain separate measurements until actually run.
+Contract checks cover packaged entrypoints and resolvable references. Startup checks exercise absent Python, missing dependencies, interpreter overrides, and installed paths containing spaces. Runtime tests cover observable memory and search behavior rather than matching instruction wording. Run the complete suite with pytest, which collects both unittest cases and the runtime's pytest functions. Adapter tests cover provider protocols and errors. Real Qwen retrieval quality, target-machine latency and memory use, and long-running multi-session behavior remain separate measurements until actually run.
 
 Legacy memory is adopted explicitly: keep existing IDs and provenance, assign IDs to records that lack them, and convert filename-based navigation deliberately. New navigation metadata does not erase meaningful statements in legacy relation prose. A copied Markdown folder is not assumed to be already indexed.
 

@@ -2,10 +2,11 @@
   "mcpServers": {
     "pcw": {
       "type": "stdio",
-      "command": "python3",
+      "command": "/bin/sh",
       "args": [
         "-c",
-        "import os, runpy; from pathlib import Path; root = os.environ.get('PLUGIN_ROOT') or os.environ.get('CLAUDE_PLUGIN_ROOT'); root or exit('PCW requires PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT from the plugin host.'); runpy.run_path(str(Path(root) / 'scripts' / 'launch.py'), run_name='__main__')"
+        "pcw_root=${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}; case \"$pcw_root\" in /*) ;; *) printf '%s\\n' 'PCW requires an absolute PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT from the plugin host.' >&2; exit 2 ;; esac; if [ ! -r \"$pcw_root/scripts/launch.sh\" ]; then printf 'PCW bundled launcher is unavailable under: %s\\n' \"$pcw_root\" >&2; exit 2; fi; exec /bin/sh \"$pcw_root/scripts/launch.sh\" \"$@\"",
+        "pcw"
       ]
     }
   }

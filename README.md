@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.4.0 provides one explicit `$pcw` skill, linked Markdown knowledge, and local semantic search. The primary agent manages memory and task decisions; native subagents investigate real sources, make authorized changes, and prepare literal search parts.
+Version 0.4.1 provides one explicit `$pcw` skill, linked Markdown knowledge, and local semantic search. The primary agent manages memory and task decisions; native subagents investigate real sources, make authorized changes, and prepare literal search parts.
 
 ```text
 $pcw Prepare context for the validator project at /path/to/project. Record its architecture and the task constraints.
@@ -12,21 +12,23 @@ Everything after `$pcw` is natural language. Preparing or refining context does 
 
 ## Local setup
 
-The runtime requires Python 3.11 or newer on a POSIX system, Git for memory checkpoints, and the package dependencies. LanceDB is embedded; no database server is needed. Install dependencies explicitly into a dedicated virtual environment:
+The runtime requires an existing Python 3.11 or newer on a POSIX system, Git for memory checkpoints, and the package dependencies. LanceDB is embedded; no database server or virtual environment is required. The primary agent checks setup when `$pcw` is invoked, requests any missing installation permission with the exact scope, repairs missing requirements after approval, and continues the original task.
+
+Use the active plugin directory, which can be a checkout or an installed cache copy:
 
 ```bash
-pcw_repo=/absolute/path/to/persistent-context-workspace
-pcw_venv="${XDG_DATA_HOME:-$HOME/.local/share}/persistent-context-workspace/venv"
-python3 -m venv "$pcw_venv"
-"$pcw_venv/bin/python" -m pip install "$pcw_repo/plugins/persistent-context-workspace[local]"
-"$pcw_venv/bin/python" "$pcw_repo/plugins/persistent-context-workspace/scripts/launch.py" --check
+pcw_plugin=/absolute/path/to/persistent-context-workspace/plugins/persistent-context-workspace
+/bin/sh "$pcw_plugin/scripts/launch.sh" --check
+/bin/sh "$pcw_plugin/scripts/launch.sh" --check-local
 ```
 
-The `[local]` extra installs sentence-transformers and its model runtime dependencies. It does not pre-download the Qwen model. When explicitly using an existing remote embedding endpoint, omit `[local]`; the base install supplies LanceDB and MCP. Git commits use your configured Git identity.
+The shell launcher selects an absolute `PCW_PYTHON` when configured, otherwise `python3` from PATH. An explicit interpreter works even when `python3` is absent. The cheap checks report Python and dependency versions, missing or incompatible requirements, pip availability, and `dependency_install_target`. `--check` covers the MCP runtime; `--check-local` also covers local embedding dependencies. Neither imports the model runtime nor proves that model weights are cached. Deeper import checks are available for installation verification; see [Runtime setup](plugins/persistent-context-workspace/skills/pcw/references/setup.md).
 
-The launcher selects `PCW_PYTHON` when set to an absolute executable path. Otherwise it uses the dedicated environment above. It imports runtime code from the active plugin copy, including a Codex cache copy, while reusing that environment's dependencies. Dependency upgrades require an explicit install command again. A source-checkout `.venv` is not silently assumed to exist inside the installed plugin.
+Dependencies can be supplied by the selected interpreter or installed with its pip into the reported private packages directory using `--target`. This directory contains packages, not a Python executable or a virtual environment. `PCW_DEPENDENCIES` can select another absolute packages directory; the default is under the user's data directory and is separated by Python ABI and platform. The launcher imports active plugin code first, then that target. Python runs with `-E -P -B` to exclude the working directory and `PYTHONPATH` while preserving its normal installed-package and virtual-environment policy. Existing user site-packages remain available when that policy allows them; `PYTHONNOUSERSITE` is honored. Run checks through the launcher to see what the runtime actually uses.
 
-The bundled stdio configuration uses `PLUGIN_ROOT`, with `CLAUDE_PLUGIN_ROOT` compatibility, to locate the launcher. The host starts the process when needed; the model stays loaded only for that process's lifetime. Startup never installs packages or downloads model weights. `--check` checks imports without loading the model; the first embedding request may download weights unless offline mode is explicitly configured.
+After consent, install only the reported missing or incompatible distributions and their required dependencies into the agreed destination. Do not override system package protections or create a virtual environment automatically. The `[local]` package extra describes sentence-transformers and its runtime dependencies; it does not download the Qwen weights. Existing remote embedding configurations need only the base runtime requirements. Git commits use your configured Git identity.
+
+The bundled stdio configuration uses `PLUGIN_ROOT`, with `CLAUDE_PLUGIN_ROOT` compatibility, to locate the launcher. The host starts the persistent MCP process; a loaded model is reused for that process's lifetime. Startup never installs packages or downloads weights. Before a first embedding request that would download weights, the agent discloses model/cache and resource scope and requests permission unless already authorized. Refused or failed setup remains a concrete blocker.
 
 For a checkout you intend to register as a local marketplace:
 
@@ -35,7 +37,9 @@ codex plugin marketplace add /absolute/path/to/persistent-context-workspace
 codex plugin add persistent-context-workspace@persistent-context-workspace
 ```
 
-Use the marketplace entry that points to this checkout if already configured. Start a new thread after installation or updating the installed copy. These commands are deployment instructions, not steps performed by the runtime. The repository also remains installable from its published GitHub branch; unpushed local changes are not present in that branch.
+Use the marketplace entry that points to this checkout if already configured. These commands are deployment instructions, not steps performed by the runtime. The repository also remains installable from its published GitHub branch; unpushed local changes are not present in that branch.
+
+After dependency repair, retry the bundled server through a supported host reload if one is available and verify that PCW tools are exposed. A successful standalone check or stdio handshake does not reconnect an existing failed host connection. If the current host cannot reload, preserve the original task and next action in the conversation and resume them after restarting the host session. A newly installed plugin copy may require a new thread to expose updated skills/tools; that continues the same task without a new assignment. There is no automatic live reconnect promise or separate manual `codex mcp add` step.
 
 The legacy `.codex-plugin/plugin.json` manifest includes the bundled `.mcp.json` configuration. See the [official bundled MCP documentation](https://developers.openai.com/plugins/build/plugins#bundled-mcp-servers-and-lifecycle-hooks) for plugin-host configuration.
 
@@ -97,9 +101,16 @@ The plugin contains the single skill and conditional references, manifest and st
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p test_contracts.py -v
-"$pcw_venv/bin/python" -m unittest discover -s tests -v
 ```
 
-Contract tests cover packaging and fixture links; their real stdio handshake uses the installed runtime dependencies. Runtime tests exercise local LanceDB with deterministic embedding fixtures. Adapter tests check provider protocols and failure behavior without external credentials or model downloads. Those tests do not measure real Qwen quality, latency, or memory consumption. Run the complete suite in the installed environment so integration tests are not skipped.
+For the full suite, install the `[test]` extra or pytest in the selected development Python or its private packages directory. From the checkout root, set `pcw_plugin` to its plugin directory and copy `python.executable` and `dependency_install_target` from that launcher's `--check` report into `pcw_python` and `pcw_packages`. Include both paths when starting pytest so an installation using only `--target` works:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+  PYTHONPATH="$pcw_plugin:$pcw_packages" PCW_DEPENDENCIES="$pcw_packages" \
+  "$pcw_python" -m pytest tests -q -p no:cacheprovider
+```
+
+The pytest command collects both unittest cases and the runtime's pytest functions; unittest discovery alone is not the full suite. Contract tests cover packaging and fixture links, including real stdio initialization when dependencies are available. Runtime tests exercise local LanceDB with deterministic embedding fixtures. Adapter tests check provider protocols and failure behavior without external credentials or model downloads. These tests do not measure real Qwen quality, latency, or memory consumption. Report any integration skips explicitly.
 
 Routine memory handling does not add semantic acceptance, source rereading, or tests. Verification required by the actual task still applies.

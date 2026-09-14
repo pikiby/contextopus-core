@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import importlib.util
 import json
 import os
 import re
@@ -22,6 +21,7 @@ PLUGIN = ROOT / "plugins" / "persistent-context-workspace"
 SKILL = PLUGIN / "skills" / "pcw"
 FIXTURE = ROOT / "tests" / "fixtures" / "valid-memory"
 LAUNCHER = PLUGIN / "scripts" / "launch.py"
+SHELL_LAUNCHER = PLUGIN / "scripts" / "launch.sh"
 
 
 def frontmatter(path: Path) -> dict:
@@ -65,6 +65,7 @@ class PluginContractTests(unittest.TestCase):
             self.assertIn(f"Version {manifest['version']}", (ROOT / document).read_text())
         self.assertTrue((PLUGIN / "pcw_runtime" / "__main__.py").is_file())
         self.assertTrue(LAUNCHER.is_file())
+        self.assertTrue(SHELL_LAUNCHER.is_file())
 
     def test_existing_marketplace_resolves_same_plugin(self):
         marketplace = json.loads((ROOT / ".agents" / "plugins" / "marketplace.json").read_text())
@@ -117,27 +118,16 @@ class PluginContractTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        specification = importlib.util.spec_from_file_location("pcw_launcher_contract", LAUNCHER)
-        cls.launcher = importlib.util.module_from_spec(specification)
-        specification.loader.exec_module(cls.launcher)
-
-    def test_interpreter_override_and_stable_environment(self):
-        self.assertEqual(Path("/custom/python"), self.launcher.interpreter_path({"PCW_PYTHON": "/custom/python"}))
-        expected = Path("/custom/data/persistent-context-workspace/venv/bin/python")
-        self.assertEqual(expected, self.launcher.interpreter_path({"XDG_DATA_HOME": "/custom/data"}))
-
     def test_missing_interpreter_fails_without_creating_environment(self):
         with tempfile.TemporaryDirectory() as directory:
             missing = Path(directory) / "not-installed" / "bin" / "python"
             environment = {**os.environ, "PCW_PYTHON": str(missing)}
             result = subprocess.run(
-                [sys.executable, str(LAUNCHER)], env=environment,
+                ["/bin/sh", str(SHELL_LAUNCHER)], env=environment,
                 text=True, capture_output=True, timeout=10,
             )
             self.assertEqual(2, result.returncode)
-            self.assertIn("Install the plugin dependencies", result.stderr)
+            self.assertIn(str(missing), result.stderr)
             self.assertEqual("", result.stdout)
             self.assertEqual([], list(Path(directory).iterdir()))
 
@@ -148,7 +138,7 @@ class LauncherTests(unittest.TestCase):
         environment.pop("PLUGIN_ROOT", None)
         environment.pop("CLAUDE_PLUGIN_ROOT", None)
         result = subprocess.run(
-            [sys.executable, *config["args"]], env=environment,
+            [config["command"], *config["args"]], env=environment,
             text=True, capture_output=True, timeout=10,
         )
         self.assertNotEqual(0, result.returncode)
@@ -160,39 +150,53 @@ class LauncherTests(unittest.TestCase):
             isolated = Path(directory) / "isolated"
             venv.EnvBuilder(with_pip=False).create(isolated)
             environment = {**os.environ, "PCW_PYTHON": str(isolated / "bin" / "python")}
+            environment["PCW_DEPENDENCIES"] = str(Path(directory) / "packages")
             result = subprocess.run(
-                [sys.executable, str(LAUNCHER)], env=environment,
+                ["/bin/sh", str(SHELL_LAUNCHER)], env=environment,
                 text=True, capture_output=True, timeout=10,
             )
-            self.assertEqual(2, result.returncode)
-            self.assertIn("Install the plugin package", result.stderr)
+            self.assertEqual(3, result.returncode)
+            self.assertIn("mcp", result.stderr)
             self.assertEqual("", result.stdout)
+            self.assertFalse((Path(directory) / "packages").exists())
 
-    @unittest.skipUnless(
-        importlib.util.find_spec("mcp") and importlib.util.find_spec("lancedb"),
-        "Run in the installed runtime environment for the real stdio integration check",
-    )
     def test_actual_packaged_stdio_initializes_and_lists_tools(self):
         config = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["pcw"]
-        for root_variable in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
-            with self.subTest(root_variable=root_variable), tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as cache:
+        check = subprocess.run(
+            ["/bin/sh", str(SHELL_LAUNCHER), "--check"],
+            env={**os.environ, "PCW_PYTHON": sys.executable},
+            text=True, capture_output=True, timeout=30,
+        )
+        if check.returncode == 3:
+            self.skipTest("Selected runtime dependencies are unavailable; real stdio integration was not run")
+        self.assertEqual(0, check.returncode, check.stdout + check.stderr)
+        imports = subprocess.run(
+            ["/bin/sh", str(SHELL_LAUNCHER), "--check-imports"],
+            env={**os.environ, "PCW_PYTHON": sys.executable},
+            text=True, capture_output=True, timeout=30,
+        )
+        self.assertEqual(0, imports.returncode, imports.stdout + imports.stderr)
+        cases = ((root_variable, explicit) for root_variable in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT") for explicit in (False, True))
+        for root_variable, explicit in cases:
+            with self.subTest(root_variable=root_variable, explicit=explicit), tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as cache:
                 environment = {
                     **os.environ,
-                    "PCW_PYTHON": sys.executable,
+                    "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
                     "HF_HUB_OFFLINE": "1",
                     "TRANSFORMERS_OFFLINE": "1",
                     "PYTHONDONTWRITEBYTECODE": "1",
                 }
                 environment.pop("PLUGIN_ROOT", None)
                 environment.pop("CLAUDE_PLUGIN_ROOT", None)
-                if root_variable == "CLAUDE_PLUGIN_ROOT":
-                    active_plugin = Path(cache) / "installed plugin"
-                    shutil.copytree(PLUGIN, active_plugin, ignore=shutil.ignore_patterns("__pycache__", ".venv", "*.egg-info"))
+                if explicit:
+                    environment["PCW_PYTHON"] = sys.executable
                 else:
-                    active_plugin = PLUGIN
+                    environment.pop("PCW_PYTHON", None)
+                active_plugin = Path(cache) / "installed plugin with spaces"
+                shutil.copytree(PLUGIN, active_plugin, ignore=shutil.ignore_patterns("__pycache__", ".venv", "*.egg-info", "build"))
                 environment[root_variable] = str(active_plugin)
                 process = subprocess.Popen(
-                    [sys.executable, *config["args"]], env=environment, cwd=directory,
+                    [config["command"], *config["args"]], env=environment, cwd=directory,
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, bufsize=1,
                 )
