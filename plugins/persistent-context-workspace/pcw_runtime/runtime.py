@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import dataclasses
+from datetime import datetime, timezone
 from array import array
 import fcntl
 import hashlib
@@ -82,7 +83,7 @@ _FRONT = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.S)
 
 def _id(value: str) -> str:
     if not isinstance(value, str) or not _ID.fullmatch(value):
-        raise PCWError("Material ID must be an exact UUID or existing safe slug")
+        raise PCWError("Material ID must be an exact safe filename")
     return value
 
 
@@ -186,6 +187,11 @@ class PCWRuntime:
         self._assert_safe(path)
         return path
 
+    @staticmethod
+    def _material_id(path: Path) -> str:
+        """The filename, including .md, is the sole material identity."""
+        return _id(path.name)
+
     def _write(self, path: Path, text: str):
         self._assert_safe(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -261,7 +267,12 @@ class PCWRuntime:
     def _scan(self):
         self.materials: dict[str, Material] = {}
         self.unregistered = []
+        self._legacy_ids: dict[str, str] = {}
+        self._legacy_id_paths: set[str] = set()
+        self._legacy_link_paths: set[str] = set()
         cache = {}
+        found = []
+        found_ids = set()
         self._assert_safe(self.knowledge)
         for path in sorted(self.knowledge.rglob("*.md")):
             if any(part.startswith(".") for part in path.relative_to(self.knowledge).parts):
@@ -279,16 +290,33 @@ class PCWRuntime:
                 metadata, body = _parse(path.read_bytes().decode("utf-8"))
                 revision = _revision(body)
             cache[relative] = (signature, copy.deepcopy(metadata), body, revision)
-            if "id" not in metadata or "links" not in metadata:
-                self.unregistered.append({"path": relative, "reason": "explicit pcw_adopt required for id/links metadata"})
-                continue
-            ident = _id(metadata["id"])
-            links = _unique_links(metadata["links"], ident)
-            if links != metadata["links"]:
-                self.unregistered.append({"path": relative, "reason": "explicit pcw_adopt required to normalize links"})
-                continue
-            if ident in self.materials:
-                raise PCWError(f"Duplicate material ID: {ident}")
+            ident = self._material_id(path)
+            if ident in found_ids:
+                raise PCWError(f"Duplicate material filename ID: {ident}")
+            found_ids.add(ident)
+            # A legacy id is retained only as migration input. It is never used
+            # to address the material during normal runtime operations.
+            legacy_id = metadata.get("id")
+            if legacy_id is not None:
+                legacy_id = _id(legacy_id)
+                previous = self._legacy_ids.get(legacy_id)
+                if previous is not None and previous != ident:
+                    raise PCWError(f"Duplicate legacy material ID: {legacy_id}")
+                self._legacy_ids[legacy_id] = ident
+                self._legacy_id_paths.add(relative)
+            found.append((ident, relative, metadata, body, revision))
+
+        for ident, relative, metadata, body, revision in found:
+            raw_links = metadata.get("links", [])
+            if not isinstance(raw_links, list):
+                raise PCWError(f"links must be a list in {relative}")
+            canonical_links = _unique_links(
+                [self._legacy_ids.get(_id(value), _id(value)) for value in raw_links], ident)
+            if canonical_links != raw_links:
+                self._legacy_link_paths.add(relative)
+            # Missing links are a valid empty navigation list. Do not write the
+            # file merely because it is an older plain Markdown material.
+            metadata["links"] = canonical_links
             material = Material.__new__(Material)
             material.id, material.path, material.metadata = ident, relative, metadata
             material.content, material.revision = body, revision
@@ -304,7 +332,10 @@ class PCWRuntime:
         return query.limit(None).to_list()
 
     def _delete_rows(self, ident: str):
-        self.table.delete(f"material_id = '{_id(ident)}'")
+        _id(ident)
+        aliases = [ident] + [old for old, target in self._legacy_ids.items() if target == ident]
+        for value in dict.fromkeys(aliases):
+            self.table.delete(f"material_id = '{_id(value)}'")
 
     def _reconcile(self):
         """Reconcile saved memory only, including externally restored Git content."""
@@ -314,14 +345,15 @@ class PCWRuntime:
         rows = self._rows(["material_id", "revision", "path"])
         changed, paths, indexed = set(), {}, set()
         for row in rows:
-            ident = row["material_id"]
+            stored_id = row["material_id"]
+            ident = self._legacy_ids.get(stored_id, stored_id)
             material = self.materials.get(ident)
             if material is None or material.revision != row["revision"]:
-                changed.add(ident)
+                changed.add(stored_id)
             else:
                 indexed.add(ident)
                 if row["path"] != material.path:
-                    paths[ident] = material.path
+                    paths[stored_id] = material.path
         for ident in changed:
             self._delete_rows(ident)
         for ident, path in paths.items():
@@ -349,6 +381,9 @@ class PCWRuntime:
                   "index_status": "pending_preparation" if material.id in self.pending else "indexed"}
         if content:
             result["content"] = material.content
+        for field in ("saved_at", "executor_session_id"):
+            if field in material.metadata:
+                result[field] = material.metadata[field]
         return result
 
     def status(self):
@@ -373,14 +408,81 @@ class PCWRuntime:
         with self._guard():
             return self._result(self._material(material_id), content=True)
 
+    def save_subagent_result(self, material_name: str, result: str, executor_session_id: str,
+                             expected_previous_revision: str | None = None):
+        """Persist one returned subagent result without changing its Markdown body."""
+        with self._guard():
+            if not isinstance(result, str):
+                raise PCWError("Subagent result must be a text string")
+            if not isinstance(executor_session_id, str) or not executor_session_id.strip():
+                raise PCWError("executor_session_id is required and must be the actual executor session ID")
+            if not isinstance(material_name, str) or "/" in material_name or "\\" in material_name:
+                raise PCWError("material_name must be one safe Markdown filename")
+            target = self._knowledge_path(material_name)
+            ident = self._material_id(target)
+            existing = self.materials.get(ident)
+            if existing is not None:
+                if (existing.content == result and
+                        existing.metadata.get("executor_session_id") == executor_session_id and
+                        isinstance(existing.metadata.get("saved_at"), str)):
+                    return {**self._result(existing, content=False), "status": "already_saved"}
+                if expected_previous_revision is None:
+                    # Keep the existing occupied-name behavior for callers that
+                    # did not explicitly opt into a CAS raw-result revision.
+                    raise PCWError(
+                        f"Material filename {ident} is already occupied by a different result or executor session; "
+                        "choose another material_name")
+                if not isinstance(existing.metadata.get("saved_at"), str):
+                    raise PCWError(
+                        f"Material filename {ident} is not a saved raw subagent result and cannot be revised")
+                if existing.metadata.get("executor_session_id") != executor_session_id:
+                    raise PCWError(
+                        f"Material filename {ident} is already occupied by a different executor session")
+                if not isinstance(expected_previous_revision, str) or not expected_previous_revision:
+                    raise PCWError(
+                        f"Material filename {ident} is already occupied by a different result; "
+                        "provide its expected_previous_revision to save a new raw result")
+                if existing.revision != expected_previous_revision:
+                    raise PCWError("Saved subagent result changed since it was read; read it again")
+                metadata = copy.deepcopy(existing.metadata)
+                metadata["saved_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                # The executor was compared above. Set it explicitly so the
+                # persisted metadata exactly identifies the new raw return.
+                metadata["executor_session_id"] = executor_session_id
+                replacement = Material(existing.id, existing.path, metadata, result)
+                # Write the authoritative body first. If it fails, the previous
+                # body, metadata, revision, and search rows remain usable.
+                self._save(replacement)
+                self.materials[ident] = replacement
+                self.pending.add(ident)
+                # A successful body revision must never leave its prior vector
+                # rows visible while literal semantic preparation is pending.
+                self._delete_rows(ident)
+                return {**self._result(replacement), "status": "updated"}
+            if target.exists():
+                # A path that scan did not register must never be overwritten by
+                # a primary save just because its basename looks available.
+                raise PCWError(f"Material filename {ident} already exists and cannot be overwritten")
+            saved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            material = Material(ident, target.relative_to(self.root).as_posix(), {
+                "links": [], "saved_at": saved_at, "executor_session_id": executor_session_id,
+            }, result)
+            self._save(material)
+            self.materials[ident] = material
+            if result.strip():
+                self.pending.add(ident)
+            return {**self._result(material), "status": "saved"}
+
     def create(self, path: str, content: str, links: list[str] | None = None):
         with self._guard():
             target = self._knowledge_path(path)
             if target.exists():
                 raise PCWError("Knowledge path already exists; use update or explicit adoption")
-            ident = str(uuid.uuid4())
+            ident = self._material_id(target)
+            if ident in self.materials:
+                raise PCWError(f"Material filename ID already exists: {ident}")
             material = Material(ident, target.relative_to(self.root).as_posix(),
-                                {"id": ident, "links": self._check_links(links or [], ident)}, content)
+                                {"links": self._check_links(links or [], ident)}, content)
             self._save(material)
             self.materials[ident] = material
             if content.strip():
@@ -391,18 +493,86 @@ class PCWRuntime:
         with self._guard():
             target = self._knowledge_path(path)
             metadata, content = _parse(target.read_bytes().decode("utf-8"))
-            ident = _id(metadata["id"]) if "id" in metadata else str(uuid.uuid4())
+            ident = self._material_id(target)
             relative = target.relative_to(self.root).as_posix()
             if ident in self.materials and self.materials[ident].path != relative:
-                raise PCWError("ID belongs to another material")
-            metadata["id"] = ident
+                raise PCWError(f"Material filename ID already exists: {ident}")
+            # id was an old transport identity. Keep every other metadata field,
+            # but remove it when this file is explicitly adopted.
+            metadata.pop("id", None)
             # Do not infer or reinterpret legacy free-text links.
-            metadata["links"] = _unique_links(metadata.get("links", []), ident)
+            raw_links = metadata.get("links", [])
+            if not isinstance(raw_links, list):
+                raise PCWError("links must be a list of exact IDs")
+            metadata["links"] = _unique_links(
+                [self._legacy_ids.get(_id(value), _id(value)) for value in raw_links], ident)
             material = Material(ident, relative, metadata, content)
             self._save(material)
             self._scan()
             self._reconcile()
             return self._result(material)
+
+    def migrate_legacy_ids(self):
+        """Explicitly replace legacy YAML UUID identities with filename identities.
+
+        This preserves bodies and existing LanceDB vectors. It is deliberately a
+        separate operation: merely opening a workspace never rewrites knowledge.
+        """
+        with self._guard():
+            mappings: dict[str, str] = {}
+            for material in self.materials.values():
+                if "id" not in material.metadata:
+                    continue
+                old = _id(material.metadata["id"])
+                previous = mappings.get(old)
+                if previous is not None and previous != material.id:
+                    raise PCWError(f"Duplicate legacy material ID: {old}")
+                mappings[old] = material.id
+            # Never acknowledge a migration that leaves an old, unknown ID in
+            # navigation. Keep the legacy file unchanged so the caller can
+            # resolve the intended target and retry explicitly.
+            for material in self.materials.values():
+                missing = [link for link in material.links if link not in self.materials]
+                if missing:
+                    raise PCWError(
+                        f"Legacy migration cannot resolve links in {material.id}: "
+                        + ", ".join(missing))
+            if not mappings and not self._legacy_link_paths:
+                return {"status": "already_migrated", "migrated": [], "index_updated": []}
+
+            applied = []
+            index_updated = []
+            try:
+                # Update existing search rows in place: their text and vectors
+                # remain untouched, only the material address changes.
+                for old, new in mappings.items():
+                    material = self._material(new)
+                    if old != new:
+                        self.table.update(where=f"material_id = '{_id(old)}'",
+                                          values={"material_id": new, "path": material.path})
+                        index_updated.append(f"index:{old}:{new}")
+                for material in self.materials.values():
+                    changed = material.path in self._legacy_id_paths or material.path in self._legacy_link_paths
+                    if "id" in material.metadata:
+                        material.metadata.pop("id")
+                        changed = True
+                    canonical = _unique_links(
+                        [mappings.get(value, value) for value in material.links], material.id)
+                    if canonical != material.links:
+                        material.metadata["links"] = canonical
+                        changed = True
+                    if changed:
+                        self._save(material)
+                        applied.append(f"saved:{material.id}")
+            except Exception as exc:
+                return {"status": "partial", "migrated": applied, "index_updated": index_updated,
+                        "error": str(exc),
+                        "repair": "Retry pcw_migrate_legacy_ids to complete the interrupted migration; pcw_reconcile is diagnostic only"}
+            self._scan()
+            self._reconciled_token = None
+            self._reconcile()
+            return {"status": "ok", "migrated": applied, "index_updated": index_updated,
+                    "pending_preparation": sorted(self.pending)[:50], "pending_count": len(self.pending)}
 
     def _update(self, material: Material, content: str):
         if material.content != content:
@@ -423,23 +593,94 @@ class PCWRuntime:
             self._update(material, content)
             return self._result(material)
 
+    def _move_same_id(self, material: Material, destination: Path, requested_path: str):
+        """Move one filename-ID to another directory without changing identity."""
+        old_path = material.path
+        destination_relative = destination.relative_to(self.root).as_posix()
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(self.root / old_path, destination)
+        except Exception as exc:
+            return {"status": "partial", "applied": [], "error": str(exc),
+                    "repair": f"Retry pcw_rename({material.id!r}, {requested_path!r}); the source path remains authoritative"}
+
+        # The filesystem has one source file after os.rename. If the index path
+        # update fails, a fresh runtime's reconciliation observes that same file
+        # and completes only the derived path update; it never needs a copied
+        # second material with the same filename-ID.
+        material.path = destination_relative
+        applied = [f"moved:{material.id}:{old_path}:{destination_relative}"]
+        try:
+            aliases = [material.id] + [old for old, target in self._legacy_ids.items() if target == material.id]
+            for stored_id in dict.fromkeys(aliases):
+                self.table.update(where=f"material_id = '{_id(stored_id)}'", values={"path": destination_relative})
+                applied.append(f"index_path:{stored_id}:{destination_relative}")
+        except Exception as exc:
+            self._reconciled_token = None
+            return {"status": "partial", "applied": applied, "error": str(exc),
+                    "repair": f"Retry pcw_rename({material.id!r}, {requested_path!r}) to complete the index path update; pcw_reconcile can diagnose it"}
+        self._reconciled_token = None
+        return self._result(material)
+
     def rename(self, material_id: str, path: str):
         with self._guard():
             material = self._material(material_id)
             destination = self._knowledge_path(path)
             if destination == self.root / material.path:
                 return self._result(material)
+            old_id = material.id
+            new_id = self._material_id(destination)
+            if new_id == old_id:
+                if destination.exists():
+                    raise PCWError("Destination already exists")
+                return self._move_same_id(material, destination, path)
+            destination_relative = destination.relative_to(self.root).as_posix()
+            destination_metadata = copy.deepcopy(material.metadata)
+            # A copied legacy id would make a fresh runtime see two legacy
+            # sources. The destination already has its filename identity.
+            destination_metadata.pop("id", None)
+            prepared = Material(new_id, destination_relative, destination_metadata, material.content)
+            existing = self.materials.get(new_id)
             if destination.exists():
-                raise PCWError("Destination already exists")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            os.rename(self.root / material.path, destination)
-            material.path = destination.relative_to(self.root).as_posix()
+                # A matching destination is an interrupted rename. Retrying the
+                # same call completes it; a different file remains protected.
+                if (existing is None or existing.content != prepared.content or
+                        existing.metadata != prepared.metadata):
+                    raise PCWError("Destination already exists")
+            else:
+                if existing is not None:
+                    raise PCWError(f"Material filename ID already exists: {new_id}")
+                self._save(prepared)
+                self.materials[new_id] = prepared
+
+            # Keep the old source file addressable while every incoming link is
+            # saved. On a write failure, both old and new IDs still resolve and
+            # retrying this exact rename resumes from the prepared destination.
+            applied = [f"destination_prepared:{new_id}:{destination_relative}"]
             try:
-                self.table.update(where=f"material_id = '{material.id}'", values={"path": material.path})
+                self._rewrite({old_id: new_id}, applied)
+                legacy_aliases = [old for old, target in self._legacy_ids.items() if target == old_id]
+                aliases = [old_id, *legacy_aliases]
+                for stored_id in dict.fromkeys(aliases):
+                    self.table.update(where=f"material_id = '{_id(stored_id)}'",
+                                      values={"material_id": new_id, "path": destination_relative})
+                (self.root / material.path).unlink()
+                self.materials.pop(old_id)
+                self.materials[new_id] = prepared
+                for legacy, target in list(self._legacy_ids.items()):
+                    if target == old_id:
+                        self._legacy_ids[legacy] = new_id
+                if old_id in self.pending:
+                    self.pending.remove(old_id)
+                    self.pending.add(new_id)
+                applied.append(f"renamed:{old_id}:{new_id}:{destination_relative}")
             except Exception as exc:
-                return {"status": "partial", "applied": [f"renamed:{material.id}:{material.path}"],
-                        "error": str(exc), "repair": "pcw_reconcile"}
-            return self._result(material)
+                self._reconciled_token = None
+                return {"status": "partial", "applied": applied,
+                        "error": str(exc),
+                        "repair": f"Retry pcw_rename({old_id!r}, {path!r}) to complete the prepared rename"}
+            self._reconciled_token = None
+            return self._result(prepared)
 
     def links(self, source_id: str, add: list[str] | None = None, remove: list[str] | None = None):
         with self._guard():
@@ -544,7 +785,7 @@ class PCWRuntime:
             material = self._material(material_id)
             return {"id": material.id, "path": material.path, "revision": material.revision,
                     "content": material.content,
-                    "instruction": "Native Codex subagent must return original semantic parts in order, without paraphrase or additions. Preserve tables, code, conditions and explanations together. Only inter-part whitespace may be omitted. Do not open source files."}
+                    "instruction": "A native subagent in the agent environment must return original semantic parts in order, without paraphrase or additions. Preserve tables, code, conditions and explanations together. Only inter-part whitespace may be omitted. Do not open source files."}
 
     @staticmethod
     def _validate_parts(content: str, parts: list[str]):
@@ -723,17 +964,68 @@ class PCWRuntime:
                         "error": f"Pointer published; durability confirmation failed: {publication_warning}"}
             return {"status": "ok", "reembedded": new_table is not None, "active": active}
 
+    _CURRENT_FIELDS = ("goal", "constraints", "completion", "step", "blocker")
+    _CURRENT_HEADINGS = {
+        "goal": "Goal", "constraints": "Constraints", "completion": "Completion", "step": "Current step", "blocker": "Blocker",
+    }
+
+    @classmethod
+    def _render_current(cls, current: dict[str, str]) -> str:
+        sections = []
+        for field in cls._CURRENT_FIELDS:
+            value = current[field]
+            if not isinstance(value, str):
+                raise PCWError(f"Current {field} must be a text string")
+            # The length marker makes each readable section unambiguous even
+            # when a value contains another section heading or a fenced block.
+            sections.append(
+                f"# {cls._CURRENT_HEADINGS[field]}\n"
+                f"<!-- pcw-current-length: {len(value)} -->\n"
+                f"{value}")
+        return "\n\n".join(sections) + "\n"
+
+    @classmethod
+    def _parse_current_markdown(cls, text: str) -> dict[str, str] | None:
+        cursor = 0
+        values = {}
+        for index, field in enumerate(cls._CURRENT_FIELDS):
+            heading = f"# {cls._CURRENT_HEADINGS[field]}\n"
+            prefix = heading if index == 0 else "\n\n" + heading
+            if not text.startswith(prefix, cursor):
+                return None
+            start = cursor + len(prefix)
+            marker_end = text.find("\n", start)
+            marker = text[start:marker_end] if marker_end >= 0 else ""
+            match = re.fullmatch(r"<!-- pcw-current-length: ([0-9]+) -->", marker)
+            if match is None:
+                return None
+            value_start = marker_end + 1
+            value_end = value_start + int(match.group(1))
+            if value_end > len(text):
+                return None
+            values[field] = text[value_start:value_end]
+            cursor = value_end
+        if text[cursor:] != "\n":
+            return None
+        return values
+
     def current_get(self):
         with self._guard():
             path = self.root / "current.md"
             self._assert_safe(path)
             if not path.exists():
-                return {"goal": "", "constraints": "", "completion": "", "step": "", "blocker": ""}
+                return {field: "" for field in self._CURRENT_FIELDS}
             text = path.read_bytes().decode("utf-8")
-            metadata, _ = _parse(text)
-            if metadata.get("pcw_current") != 1:
-                return {"legacy_content": text, "requires_explicit_replacement": True}
-            return {field: metadata.get(field, "") for field in ("goal", "constraints", "completion", "step", "blocker")}
+            current = self._parse_current_markdown(text)
+            if current is not None:
+                return current
+            metadata, body = _parse(text)
+            # Known YAML-only Current is safe to translate on the next write.
+            # Other Markdown (including arbitrary YAML-fronted documents) must
+            # be returned verbatim until the caller explicitly replaces it.
+            if metadata.get("pcw_current") == 1 and not body and set(metadata).issubset({"pcw_current", *self._CURRENT_FIELDS}):
+                return {field: metadata.get(field, "") for field in self._CURRENT_FIELDS}
+            return {"legacy_content": text, "requires_explicit_replacement": True}
 
     def current_set(self, goal: str | None = None, constraints: str | None = None,
                     completion: str | None = None, step: str | None = None,
@@ -743,13 +1035,12 @@ class PCWRuntime:
             if "legacy_content" in current:
                 if not replace_legacy or any(value is None for value in (goal, constraints, completion)):
                     raise PCWError("Legacy Current: read it and explicitly replace with goal, constraints, completion and replace_legacy=true")
-                current = {key: "" for key in ("goal", "constraints", "completion", "step", "blocker")}
+                current = {key: "" for key in self._CURRENT_FIELDS}
             for key, value in {"goal": goal, "constraints": constraints, "completion": completion,
                                "step": step, "blocker": blocker}.items():
                 if value is not None:
                     current[key] = value
-            header = yaml.safe_dump({"pcw_current": 1, **current}, sort_keys=False, allow_unicode=True)
-            self._write(self.root / "current.md", "---\n" + header + "---\n")
+            self._write(self.root / "current.md", self._render_current(current))
             return current
 
     def _git_paths(self, paths: list[str]):
@@ -822,8 +1113,8 @@ class PCWRuntime:
                 if historical.returncode:
                     self._delete_rows(material.id)
                     continue
-                metadata, body = _parse(historical.stdout)
-                if metadata.get("id") != material.id or body != material.content:
+                _, body = _parse(historical.stdout)
+                if body != material.content:
                     self._delete_rows(material.id)
             try:
                 self._git("restore", "--source", revision, "--worktree", "--", *paths)

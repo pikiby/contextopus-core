@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import hashlib
 import json
 import math
 import os
@@ -21,6 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "persistent-context-workspace"))
 
 from pcw_runtime import PCWRuntime, PCWError, SearchConfig, select_candidates
+from pcw_runtime.agent_workflow import AgentWorkflow
 
 
 class TestProvider:
@@ -153,16 +155,55 @@ def test_links_rename_and_repeat_save_do_not_reembed(memory):
     b = indexed(runtime, "two.md", "another")
     calls = len(factory.calls)
     runtime.links(a["id"], [b["id"], b["id"], a["id"]])
+    runtime.links(b["id"], [a["id"]])
     assert runtime.read(a["id"])["links"] == [b["id"]]
-    assert runtime.read(b["id"])["links"] == []
+    assert runtime.read(b["id"])["links"] == [a["id"]]
     renamed = runtime.rename(a["id"], "nested/renamed.md")
-    runtime.update(a["id"], "original material")
-    runtime.links(a["id"], remove=[b["id"]])
+    runtime.update(renamed["id"], "original material")
+    runtime.links(renamed["id"], remove=[b["id"]])
     assert len(factory.calls) == calls
-    assert renamed["id"] == a["id"]
-    assert {row["path"] for row in runtime._rows() if row["material_id"] == a["id"]} == {"knowledge/nested/renamed.md"}
+    assert renamed["id"] == "renamed.md"
+    assert runtime.read(b["id"])["links"] == ["renamed.md"]
+    assert {row["path"] for row in runtime._rows() if row["material_id"] == renamed["id"]} == {"knowledge/nested/renamed.md"}
+    with pytest.raises(PCWError, match="Unknown"):
+        runtime.read(a["id"])
     with pytest.raises(PCWError, match="Unknown"):
         runtime.links(a["id"], ["missing-exact-id"])
+
+
+def test_rename_write_failure_keeps_old_id_resolvable_and_retry_completes(memory):
+    runtime, _ = memory
+    a = indexed(runtime, "a.md", "a")
+    b = indexed(runtime, "b.md", "b")
+    runtime.links(b["id"], [a["id"]])
+    original_save = runtime._save
+
+    def fail_incoming(material):
+        if material.id == b["id"]:
+            raise OSError("Injected incoming rewrite failure")
+        original_save(material)
+
+    with patch.object(runtime, "_save", side_effect=fail_incoming):
+        partial = runtime.rename(a["id"], "nested/renamed.md")
+    assert partial["status"] == "partial"
+    assert "Retry pcw_rename" in partial["repair"]
+    assert runtime.read(a["id"])["content"] == "a"
+    assert runtime.read(b["id"])["links"] == [a["id"]]
+    assert runtime.read("renamed.md")["content"] == "a"
+
+    fresh = PCWRuntime(runtime.work_root, "project", provider_factory=Factory())
+    try:
+        # A process restarted after the interruption sees no dangling link and
+        # can finish the same operation instead of needing manual repair.
+        assert fresh.read(a["id"])["content"] == "a"
+        assert fresh.read(b["id"])["links"] == [a["id"]]
+        completed = fresh.rename(a["id"], "nested/renamed.md")
+        assert completed["id"] == "renamed.md"
+        assert fresh.read(b["id"])["links"] == ["renamed.md"]
+        with pytest.raises(PCWError, match="Unknown"):
+            fresh.read(a["id"])
+    finally:
+        fresh.close()
 
 
 def test_merge_rewrites_before_delete_and_unions_links(memory):
@@ -244,6 +285,23 @@ def test_current_focus_survives_step_update_and_legacy_is_explicit(memory):
     assert current == {"goal": "Deliver result", "constraints": "Read-only", "completion": "Evidence ready", "step": "Interpret", "blocker": "missing input"}
     runtime.current_set(blocker="")
     assert runtime.current_get()["blocker"] == ""
+    current_text = (runtime.root / "current.md").read_text()
+    assert "# Goal" in current_text and "# Current step" in current_text and "# Blocker" in current_text
+    exact = {
+        "goal": "line 1\n\n# Constraints\nlooks like a heading\n",
+        "constraints": "```py\n# Completion\nprint('kept')\n```\n",
+        "completion": "done\n\n",
+        "step": "# Blocker\ninside value",
+        "blocker": "trailing spaces  \n\n",
+    }
+    runtime.current_set(**exact)
+    assert runtime.current_get() == exact
+    (runtime.root / "current.md").write_text("---\npcw_current: 1\ngoal: Legacy goal\nconstraints: Legacy limits\ncompletion: Legacy done\nstep: Legacy step\nblocker: Legacy blocker\n---\n")
+    assert runtime.current_get()["goal"] == "Legacy goal"
+    runtime.current_set(step="Translated")
+    assert runtime.current_get() == {"goal": "Legacy goal", "constraints": "Legacy limits", "completion": "Legacy done", "step": "Translated", "blocker": "Legacy blocker"}
+    (runtime.root / "current.md").write_text("# Goal\n\nUnframed legacy Markdown\n\n# Constraints\n\nMust stay verbatim\n")
+    assert runtime.current_get()["requires_explicit_replacement"]
     (runtime.root / "current.md").write_text("# Old current\nDo not erase")
     assert runtime.current_get()["requires_explicit_replacement"]
     with pytest.raises(PCWError, match="Legacy"):
@@ -390,20 +448,249 @@ def test_switch_blocks_other_runtime_write_until_activation(memory):
     other.close()
 
 
-def test_adopt_preserves_legacy_id_extra_metadata_body_and_crlf(memory):
+def test_save_subagent_result_is_exact_idempotent_and_requires_executor_session(memory):
+    runtime, factory = memory
+    result = "\n---\ninner: frontmatter stays in the result\n---\n\n| key | value |\n|---|---|\n| x | 1 |\n\n```py\nprint('exact')\n```\n  \n"
+    with pytest.raises(PCWError, match="executor_session_id"):
+        runtime.save_subagent_result("returned.md", result, "")
+    saved = runtime.save_subagent_result("returned.md", result, "executor-session-17")
+    assert saved["status"] == "saved"
+    assert saved["id"] == "returned.md"
+    assert saved["saved_at"].endswith("Z")
+    assert saved["executor_session_id"] == "executor-session-17"
+    read = runtime.read("returned.md")
+    assert read["content"] == result
+    assert read["saved_at"] == saved["saved_at"]
+    duplicate = runtime.save_subagent_result("returned.md", result, "executor-session-17")
+    assert duplicate["status"] == "already_saved"
+    assert duplicate["saved_at"] == saved["saved_at"]
+    with pytest.raises(PCWError, match="already occupied"):
+        runtime.save_subagent_result("returned.md", result + "different", "executor-session-17")
+    with pytest.raises(PCWError, match="already occupied"):
+        runtime.save_subagent_result("returned.md", result, "other-executor-session")
+    assert not factory.calls
+
+
+def test_save_subagent_result_cas_revises_only_same_executor_raw_result(memory):
+    runtime, factory = memory
+    first_body = "# First raw return\n\n| state | first |\n| --- | --- |\n"
+    saved = runtime.save_subagent_result("worker-return.md", first_body, "worker-session-17")
+    runtime.submit_parts(saved["id"], saved["revision"], [first_body])
+    moved = runtime.rename(saved["id"], "nested/worker-return.md")
+    assert moved["path"] == "knowledge/nested/worker-return.md"
+    related = runtime.create("related.md", "Navigation target")
+    runtime.links(saved["id"], add=[related["id"]])
+    before = runtime.read(saved["id"])
+    assert before["index_status"] == "indexed"
+
+    second_body = "# Second raw return\n\n| state | updated |\n| --- | --- |\n"
+    with pytest.raises(PCWError, match="already occupied"):
+        runtime.save_subagent_result(saved["id"], second_body, "worker-session-17")
+    with pytest.raises(PCWError, match="different executor session"):
+        runtime.save_subagent_result(saved["id"], second_body, "other-session",
+                                     expected_previous_revision=before["revision"])
+    with pytest.raises(PCWError, match="changed since it was read"):
+        runtime.save_subagent_result(saved["id"], second_body, "worker-session-17",
+                                     expected_previous_revision="stale-revision")
+
+    updated = runtime.save_subagent_result(saved["id"], second_body, "worker-session-17",
+                                            expected_previous_revision=before["revision"])
+    assert updated["status"] == "updated"
+    assert updated["saved_at"] != before["saved_at"]
+    assert updated["links"] == [related["id"]]
+    assert updated["index_status"] == "pending_preparation"
+    assert runtime.read(saved["id"])["content"] == second_body
+    assert not [row for row in runtime._rows() if row["material_id"] == saved["id"]]
+    assert len(factory.calls) == 1
+
+    # Exact retries remain idempotent even when they still carry the revision
+    # read before the successful CAS replacement.
+    retry = runtime.save_subagent_result(saved["id"], second_body, "worker-session-17",
+                                         expected_previous_revision=before["revision"])
+    assert retry["status"] == "already_saved"
+    assert retry["saved_at"] == updated["saved_at"]
+
+    ordinary = runtime.create("ordinary.md", "ordinary knowledge")
+    with pytest.raises(PCWError, match="not a saved raw subagent result"):
+        runtime.save_subagent_result(ordinary["id"], "new raw", "worker-session-17",
+                                     expected_previous_revision=ordinary["revision"])
+
+
+def test_save_subagent_result_cas_write_error_keeps_previous_body_and_index(memory):
+    runtime, _ = memory
+    original = runtime.save_subagent_result("worker-return.md", "first body", "worker-session-17")
+    runtime.submit_parts(original["id"], original["revision"], ["first body"])
+    before = runtime.read(original["id"])
+    rows_before = runtime._rows()
+
+    with patch.object(runtime, "_save", side_effect=OSError("injected raw-save failure")):
+        with pytest.raises(OSError, match="injected raw-save failure"):
+            runtime.save_subagent_result(original["id"], "second body", "worker-session-17",
+                                         expected_previous_revision=before["revision"])
+
+    assert runtime.read(original["id"]) == before
+    assert runtime._rows() == rows_before
+
+
+def test_saved_result_lookup_survives_nested_path_rename(memory):
+    runtime, _ = memory
+    runtime.save_subagent_result("returned.md", "worker output", "executor-session-17")
+    renamed = runtime.rename("returned.md", "nested/returned.md")
+    assert renamed["id"] == "returned.md"
+    workflow = AgentWorkflow(runtime)
+
+    process = workflow.action_requirements("process_result", {
+        "result": {"material_name": "returned.md", "executor_session_id": "executor-session-17"},
+    })
+    transition = workflow.action_requirements("transition", {
+        "checks_due": {"status": "assigned", "checks": [{
+            "material_name": "returned.md", "executor_session_id": "executor-session-17",
+        }]},
+    })
+    finish = workflow.action_requirements("finish", {
+        "acceptance_checks": {"status": "assigned", "scope": "whole task", "checks": [{
+            "material_name": "returned.md", "executor_session_id": "executor-session-17",
+        }]},
+    })
+    assert process["ready"] and transition["ready"] and finish["ready"]
+
+    wrong_session = workflow.action_requirements("process_result", {
+        "result": {"material_name": "returned.md", "executor_session_id": "other-session"},
+    })
+    assert not wrong_session["ready"]
+
+
+def test_same_filename_id_move_retries_only_index_path_after_failure(memory):
+    runtime, factory = memory
+    saved = runtime.save_subagent_result("returned.md", "worker output", "executor-session-17")
+    runtime.submit_parts(saved["id"], saved["revision"], ["worker output"])
+    before_rows = runtime._rows()
+    calls = len(factory.calls)
+
+    # _guard reopens LanceTable for every public call, so patch its class
+    # method instead of one transient table instance.
+    with patch("lancedb.table.LanceTable.update", side_effect=OSError("Injected index path failure")):
+        partial = runtime.rename("returned.md", "nested/returned.md")
+    assert partial["status"] == "partial"
+    assert "index path update" in partial["repair"]
+    assert not (runtime.root / "knowledge" / "returned.md").exists()
+    assert (runtime.root / "knowledge" / "nested" / "returned.md").exists()
+    assert len(list(runtime.knowledge.rglob("returned.md"))) == 1
+    assert runtime.read("returned.md")["path"] == "knowledge/nested/returned.md"
+    assert len(factory.calls) == calls
+
+    fresh = PCWRuntime(runtime.work_root, "project", provider_factory=Factory())
+    try:
+        # _guard reconciliation repairs only the derived LanceDB path. Repeating
+        # the same rename is idempotent once the material is already moved.
+        moved = fresh.rename("returned.md", "nested/returned.md")
+        assert moved["path"] == "knowledge/nested/returned.md"
+        rows = fresh._rows()
+        assert {row["path"] for row in rows if row["material_id"] == "returned.md"} == {"knowledge/nested/returned.md"}
+        assert [row["vector"] for row in rows] == [row["vector"] for row in before_rows]
+    finally:
+        fresh.close()
+
+
+def test_filename_is_id_plain_markdown_is_readable_and_duplicate_basenames_fail(memory):
+    runtime, _ = memory
+    created = runtime.create("nested/context.md", "saved")
+    assert created["id"] == "context.md"
+    with pytest.raises(PCWError, match="filename ID"):
+        runtime.create("other/context.md", "must not create")
+    plain = runtime.knowledge / "plain.md"
+    plain.write_text("# Plain Markdown\n")
+    assert runtime.read("plain.md")["content"] == "# Plain Markdown\n"
+    duplicate = runtime.knowledge / "duplicate" / "plain.md"
+    duplicate.parent.mkdir()
+    duplicate.write_text("# Different\n")
+    with pytest.raises(PCWError, match="Duplicate material filename ID: plain.md"):
+        runtime.status()
+
+
+def test_explicit_legacy_id_migration_preserves_body_links_and_existing_index(memory):
+    runtime, factory = memory
+    a_body = "# A\n\n| k | v |\n|---|---|\n| one | 1 |\n\n```py\nprint(1)\n```\n"
+    b_body = "# B\n"
+    (runtime.knowledge / "a.md").write_text(f"---\nid: old-a\nkind: evidence\nlinks: [old-b]\n---\n{a_body}")
+    (runtime.knowledge / "b.md").write_text(f"---\nid: old-b\nlinks: []\n---\n{b_body}")
+    runtime.status()
+    dimensions = runtime.active["config"]["profile"]["dimensions"]
+    runtime.table.add([
+        {"material_id": "old-a", "part_index": 0, "text": a_body, "vector": [0.1] * dimensions,
+         "path": "knowledge/a.md", "revision": hashlib.sha256(a_body.encode()).hexdigest()},
+        {"material_id": "old-b", "part_index": 0, "text": b_body, "vector": [0.2] * dimensions,
+         "path": "knowledge/b.md", "revision": hashlib.sha256(b_body.encode()).hexdigest()},
+    ])
+    migrated = runtime.migrate_legacy_ids()
+    assert migrated["status"] == "ok"
+    assert runtime.read("a.md")["content"] == a_body
+    assert runtime.read("a.md")["links"] == ["b.md"]
+    with pytest.raises(PCWError, match="Unknown"):
+        runtime.read("old-a")
+    assert {row["material_id"] for row in runtime._rows()} == {"a.md", "b.md"}
+    assert [row["text"] for row in runtime._rows() if row["material_id"] == "a.md"] == [a_body]
+    assert "id: old-a" not in (runtime.knowledge / "a.md").read_text()
+    assert "kind: evidence" in (runtime.knowledge / "a.md").read_text()
+    assert not factory.calls
+
+
+def test_partial_legacy_id_migration_instructs_retry_not_reconcile(memory):
+    runtime, _ = memory
+    (runtime.knowledge / "a.md").write_text("---\nid: old-a\nlinks: []\n---\n# Body\n")
+    runtime.status()
+    original_save = runtime._save
+
+    def fail_write(material):
+        if material.id == "a.md":
+            raise OSError("Injected migration write failure")
+        original_save(material)
+
+    with patch.object(runtime, "_save", side_effect=fail_write):
+        result = runtime.migrate_legacy_ids()
+    assert result["status"] == "partial"
+    assert "pcw_migrate_legacy_ids" in result["repair"]
+    assert "pcw_reconcile is diagnostic only" in result["repair"]
+
+
+def test_legacy_id_migration_rejects_unresolved_links_without_writing(memory):
+    runtime, _ = memory
+    source = "---\nid: old-a\nlinks: [old-missing]\n---\n# Body\n"
+    path = runtime.knowledge / "a.md"
+    path.write_text(source)
+    runtime.status()
+    with pytest.raises(PCWError, match="cannot resolve links.*old-missing"):
+        runtime.migrate_legacy_ids()
+    assert path.read_text() == source
+    assert runtime.read("a.md")["links"] == ["old-missing"]
+
+
+def test_legacy_id_migration_validates_links_even_when_no_ids_need_translation(memory):
+    runtime, _ = memory
+    source = "---\nlinks: [missing.md]\n---\n# Body\n"
+    path = runtime.knowledge / "a.md"
+    path.write_text(source)
+    runtime.status()
+    with pytest.raises(PCWError, match="cannot resolve links.*missing.md"):
+        runtime.migrate_legacy_ids()
+    assert path.read_text() == source
+
+
+def test_adopt_removes_legacy_id_preserves_extra_metadata_body_and_crlf(memory):
     runtime, _ = memory
     source = "---\r\nid: legacy-id\r\nkind: rule\r\n---\r\n# Body\r\nKeep [[old-link]] as written.\r\n"
     path = runtime.knowledge / "legacy.md"
     path.write_bytes(source.encode())
-    assert runtime.status()["unregistered_count"] == 1
+    assert runtime.status()["unregistered_count"] == 0
     adopted = runtime.adopt("legacy.md")
-    assert adopted["id"] == "legacy-id"
-    assert runtime.read("legacy-id")["content"] == "# Body\r\nKeep [[old-link]] as written.\r\n"
+    assert adopted["id"] == "legacy.md"
+    assert runtime.read("legacy.md")["content"] == "# Body\r\nKeep [[old-link]] as written.\r\n"
     assert "kind: rule" in path.read_text()
+    assert "id: legacy-id" not in path.read_text()
     path = runtime.knowledge / "index.md"
     path.write_text("# Existing index\n")
     adopted = runtime.adopt("index.md")
-    assert len(adopted["id"]) == 36
+    assert adopted["id"] == "index.md"
     assert runtime.read(adopted["id"])["content"] == "# Existing index\n"
 
 
@@ -413,7 +700,7 @@ def test_adopt_repairs_duplicate_self_links_without_global_lockout(memory):
     b = runtime.create("b.md", "b")
     path = runtime.root / a["path"]
     path.write_text(f"---\nid: {a['id']}\nlinks: [{a['id']}, {b['id']}, {b['id']}]\n---\na")
-    assert runtime.status()["unregistered_count"] == 1
+    assert runtime.status()["unregistered_count"] == 0
     assert runtime.adopt("a.md")["links"] == [b["id"]]
 
 

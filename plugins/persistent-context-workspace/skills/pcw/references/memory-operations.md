@@ -1,65 +1,49 @@
 # Memory operations
 
-Read for workspace selection, durable changes, or recovery. All MCP tools receive `work_root` as an existing absolute project directory and `workspace` as one semantic directory name. Their storage is confined to `<work-root>/.pcw/<workspace>/`. Tool schemas give the full argument types.
+Read this reference through the PCW action loop before selecting a workspace, changing durable memory, or recovering it. All MCP calls receive an existing absolute `work_root` and one semantic `workspace`; durable storage is `<work-root>/.pcw/<workspace>/`.
 
-## Select and open
+## Read before deciding
 
-Select the exact workspace named by the user, or the only existing candidate unambiguously matching the request. Inspect memory coordinates only inside the chosen project's `.pcw/`; do not search the home directory or select from a stale next action. Ask only when the remaining ambiguity changes the workspace or task.
+The primary calls `pcw_status`, `pcw_current_get`, `pcw_search`, `pcw_read`, and `pcw_list` to obtain PCW context. It reads Current on start or recovery and opens only relevant full materials. Search returns a bounded selection; an empty result does not prove that knowledge is absent or fresh. The primary does not inspect real project sources, diffs, logs, or external services itself while the skill is active. Native capability descriptors and the necessary environment configuration used to build the tools map are a limited primary responsibility, not project-source research.
 
-`pcw_status` opens the workspace and initializes missing knowledge and local runtime directories. Call it for a missing workspace only when creation is authorized. It returns material count, `pending_preparation`, unregistered legacy files, and active connection, table, and search settings. It does not load the embedding model or create a Git commit. The first checkpoint initializes a separate memory Git repository. Keep the parent's `.pcw/` outside source Git; if its ignore rule is missing, delegate only that setup change under the context-creation request.
+Knowledge bodies are free Markdown. They can contain prose, sources, conditions, uncertainty, tables, and code. `links` is a directional list of filename-IDs for navigation; it has no required relation type, explanation, or mirror edge. The body, not a link, carries claims and conditions.
 
-`pcw_current_get` returns the saved task fields. Read them into the primary's active context. `pcw_list(offset=0, limit=50)` returns paginated material metadata and pending status without loading every material body; its maximum page size is 100. Use listing for exact ID/path resolution or migration, not as an instruction to read all knowledge. Status, search, and reconciliation bound their pending-ID lists and include counts; a returned list may not enumerate all pending materials.
+## Filename IDs and legacy memory
 
-## Read and search
+A filename such as `architecture.md` is the material's unique ID within `knowledge`; its workspace-relative path is a separate address. There is no separate UUID identity. New materials are addressed by the filename-ID in `pcw_create`, `pcw_read`, `pcw_update`, `pcw_links`, `pcw_merge`, `pcw_reassign`, `pcw_delete`, and preparation operations.
 
-`pcw_search(query)` returns selected IDs, current workspace-relative paths, distances, and pending or unregistered materials. Its optional `N`, `d_max`, `min_jump`, and `multiplier` override one query's cutoff. Defaults are `20`, `0.8`, `0.02`, and `3` with cosine distance: engineering starting points, not calibrated relevance guarantees. Search settings and calibration status appear in results.
+`pcw_rename` changes the path and updates search-row addresses without preparing or embedding an unchanged body again. If the basename changes, it also changes the filename-ID and rewrites exact incoming links. A move such as `a.md` to `nested/a.md` keeps the ID and links unchanged. It must reject a duplicate destination. It does not retain a redirect, create a replacement material, or infer semantic relationships.
 
-`pcw_read(material_id)` returns the full body, exact ID, path, `links`, and revision. Read useful linked IDs directly without another vector query. Unknown IDs produce an error, not a nearest-match substitution. Vector similarity and navigation do not establish factual freshness or semantic equivalence.
+Migration is explicit. For a legacy UUID-addressed material, first establish its filename mapping, rewrite exact legacy links to filename-IDs, preserve body text, metadata, tables, code, sources, and meaningful relation prose, and reconcile search addresses. Do not re-embed an unchanged body merely because its filename or links changed. Do not adopt, normalize, or replace legacy memory merely because it was encountered during ordinary work.
 
-## Save materials
+## Save and apply
 
-- `pcw_create(path, content, links=[])` creates a new material and allocates its permanent ID. Here `path` is relative to `knowledge/`, such as `architecture.md`. Supply body text without frontmatter. Existing targets are not overwritten.
-- `pcw_update(material_id, content, expected_revision)` replaces the primary-authored body while preserving its ID and navigation. Pass the revision already returned by the read when available; a stale revision reports a conflict.
-- `pcw_rename(material_id, path)` changes the file address without changing the ID or re-embedding its unchanged body. The destination must be absent.
+An investigating or checking worker writes its own raw result. The primary first calls:
 
-Content writes become visible as saved knowledge immediately. Changed nonempty bodies are `pending_preparation`; their old search rows are removed. Complete [Prepare search](prepare-search.md) before claiming the material is indexed. New or changed material remains readable when preparation or embedding fails. Do not overwrite it with a fabricated successful result.
+```text
+pcw_save_subagent_result(work_root, workspace, material_name, result, executor_session_id)
+```
 
-The runtime stores `id` and `links` in YAML frontmatter and preserves other existing metadata. Bodies may freely contain prose, tables, and code. The primary chooses their meaning and organization; there is no obligatory object/fact schema or subagent report template.
+`material_name` is the exact filename-ID and `result` is the unmodified raw Markdown return. `executor_session_id` is the actual worker-session identifier, never a generated substitute or primary-session identifier. The MCP assigns `saved_at` in ISO 8601 UTC with an explicit timezone designator, persists both metadata fields with the text, returns them only after a real save, and rejects a missing session identifier. On a repeat delivery of the same material, raw result, and session, it keeps the original saved record and timestamp instead of duplicating it. The primary then calls `pcw_read` and only then makes a content or acceptance decision.
 
-## Navigation, merge, and deletion
+For a new raw return from the same executor, the primary may reuse that executor's raw-result filename by passing `expected_previous_revision` from the previously read material. MCP replaces the body only if this is an existing raw-result material with the same executor and the expected revision still matches. It preserves links, assigns a new `saved_at`, removes the old search rows, and returns `updated` with preparation pending. Without that explicit revision, a different return at an occupied name remains a conflict. A stale revision, another executor, or an ordinary knowledge material cannot be overwritten by this route; read the current record and resolve the actual conflict. An exact repeat of an already saved body and executor returns `already_saved` with its original timestamp even if a retry carries an older expected revision.
 
-`pcw_links(source_id, add=[], remove=[])` edits only exact navigation IDs. It preserves other links, removes duplicates, prevents self-links, and rejects unknown added IDs. Navigation is directional; no mirror link, relation type, or description is required. Links-only edits do not prepare or embed content.
+This operation saves the worker's new raw text unchanged; it does not authorize the primary to edit or compact the text. Choose a separate filename when earlier findings need to remain independently available. For memory and Git work, every raw return must include the affected filename-IDs, the Current path when affected, and the actual status. A generic completion sentence or an old list of affected materials does not satisfy that return contract.
 
-For full replacement, the primary writes the final content and explicitly chooses every old-ID to target-ID mapping:
+For every other durable mutation, a subagent acts on the primary's prepared decision. It can call `pcw_create`, `pcw_update`, `pcw_links`, `pcw_merge`, `pcw_reassign`, `pcw_rename`, `pcw_delete`, `pcw_current_set`, `pcw_checkpoint`, or `pcw_restore` inside its authorized assignment. The primary chooses final content, consolidation, links, and replacement mappings; PCW does not infer them from similarity.
 
-1. Ensure each target already exists; use `pcw_create` first for a new target.
-2. Call `pcw_merge(materials, replacements)`. `materials` contains one `{id, content}` entry for each target; optional `links` supplies an explicit final list. `replacements` maps each removed ID to its target ID.
-3. The tool saves final targets, unions outgoing links when no final list was supplied, rewrites incoming links, deduplicates and removes self-links, and then deletes replaced files and search rows. Finish preparation for changed target bodies.
+Content writes are readable immediately and are `pending_preparation` until literal semantic parts are accepted. Links-only changes and renames do not prepare or embed text. A failed preparation or embedding leaves the material readable and honestly pending.
 
-`pcw_reassign(mapping)` performs only exact navigation replacement; it does not merge content or delete materials. Use it when navigation needs changing independently. Partial extraction while the original material remains does not imply global reassignment. If different incoming links need different targets, edit their source lists explicitly; do not ask the runtime to infer a destination.
+## Consolidation and deletion
 
-`pcw_delete(material_id)` removes incoming links, then the material and its search rows. It does not delete linked targets or rewrite their prose. A deletion request includes removal of pointers to that material; deciding to discard knowledge remains the primary's responsibility. Retired IDs are not reused, and persistent redirect files are not created.
+Consolidate actual duplicate content rather than adding a summary beside it. Preserve useful implementation details, conditions, exceptions, uncertainty, tables, and code. Compaction does not require retaining source attribution or provenance metadata.
 
-These multi-file operations report `partial` with applied changes when interrupted by an error. Account for those effects before continuing. Do not report an entire merge or deletion as complete when the tool reports partial failure. Link maintenance is mechanical and does not trigger a semantic review of all neighbors.
+For a replacement, the primary explicitly chooses the final target content and every old filename-ID to new filename-ID mapping. The worker ensures targets exist, then uses `pcw_merge` to save targets, preserve or explicitly set outgoing links, rewrite incoming links, remove duplicates and self-links, and only then remove replaced materials and their current search rows. `pcw_reassign` changes exact navigation only; partial extraction is not a global redirect. `pcw_delete` removes incoming links, material, and current search rows, not linked targets or their prose. Report any `partial` response with applied effects.
 
-## Current
+## Current and checkpoint
 
-`pcw_current_set` accepts strings `goal`, `constraints`, `completion`, `step`, and `blocker`. Unspecified fields preserve their previous values. Goal, constraints, and completion express the user's task; supporting facts do not expand them. The primary updates step/blocker when its chosen next action or obstacle changes, not for every tool call.
+Current is readable Markdown with exactly these task sections: `# Goal`, `# Constraints`, `# Completion`, `# Current step`, and `# Blocker`. `pcw_current_set` preserves unspecified values. A worker writes it from the primary's decision; PCW does not decide the goal or next action. Update step or blocker when the primary changes the next action or an obstacle changes. Goal, constraints, and completion change only when the user's request changes. Do not turn Current into a return log or rewrite it after every worker result.
 
-Keep Current compact and load it at task start or recovery. It is neither the complete plan history nor a copy of knowledge. A knowledge-only request does not replace the current task. The runtime saves the primary's fields; it does not determine the next action.
+Each section written by PCW includes an HTML comment `<!-- pcw-current-length: N -->` recording the number of characters in its value. The value remains visible Markdown; the marker preserves exact text when a value itself contains section headings, code, or trailing newlines. Use `pcw_current_set` to keep these lengths consistent.
 
-## Checkpoint and restore
-
-Unless the user forbids the local memory commit, call `pcw_checkpoint(paths, message)` for exactly the durable files changed by this request. These paths are relative to the workspace, such as `current.md` or `knowledge/architecture.md`; include both addresses for a rename and all affected navigation files. Resolve IDs to paths with existing metadata or `pcw_list` without rereading bodies for acceptance. Preserve unrelated staged and unstaged work. Never use broad staging or put runtime state, model caches, or credentials into Git.
-
-A checkpoint concerns the selected memory repository only. Source commits and every push require the user's corresponding authority. Report actual checkpoint errors and uncommitted changes; do not introduce a routine review or validation phase.
-
-For an authorized rollback, call `pcw_restore(commit, paths)` with the exact selected durable paths after accounting for uncommitted work that the restore would replace. It restores those worktree files and reconciles derived search data. It does not roll back source changes or external side effects. `pcw_reconcile` also reconciles externally restored or edited knowledge, removing stale rows and updating paths. Complete preparation for the returned pending IDs; no old vector table is treated as a history archive.
-
-## Legacy memory
-
-`pcw_status` and `pcw_list` identify files lacking recognized metadata as unregistered. Under an explicit import or migration request, `pcw_adopt(path)` preserves existing IDs and provenance or allocates an ID when missing, then adds/normalizes the navigation list. It does not infer links from wiki syntax or rewrite old relation prose. The primary deliberately converts useful filename-based links to target IDs and preserves any meaningful claims, conditions, and sources in the body. An old `index.md` is an ordinary material if adopted, not a mandatory global reading entrypoint.
-
-For a legacy Current, `pcw_current_get` returns `legacy_content` and `requires_explicit_replacement`. Read that content and preserve its still-applicable user constraints. Replacement requires explicitly supplying goal, constraints, completion, and `replace_legacy: true`; normal step updates cannot silently erase the legacy task.
-
-Missing preparation after migration or restoration is visible state. It is not evidence that the underlying knowledge was deleted, and it does not authorize re-executing the saved source task.
+Unless the user forbids a local memory commit, a worker calls `pcw_checkpoint` for exactly the durable Current and knowledge paths changed by the request. A prohibition of, or lack of authority for, a source-project commit does not prohibit this separate local memory checkpoint. A temporary PCW work location still uses Current and knowledge with their required consolidation and local history; the location is not a user prohibition of those operations. Include both old and new paths for a rename and affected navigation files. Preserve unrelated changes. A memory checkpoint is not authority for source commits, pushes, or external changes. `pcw_restore` needs an explicit authorized target and exact paths; `pcw_reconcile` makes derived search state match externally restored or edited knowledge.

@@ -319,10 +319,11 @@ class LocalProvider(_Provider):
             try:
                 # An explicit empty prompt disables saved/default prompts. PCW
                 # already formatted queries, and documents remain unchanged.
+                # Process long semantic parts sequentially to avoid batch padding.
                 vectors = model.encode(
                     prepared, prompt="", show_progress_bar=False,
                     convert_to_numpy=True, normalize_embeddings=False,
-                    precision="float32",
+                    precision="float32", batch_size=1,
                 )
             except Exception:
                 raise EmbeddingError("Local embedding computation failed; no alternative provider was used") from None

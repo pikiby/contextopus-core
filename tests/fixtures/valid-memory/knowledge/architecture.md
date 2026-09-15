@@ -1,6 +1,5 @@
 ---
-id: "6d37b833-81c7-4ff0-9d11-000000000001"
-links: ["6d37b833-81c7-4ff0-9d11-000000000002"]
+links: ["current-contract.md"]
 sources: ["PLAN.md"]
 ---
 

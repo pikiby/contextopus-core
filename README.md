@@ -1,125 +1,120 @@
 # Persistent Context Workspace
 
-Version 0.4.2 provides one explicit `$pcw` skill, linked Markdown knowledge, and local semantic search. The primary agent manages memory and task decisions; native subagents investigate real sources, make authorized changes, and prepare literal search parts.
+Version 0.5.0 provides one explicit `$pcw` skill, readable Markdown knowledge, a compact Current, and local semantic search. The primary agent remains the user-facing decision maker. Native subagents investigate real sources, make authorized changes, perform factual checks, write Current, apply knowledge changes, and perform Git operations. PCW is an MCP memory interface: it does not run a Controller, dispatch agents, or intercept their completion.
+
+## Update the Codex plugin
+
+For an existing `persistent-context-workspace` Git marketplace tracking this repository's `main` branch:
+
+```bash
+codex plugin marketplace upgrade persistent-context-workspace
+codex plugin add persistent-context-workspace@persistent-context-workspace
+```
+
+The first command refreshes the marketplace checkout; the second installs the plugin version from that checkout. Start a new Codex thread after installation to load the updated skill and MCP tools.
+
+See [0.5.0 release notes](CHANGELOG.md). Existing UUID-addressed knowledge requires an explicitly requested migration through `pcw_migrate_legacy_ids`; installing the plugin does not migrate it automatically.
+
+## Use PCW
 
 ```text
-$pcw Prepare context for the validator project at /path/to/project. Record its architecture and the task constraints.
+$pcw Prepare context for the validator project at /path/to/project. Record its architecture and task constraints.
 
 $pcw Continue the validator task using its existing context.
 ```
 
-Everything after `$pcw` is natural language. Preparing or refining context does not execute the saved task. An explicit execution request includes the necessary preparation; no separate run skill or Controller is required.
+Everything after `$pcw` is natural language. Preparing or refining context does not execute a task saved in Current. Execution needs an explicit user request; it includes necessary preparation without another run command.
 
-## Local setup
+## Work cycle
 
-The runtime requires an existing Python 3.11 or newer on a POSIX system, Git for memory checkpoints, and the package dependencies. LanceDB is embedded; no database server or virtual environment is required. The primary agent checks setup when `$pcw` is invoked, requests any missing installation permission with the exact scope, repairs missing requirements after approval, and continues the original task.
+Before each meaningful action, the primary calls `pcw_action_requirements` with one of `prepare_assignment`, `process_result`, `transition`, or `finish`. It then acts within the user request, submits the applicable result, and gets requirements for the next action. This short loop supplies detailed instructions at the time they apply.
 
-Use the active plugin directory, which can be a checkout or an installed cache copy:
+Before a native launch, the complete assignment must pass `prepare_assignment` with `ready: true` and an exact profile ID from the current tools map. A `ready: false` response still supplies instructions; the primary corrects the missing prerequisites and repeats the call before launching.
 
-```bash
-pcw_plugin=/absolute/path/to/persistent-context-workspace/plugins/persistent-context-workspace
-/bin/sh "$pcw_plugin/scripts/launch.sh" --check
-/bin/sh "$pcw_plugin/scripts/launch.sh" --check-local
-```
+The primary reads Current and knowledge through MCP, determines scope, itself obtains native model/reasoning capabilities from environment tools, descriptors, and needed environment configuration, compares them with roles, maintains a current tools map, selects a suitable profile, directly launches native agents, and decides acceptance. This limited capability work is not delegated source research. A prepared simple task can use a smaller discovered profile when justified by the map. More capability or deeper reasoning must be justified by the actual task, uncertainty, or required check. PCW does not impose a ranking across providers or hard-coded reasoning settings.
 
-The shell launcher selects an absolute `PCW_PYTHON` when configured, otherwise `python3` from PATH. An explicit interpreter works even when `python3` is absent. The cheap checks report Python and dependency versions, missing or incompatible requirements, pip availability, and `dependency_install_target`. `--check` covers the MCP runtime; `--check-local` also covers local embedding dependencies. Neither imports the model runtime nor proves that model weights are cached. Deeper import checks are available for installation verification; see [Runtime setup](plugins/persistent-context-workspace/skills/pcw/references/setup.md).
+After a worker returns, the primary calls `pcw_save_subagent_result` with the exact raw Markdown, filename-ID, and actual `executor_session_id`. MCP writes UTC `saved_at` and the session ID; the primary then calls `pcw_read` before interpreting, compacting, linking, or accepting the result. The raw save and the primary's environment/tools-map operations are the limited direct-MCP exceptions. They are not proof that the task succeeded.
 
-Dependencies can be supplied by the selected interpreter or installed with its pip into the reported private packages directory using `--target`. This directory contains packages, not a Python executable or a virtual environment. `PCW_DEPENDENCIES` can select another absolute packages directory; the default is under the user's data directory and is separated by Python ABI and platform. The launcher imports active plugin code first, then that target. Python runs with `-E -P -B` to exclude the working directory and `PYTHONPATH` while preserving its normal installed-package and virtual-environment policy. Existing user site-packages remain available when that policy allows them; `PYTHONNOUSERSITE` is honored. Run checks through the launcher to see what the runtime actually uses.
+Memory and Git returns name the affected materials and their actual status. A new raw return from the same executor can reuse its filename with `expected_previous_revision`: the matching revision permits an update, keeps links, and marks the new body for preparation. Exact repeat delivery remains idempotent. See [Memory operations](plugins/persistent-context-workspace/skills/pcw/references/memory-operations.md) for conflict handling and the save/read order.
 
-After consent, install only the reported missing or incompatible distributions and their required dependencies into the agreed destination. Do not override system package protections or create a virtual environment automatically. The `[local]` package extra describes sentence-transformers and its runtime dependencies; it does not download the Qwen weights. Existing remote embedding configurations need only the base runtime requirements. Git commits use your configured Git identity.
+Factual checks are scheduled by the primary at moments chosen from task complexity, or when a saved return shows a mismatch needing attention. They are not created for every return. A checker reproduces behavior or checks real sources, including a no-change research conclusion. Its result is saved and read in the same order before acceptance.
 
-The portable root `plugin.json` and `mcp.json` let Codex resolve `${PLUGIN_ROOT}/scripts/launch.sh` into an absolute script argument before starting `sh`. This is plugin-path substitution, not a shell lookup of an assumed environment variable. The host starts the persistent MCP process; a loaded model is reused for that process's lifetime. Startup never installs packages or downloads weights. Before a first embedding request that would download weights, the agent discloses model/cache and resource scope and requests permission unless already authorized. Refused or failed setup remains a concrete blocker.
+## Memory layout
 
-For a checkout you intend to register as a local marketplace:
-
-```bash
-codex plugin marketplace add /absolute/path/to/persistent-context-workspace
-codex plugin add persistent-context-workspace@persistent-context-workspace
-```
-
-Use the marketplace entry that points to this checkout if already configured. These commands are deployment instructions, not steps performed by the runtime. The repository also remains installable from its published GitHub branch; unpushed local changes are not present in that branch.
-
-After dependency repair, retry the bundled server through a supported host reload if one is available and verify that PCW tools are exposed. A successful standalone check or stdio handshake does not reconnect an existing failed host connection. If the current host cannot reload, preserve the original task and next action in the conversation and resume them after restarting the host session. A newly installed plugin copy may require a new thread to expose updated skills/tools; that continues the same task without a new assignment. There is no automatic live reconnect promise or separate manual `codex mcp add` step.
-
-The `.codex-plugin/plugin.json` compatibility metadata remains, but does not redeclare MCP through the legacy `mcpServers` field. Codex loads the portable root manifest and resolves the root `mcp.json` transport. `codex mcp get pcw --json` must show an absolute launcher argument, not an unresolved placeholder. See the [official bundled MCP documentation](https://developers.openai.com/plugins/build/plugins#bundled-mcp-servers-and-lifecycle-hooks) for plugin-host configuration.
-
-## Memory and task flow
-
-Each semantic workspace lives under its source project:
+Each semantic workspace is stored below its source project:
 
 ```text
 <work-root>/.pcw/<workspace>/
 ├── current.md
 ├── knowledge/
-│   └── <material>.md
+│   └── <filename-id>.md
 ├── .pcw-runtime/
 │   ├── active.json
-│   ├── lancedb/
-│   └── lock
+│   └── lancedb/
 └── .git/
 ```
 
-Knowledge is full Markdown with permanent `id` and `links` fields in YAML frontmatter. Links contain material IDs, without relation types or explanations; real dependencies and conditions belong in the body. Renaming a file changes its address without changing its ID. Reading by ID opens the full material and its navigation list.
+Knowledge is free Markdown: it can contain prose, tables, code, facts, sources, conditions, and uncertainty. Its filename, including `.md`, is the material ID unique within `knowledge`; path is separate. `links` stores exact filename-IDs for directional navigation. A rename updates search paths; it changes the ID and rewrites exact incoming links only when the basename changes. Moving `a.md` to `nested/a.md` preserves the ID and links. Neither operation re-embeds an unchanged body. Legacy UUID-addressed knowledge is migrated only by explicit request, with links rewritten deliberately and content retained.
 
-Current contains goal, constraints, completion condition, current step, and blocker. The primary reads it at task start or recovery and updates the working step when its decision changes. Current stays compact and does not accumulate tool events, subagent reports, or duplicated knowledge.
+Current is readable Markdown with five sections: Goal, Constraints, Completion, Current step, and Blocker. It stays compact. The primary changes its step or blocker only when its decision or obstacle changes, so ordinary returns do not rewrite Current.
 
-The primary searches existing knowledge, reads useful materials, follows relevant ID links, and gives native subagents concrete source questions or implementation assignments. It incorporates accepted findings and corrections into the affected knowledge itself, preserving conditions and uncertainty. It removes repeated content when consolidation is useful; a new summary beside unchanged duplicates is not consolidation.
-
-New or edited material is saved immediately and marked `pending_preparation`. A clean native helper obtains its original body, divides it into literal semantic parts, and submits them with the material revision. It keeps tables, code, conditions, and their existing explanations intact. The helper does not summarize, open source files, or choose fixed token windows. The Python server exposes the preparation tools; the host's agent starts the helper.
-
-LanceDB stores each part's text and embedding with the material ID and path. The runtime validates literal coverage and revision before indexing. Pending materials remain readable, while stale parts are excluded from search. An embedding error does not erase the primary's saved content or claim indexing succeeded. Links-only changes and renames do not trigger splitting or embedding.
-
-No separate graph database, search agent, raw-result archive, process journal, or permanent background service is required.
+New or changed bodies are saved first and remain readable while `pending_preparation`. A dedicated native helper obtains the literal body, divides it into literal semantic parts, and submits them with the returned revision. Tables, code, conditions, and explanations are preserved. Links-only edits and renames do not invoke splitting or embedding. Consolidation changes the actual materials and retains useful conditions, exceptions, uncertainty, tables, and code; source attribution and provenance metadata need not be retained after compaction.
 
 ## Search and embeddings
 
-The default is local `Qwen/Qwen3-Embedding-0.6B` through sentence-transformers, pinned to revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`. It uses 1024 dimensions, normalized vectors, CPU float32 execution, and Qwen's retrieval instruction for queries only. The model is loaded lazily once and reused. Configure `local_files_only: true` for a previously provisioned offline cache.
+LanceDB stores literal semantic parts, their vectors, material filename-IDs, and current paths. Search returns a bounded set of candidates; the primary reads full selected materials and follows useful links. Semantic search and knowledge consolidation solve different problems. Empty search output does not prove that knowledge is absent.
 
-Search requests at most `N` nearest parts, discards distances above `d_max`, cuts at the first sufficiently large adjacent distance gap, and deduplicates material IDs. It returns IDs and paths; the primary reads the selected full materials. Defaults `N=20`, `d_max=0.8`, `min_jump=0.02`, and `multiplier=3` with cosine distance are provisional engineering choices, not calibrated retrieval claims. Empty results do not establish that knowledge is absent.
+The bundled default is local `sentence-transformers` with `Qwen/Qwen3-Embedding-0.6B`; Qwen documents use literal parts and queries use its configured retrieval instruction. Ollama `/api/embed` and explicitly configured OpenAI-compatible `/v1/embeddings` are supported alternatives. Connection details are separate from the vector-space profile. A provider switch rebuilds vectors from stored literal parts into an inactive table, and activates source/profile/table together only after success. No provider fallback, fabricated vector, silent truncation, or re-splitting on a pure provider change is allowed.
 
-Explicit alternatives are Ollama `/api/embed` and an OpenAI-compatible `/v1/embeddings` service. A configuration separates provider connection from model, revision, dimensions, input formatting, normalization, and precision. API credentials are environment-variable references. Chat subscriptions do not themselves provide an embedding API or authorize paid calls.
+Search cutoffs and profile values are provisional engineering defaults. They are not claims about measured quality, price, latency, storage, or CPU/RAM use. See [embedding configuration](plugins/persistent-context-workspace/skills/pcw/references/embeddings.md) for exact supported configuration and failure behavior.
 
-The local adapter checks input length; Ollama receives `truncate: false`. Compatible HTTP providers must reject oversized input: their common protocol has no universal flag that proves non-truncation, and a returned vector cannot establish it. Invalid vector responses fail; the runtime never fabricates vectors or automatically switches providers.
+The [project search assessment](docs/search-assessment.md) records actual local Qwen measurements and a calibrated starting profile for its frozen eight-document corpus. Its held-out questions recovered complete answers for 6 of 8 positive cases and rejected all 4 negative cases; Russian positive cases recovered 2 of 4. These results do not calibrate the bundled defaults or establish performance on another corpus. Local encoding processes one text at a time within a call, reusing the loaded model; the assessment records the memory failure that motivated this change and the verified repeat.
 
-`pcw_switch_embeddings` accepts the full intended configuration and search settings. It re-embeds stored literal parts into a new table, then activates the matching provider and table together. It does not split materials again or change knowledge IDs and links. A rebuild failure retains the previous configuration and table. Matching dimensions or a shared model name do not establish compatibility; credential-only changes do not require re-embedding existing parts.
+## Setup and permissions
 
-Tool-specific guidance is in the skill's [embedding reference](plugins/persistent-context-workspace/skills/pcw/references/embeddings.md).
+PCW uses an existing Python 3.11+ interpreter, required package distributions, and Git for memory checkpoints. It does not create a virtual environment, install packages, or download model weights at startup. If a component is missing, a native diagnostic worker reports the exact interpreter, packages, destination, and failure. The primary asks the user for installation or model-download authority with that concrete scope, then delegates the authorized repair and recheck. Refusal, lack of permission, or a failed installation remains a reported blocker.
 
-## Git, restoration, and legacy memory
+The portable root `plugin.json` and `mcp.json` let the host resolve `${PLUGIN_ROOT}/scripts/launch.sh`. A successful standalone check or stdio handshake does not prove that an already-running host reconnected. After repair, retry only a supported host reload and verify the pending PCW operation. If the host needs a session restart, preserve the task and next action for continuation.
 
-The first local checkpoint initializes the workspace's own Git repository. Checkpoints include only exact request-owned Current and knowledge paths, unless the user forbids the commit. Runtime configuration, database data, caches, and credentials stay outside Git. The source project's Git must ignore `.pcw/`; runtime operations themselves stay inside the selected workspace.
+## History and verification
 
-Merge and delete tools mechanically update incoming ID links before removing materials. They accept final content and explicit replacements from the primary, and report partial changes if a multi-file operation fails. Physical LanceDB cleanup is separate maintenance; removed rows must disappear from current search even if disk space is not immediately reclaimed.
+An authorized worker can create a local checkpoint with `pcw_checkpoint` for exactly the Current and knowledge paths changed by the request. Source commits, pushes, external changes, package installation, and model downloads have separate authority. Restore and reconciliation make derived search state match restored knowledge; Git does not reverse external effects.
 
-`pcw_restore` restores authorized, exact memory paths from a local commit. Reconciliation removes stale search rows, repairs paths, and exposes material IDs needing fresh preparation. The same reconciliation detects externally restored knowledge. Git provides memory history; it does not reverse external actions, recover lost agent context, or make multi-file changes transactional.
-
-Existing Markdown is not silently rewritten. `pcw_adopt` explicitly registers legacy files, preserves existing IDs and metadata, and assigns missing IDs. The primary deliberately converts useful old wiki navigation to ID lists; relation prose and conditions are preserved. Legacy Current is returned verbatim until explicitly replaced with the new focus fields. A legacy `index.md` is an optional ordinary material, not a compulsory global entrypoint.
-
-## Development
-
-The plugin contains the single skill and conditional references, manifest and stdio configuration, launcher, `pcw_runtime/`, and `pyproject.toml`. [PLAN.md](PLAN.md) records the architecture and remaining measurements.
+Run the contract suite from the checkout root:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p test_contracts.py -v
 ```
 
-For the full suite, install the `[test]` extra or pytest in the selected development Python or its private packages directory. From the checkout root, set `pcw_plugin` to its plugin directory and copy `python.executable` and `dependency_install_target` from that launcher's `--check` report into `pcw_python` and `pcw_packages`. Include both paths when starting pytest so an installation using only `--target` works:
+Static contracts check packaging, references, and documented invariants. They are not evidence of live host connection, real native-agent behavior, local-model quality, latency, resource use, or factual source checks. Those need their own real execution evidence.
+
+The runtime suite also includes pytest tests; use the existing Python with PCW's dependencies available:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
-  PYTHONPATH="$pcw_plugin:$pcw_packages" PCW_DEPENDENCIES="$pcw_packages" \
-  "$pcw_python" -m pytest tests -q -p no:cacheprovider
+PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests -q -p no:cacheprovider
 ```
 
-The pytest command collects both unittest cases and the runtime's pytest functions; unittest discovery alone is not the full suite. Contract tests cover packaging and fixture links, including real stdio initialization when dependencies are available. Runtime tests exercise local LanceDB with deterministic embedding fixtures. Adapter tests check provider protocols and failure behavior without external credentials or model downloads. These tests do not measure real Qwen quality, latency, or memory consumption. Report any integration skips explicitly.
-
-Before release, install the matching candidate and run the actual Codex-host regression:
+The following opt-in checks require an installed candidate matching the checkout. The host check compares the runtime, manifests, skill, and references before testing MCP through a fresh Codex process:
 
 ```bash
-PCW_TEST_CODEX=1 PCW_TEST_QWEN=1 PYTHONDONTWRITEBYTECODE=1 \
-  python3 -B -m unittest discover -s tests -p test_codex_host.py -v
+PCW_TEST_CODEX=1 python3 -m unittest tests.test_codex_host -v
+PCW_TEST_CODEX=1 PCW_TEST_QWEN=1 python3 -m unittest tests.test_codex_host -v
+PCW_TEST_NATIVE=1 python3 -m unittest tests.test_native_workflow -v
 ```
 
-This requires Codex and already provisioned Qwen weights. It reads the transport from `codex mcp get`, starts an ephemeral Codex app-server thread, checks its MCP tool inventory, and invokes PCW through `mcpServer/tool/call`. The test makes no language-model turns, downloads, installations, or persistent configuration changes; it writes only temporary test knowledge. It needs normal Codex state-directory access. Other configured MCP servers/plugins are disabled only for this test process. The parent process has no manually supplied plugin-root variables. Omitting `PCW_TEST_QWEN=1` skips the embedding case; omitting `PCW_TEST_CODEX=1` skips both host cases. A direct launcher test does not replace this host regression.
+`PCW_TEST_QWEN` uses already cached model weights in offline mode. `PCW_TEST_NATIVE` makes actual model turns and selects the installed skill through Codex's native skill selector. It preserves process and thread IDs, selected model capabilities, and streamed events under `.pcw/project-update/.pcw-runtime/verification/native/`. Its trace must be assessed separately for instruction compliance, actor responsibilities, raw-result save/read order, executor sessions, and factual checks; a completed model turn or a returned marker alone is not acceptance.
 
-Routine memory handling does not add semantic acceptance, source rereading, or tests. Verification required by the actual task still applies.
+The [implementation assessment](docs/implementation-assessment.md) records changes, checks, and acceptance status. The [regulation assessment](docs/regulation-assessment.md) checks the written instructions, and the [independent coverage assessment](docs/final-coverage-assessment.md) maps the guide's requirements to evidence and its limits.
+
+Select a fixture with `PCW_NATIVE_SCENARIO`:
+
+| Value | Intended observation |
+| --- | --- |
+| `simple` (default) | Bounded factual source check. |
+| `prepare-context-only` | Consolidate context without executing the saved future task. |
+| `multistage-normalize-cli` | Checks of interacting components and the complete pipeline. |
+| `fault-after-saved-return` | Planned check after a temporary artifact is deliberately changed following a real saved return. Messages and product behavior are unchanged; a missed injection is inconclusive. |
+| `mismatch-before-planned` | Contradictory real input during a prepared implementation task. The trace must establish an additional check before the planned output check. |
+| `stale-environment-map` | Recovery from explicitly harness-authored prior state seeded through real MCP. This does not simulate an actual Codex upgrade. |
+
+`PCW_NATIVE_TIMEOUT_SECONDS` sets a positive per-turn timeout (default 600). `PCW_NATIVE_REASONING_EFFORT` defaults to `high` and must match Astra's actual advertised reasoning options. `PCW_NATIVE_FOLLOWUP=1` selects the separate same-thread clarification check. Collector success alone is not semantic acceptance of any scenario.

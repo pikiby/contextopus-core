@@ -165,6 +165,8 @@ class LocalTests(unittest.TestCase):
                 self.assertEqual(options["prompt"], "")
                 self.assertNotIn("prompt_name", options)
                 self.assertFalse(options["show_progress_bar"])
+                self.assertEqual(options["batch_size"], 1)
+                self.assertEqual(options["precision"], "float32")
             self.assertEqual(factory.call_args.kwargs["revision"], e.QWEN_REVISION)
             self.assertFalse(factory.call_args.kwargs["trust_remote_code"])
             self.assertEqual(model.tokenizer.calls[0][1]["truncation"], False)

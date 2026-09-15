@@ -108,6 +108,15 @@ class PluginContractTests(unittest.TestCase):
                     pending.append(resolved)
         self.assertTrue(set((SKILL / "references").glob("*.md")) <= reached)
 
+    def test_action_requirements_have_exact_action_sections(self):
+        document = (SKILL / "references" / "action-requirements.md").read_text(encoding="utf-8")
+        self.assertEqual(
+            ["prepare_assignment", "process_result", "transition", "finish"],
+            re.findall(r"^## ([a-z_]+)$", document, re.MULTILINE),
+        )
+        self.assertIn("pcw_save_subagent_result", document)
+        self.assertIn("pcw_read", document)
+
     def test_documented_tools_exist_in_runtime(self):
         documented = set()
         for path in SKILL.rglob("*.md"):
@@ -249,25 +258,24 @@ class LauncherTests(unittest.TestCase):
 
 
 class MemoryFixtureTests(unittest.TestCase):
-    def test_material_ids_resolve_independently_of_filenames(self):
+    def test_filename_ids_are_unique_and_links_are_filename_ids(self):
         paths = list((FIXTURE / "knowledge").glob("*.md"))
-        records = {frontmatter(path)["id"]: (path, frontmatter(path)) for path in paths}
+        records = {path.name: (path, frontmatter(path)) for path in paths}
         self.assertEqual(len(paths), len(records))
         for material_id, (path, metadata) in records.items():
-            self.assertNotEqual(path.stem, material_id)
             self.assertIsInstance(metadata["links"], list)
             self.assertEqual(len(metadata["links"]), len(set(metadata["links"])))
             self.assertNotIn(material_id, metadata["links"])
             self.assertTrue(set(metadata["links"]) <= records.keys())
+            self.assertNotIn("id", metadata)
+            self.assertEqual(material_id, path.name)
 
-    def test_current_focus_and_working_step_are_separate(self):
-        current = frontmatter(FIXTURE / "current.md")
-        self.assertEqual(1, current["pcw_current"])
-        self.assertEqual({"pcw_current", "goal", "constraints", "completion", "step", "blocker"}, set(current))
-        for field in ("goal", "constraints", "completion", "step", "blocker"):
-            self.assertIsInstance(current[field], str)
-        material_ids = {frontmatter(path)["id"] for path in (FIXTURE / "knowledge").glob("*.md")}
-        self.assertTrue(any(material_id in current["step"] for material_id in material_ids))
+    def test_current_is_readable_five_section_markdown(self):
+        current = (FIXTURE / "current.md").read_text(encoding="utf-8")
+        self.assertFalse(current.startswith("---\n"))
+        sections = re.findall(r"^# (.+)$", current, re.MULTILINE)
+        self.assertEqual(["Goal", "Constraints", "Completion", "Current step", "Blocker"], sections)
+        self.assertIn("current-contract.md", current)
 
 
 if __name__ == "__main__":
