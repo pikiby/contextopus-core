@@ -10,9 +10,9 @@ Knowledge bodies are free Markdown. They can contain prose, sources, conditions,
 
 ## Filename IDs and legacy memory
 
-A filename such as `architecture.md` is the material's unique ID within `knowledge`; its workspace-relative path is a separate address. There is no separate UUID identity. New materials are addressed by the filename-ID in `pcw_create`, `pcw_read`, `pcw_update`, `pcw_links`, `pcw_merge`, `pcw_reassign`, `pcw_delete`, and preparation operations.
+MCP generates a unique ID and uses it as the filename (`<generated-id>.md`). `pcw_create` accepts content and optional links, not a chosen filename. Assignment preparation reserves a generated ID for its future raw return. Store the IDs returned by MCP and use them in reads, updates, links and preparation. The ID is also the filename; there is no second identity hidden in YAML. Existing descriptive filenames remain readable until an explicitly requested migration.
 
-`pcw_rename` changes the path and updates search-row addresses without preparing or embedding an unchanged body again. If the basename changes, it also changes the filename-ID and rewrites exact incoming links. A move such as `a.md` to `nested/a.md` keeps the ID and links unchanged. It must reject a duplicate destination. It does not retain a redirect, create a replacement material, or infer semantic relationships.
+`pcw_rename` moves a material to another directory while preserving its generated basename and links. It updates search paths without preparing unchanged text and rejects a different basename or occupied destination.
 
 Migration is explicit. For a legacy UUID-addressed material, first establish its filename mapping, rewrite exact legacy links to filename-IDs, preserve body text, metadata, tables, code, sources, and meaningful relation prose, and reconcile search addresses. Do not re-embed an unchanged body merely because its filename or links changed. Do not adopt, normalize, or replace legacy memory merely because it was encountered during ordinary work.
 
@@ -21,14 +21,14 @@ Migration is explicit. For a legacy UUID-addressed material, first establish its
 An investigating or checking worker writes its own raw result. The primary first calls:
 
 ```text
-pcw_save_subagent_result(work_root, workspace, material_name, result, executor_session_id)
+pcw_save_subagent_result(work_root, workspace, assignment_id, result, executor_session_id)
 ```
 
-`material_name` is the exact filename-ID and `result` is the unmodified raw Markdown return. `executor_session_id` is the actual worker-session identifier, never a generated substitute or primary-session identifier. The MCP assigns `saved_at` in ISO 8601 UTC with an explicit timezone designator, persists both metadata fields with the text, returns them only after a real save, and rejects a missing session identifier. On a repeat delivery of the same material, raw result, and session, it keeps the original saved record and timestamp instead of duplicating it. The primary then calls `pcw_read` and only then makes a content or acceptance decision.
+`assignment_id` selects the registered assignment and MCP-allocated return ID. `result` is unmodified raw Markdown. `executor_session_id` is the actual bound worker session, never a generated substitute. MCP assigns `saved_at` in ISO 8601 UTC and saves it with the executor metadata. An exact repeat retains the original body and timestamp. The primary calls `pcw_read(material_id, assignment_id)` and then `process_result` with the saved coordinates and an explicit assessment.
 
-For a new raw return from the same executor, the primary may reuse that executor's raw-result filename by passing `expected_previous_revision` from the previously read material. MCP replaces the body only if this is an existing raw-result material with the same executor and the expected revision still matches. It preserves links, assigns a new `saved_at`, removes the old search rows, and returns `updated` with preparation pending. Without that explicit revision, a different return at an occupied name remains a conflict. A stale revision, another executor, or an ordinary knowledge material cannot be overwritten by this route; read the current record and resolve the actual conflict. An exact repeat of an already saved body and executor returns `already_saved` with its original timestamp even if a retry carries an older expected revision.
+For a continuation registered with `continuation_of`, use its retained executor/return ID and pass `expected_previous_revision` from the previously read material. Replacement preserves links, assigns new save metadata and invalidates old search rows. Another executor or an ordinary material cannot be overwritten through this route. An exact repeat returns `already_saved` without invalidating preparation, even if its retry carries an older expected revision.
 
-This operation saves the worker's new raw text unchanged; it does not authorize the primary to edit or compact the text. Choose a separate filename when earlier findings need to remain independently available. For memory and Git work, every raw return must include the affected filename-IDs, the Current path when affected, and the actual status. A generic completion sentence or an old list of affected materials does not satisfy that return contract.
+This operation saves the worker's new raw text unchanged. Register a separate assignment without reusing the return ID when earlier findings must remain independently available. Memory/Git returns identify affected IDs or paths and actual status. Register a discrepancy through `process_result` instead of silently changing the raw text; resolve it with a saved/read clarification whose accepted assessment names the prior assignment in `resolves`.
 
 For every other durable mutation, a subagent acts on the primary's prepared decision. It can call `pcw_create`, `pcw_update`, `pcw_links`, `pcw_merge`, `pcw_reassign`, `pcw_rename`, `pcw_delete`, `pcw_current_set`, `pcw_checkpoint`, or `pcw_restore` inside its authorized assignment. The primary chooses final content, consolidation, links, and replacement mappings; PCW does not infer them from similarity.
 
@@ -46,4 +46,16 @@ Current is readable Markdown with exactly these task sections: `# Goal`, `# Cons
 
 Each section written by PCW includes an HTML comment `<!-- pcw-current-length: N -->` recording the number of characters in its value. The value remains visible Markdown; the marker preserves exact text when a value itself contains section headings, code, or trailing newlines. Use `pcw_current_set` to keep these lengths consistent.
 
+An exact repeat of `pcw_checkpoint` for already committed, unchanged paths returns the existing commit with `already_checkpointed: true`; it does not create another commit or report an error merely because nothing changed.
+
 Unless the user forbids a local memory commit, a worker calls `pcw_checkpoint` for exactly the durable Current and knowledge paths changed by the request. A prohibition of, or lack of authority for, a source-project commit does not prohibit this separate local memory checkpoint. A temporary PCW work location still uses Current and knowledge with their required consolidation and local history; the location is not a user prohibition of those operations. Include both old and new paths for a rename and affected navigation files. Preserve unrelated changes. A memory checkpoint is not authority for source commits, pushes, or external changes. `pcw_restore` needs an explicit authorized target and exact paths; `pcw_reconcile` makes derived search state match externally restored or edited knowledge.
+
+## Finite service closeout
+
+After the preparation helper and memory/checkpoint worker have each returned once and their raw returns are saved/read/assessed, freeze the full retained set of material IDs and exact checkpoint paths, including those two return IDs. Reuse these executors with complete registered continuations; do not create a fresh receipt filename or a fresh executor for every pass.
+
+1. The preparation helper prepares every current pending body in that set, then calls `pcw_service_receipt(kind="preparation", material_ids=[...])`. It returns the verified `result` verbatim. The primary saves, reads and assesses it. If that first stable body differs, repeat preparation for the changed return; the next identical receipt is saved idempotently.
+2. The checkpoint worker checkpoints the exact durable set, then calls `pcw_service_receipt(kind="checkpoint", paths=[...])` and returns the verified `result` verbatim. The primary saves, reads and assesses it. The first stable checkpoint return can change its own material once.
+3. The same helper prepares that changed body and returns the same verified fixed-scope receipt. The same checkpoint worker checkpoints the changed receipt and returns its same verified fixed-scope receipt. Exact repeats preserve both indexing and checkpoint state. `finish` checks the actual result.
+
+Receipts name every affected object and its observed operation status. They omit volatile hashes and timestamps from the Markdown; those remain available in MCP operation evidence, Git history and raw-save metadata. Errors, changed scope or substantive new findings must be returned honestly, never suppressed to force an identical body. Reassess and freeze the new scope after those are resolved. If checkpoint is explicitly forbidden, record that prohibition when opening the task and close only the permitted preparation work.

@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.5.0 defines one `$pcw` skill and a persistent local MCP server. This plan records the adopted design and the acceptance boundaries for its implementation.
+Version 0.6.0 defines one `$pcw` skill and a persistent local MCP server. This plan records the adopted design and the acceptance boundaries for its implementation.
 
 ## Responsibilities and workflow
 
@@ -16,7 +16,7 @@ A user request to prepare context authorizes memory preparation and required bou
 
 ## Result ordering and checks
 
-Workers author their own free-form Markdown results: facts, source coordinates, changes, checks, uncertainty, mismatch, and blockers. On every worker return, the primary first calls `pcw_save_subagent_result(work_root, workspace, material_name, result, executor_session_id)` with the exact raw text and actual session ID. MCP assigns UTC `saved_at`, returns a successful save only after persistence, and preserves the original saved record on duplicate delivery. The primary then uses `pcw_read` to see saved text and metadata before any substantive decision. This raw save and environment/tools-map operations are the primary's narrow direct-MCP exceptions; content changes, Current, Git, source checks, and applying decisions remain worker tasks.
+Workers author their own free-form Markdown results: facts, source coordinates, changes, checks, uncertainty, mismatch, and blockers. On every worker return, the primary first calls `pcw_save_subagent_result(work_root, workspace, assignment_id, result, executor_session_id)` with the exact raw text and actual session ID. MCP assigns UTC `saved_at`, returns a successful save only after persistence, and preserves the original saved record on duplicate delivery. The primary then uses `pcw_read` to see saved text and metadata before any substantive decision. This raw save and environment/tools-map operations are the primary's narrow direct-MCP exceptions; content changes, Current, Git, source checks, and applying decisions remain worker tasks.
 
 Memory and Git returns include the affected material filename-IDs, Current path when affected, and actual status. A new raw return from the same executor may reuse its raw-result filename with a matching `expected_previous_revision`; it gets a new save timestamp and needs preparation again. An identical, still accurate return remains idempotent. Stale affected IDs or a generic success claim do not satisfy the return contract.
 
@@ -24,7 +24,7 @@ The primary schedules factual checks at intermediate or final moments selected f
 
 ## Durable memory
 
-Each workspace stores readable `current.md` and Markdown materials below `knowledge/`. The filename, including `.md`, is the material ID unique within knowledge. The path is separate. `links` contains exact filename-IDs for directional navigation; no type, explanation, or mirrored edge is required. Rename updates the path and search rows; it changes the ID and rewrites incoming links only when the basename changes. A move into a subdirectory with the same filename keeps the ID and links. Neither operation re-embeds unchanged content. Legacy UUID identity is migrated only under an explicit request; migration retains content and rewrites links deliberately.
+Each workspace stores readable `current.md` and Markdown materials below `knowledge/`. MCP generates new IDs and uses them as filenames; agents never choose names at creation. The full filename is the material ID. Moves preserve it and update only search paths. Existing materials remain readable without automatic migration. `links` contains exact generated filename-IDs with no relation types or mandatory reverse edges.
 
 Knowledge remains free Markdown. Consolidation removes actual repetition from working materials while preserving substantive facts, conditions, uncertainty, tables, code, and implementation details. Source attribution and provenance metadata need not be retained after compaction. PCW never chooses semantic merges or link targets from vector similarity.
 
@@ -47,3 +47,9 @@ Contract tests must check documentation/reference reachability, the exact action
 The measured retrieval and CPU/RAM assessment is recorded in [docs/search-assessment.md](docs/search-assessment.md). Its calibrated starting profile applies to the frozen project fixture; bundled defaults remain provisional. Native semantic preparation and whole-workflow acceptance require separate actual-agent evidence.
 
 For an absent or stale tools map, the primary rebuilds it from the native environment's available tools, descriptors, and necessary environment configuration before assigning work. No bootstrap research launch is introduced.
+
+## Workflow correction after the cluster-context audit
+
+The passive control store `.pcw/.control/<workspace>/` holds model maps and an explicit task/assignment ledger independently of the derived index. A request is opened with `pcw_task_begin`; a ready preparation returns the complete native handoff and a generated return ID. Native executor binding and `pcw_assignment_get` preserve the prepared context. Raw save/read/assessment states and unresolved discrepancies persist across recovery.
+
+`finish` checks retained affected material preparation, registered return processing, Current and exact memory checkpoint state. Frozen-scope service receipts make closeout finite without creating a new material for each technical completion. Isolated regressions use real LanceDB and temporary Git with injected test vectors; historical native evidence below does not validate these new APIs.

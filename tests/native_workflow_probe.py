@@ -436,7 +436,8 @@ class FaultAfterSavedReturn:
             if actor != self.main_thread_id: return
             args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
             if item.get("tool") == "pcw_save_subagent_result":
-                raw = args.get("result"); child = args.get("executor_session_id"); material = args.get("material_name"); saved = self._payload(item)
+                raw = args.get("result"); child = args.get("executor_session_id"); saved = self._payload(item)
+                material = saved.get("id") if isinstance(saved, dict) else None
                 if not isinstance(raw, str) or raw not in self.child_finals.values(): return
                 if len(self.child_threads) != 1 or child not in self.child_finals or self.child_finals[child].encode() != raw.encode():
                     self._inconclusive("saved_return_does_not_match_only_actual_child_final", message, index); return

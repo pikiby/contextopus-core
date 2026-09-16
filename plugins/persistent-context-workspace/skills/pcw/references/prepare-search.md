@@ -10,6 +10,8 @@ Read when a material has new or changed content, or restored/imported content la
 
 The primary saves and reads the helper's actual raw completion through the same `pcw_save_subagent_result` → `pcw_read` order. A compact operational status is still a subagent return. Reading the prepared material or `pcw_status` does not replace this primary save.
 
+During fixed-scope closeout, use the verified `pcw_service_receipt` text described in [Memory operations](memory-operations.md#finite-service-closeout). Return its `result` verbatim instead of appending volatile revision lists. The individual executor identity is already bound through native metadata and `pcw_assignment_get`; the primary supplies it separately to raw save. Check that identity before returning. Any identity conflict, additional error or substantive new observation takes precedence over a successful service receipt.
+
 ## Helper assignment
 
 Prepare the assigned knowledge material for search. Obtain its original body with `pcw_prepare`, divide it into semantic parts, and submit a JSON array of original text strings in their original order using `pcw_submit_parts`. Return a compact completion status or actual error only after that direct flow. Keep all substantive content without additions, omissions, rearrangement, rewriting, or summaries; whitespace between parts may be omitted. Preserve tables and code literally. Keep a table with its headers, units, and existing explanation; keep code with its relevant explanation, and a statement with its conditions and exceptions.

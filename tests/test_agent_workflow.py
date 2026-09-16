@@ -7,14 +7,18 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "persistent-context-workspace"))
 
 from pcw_runtime.agent_workflow import AgentWorkflow, WorkflowError
+from pcw_runtime.control import control_store
 
 
 class Material:
     def __init__(self, name: str, *, saved_at: str | None = None, session: str | None = None):
+        self.id = name
+        self.revision = "fixture-revision"
         self.path = "knowledge/" + name
         self.metadata = {}
         if saved_at is not None:
@@ -25,13 +29,31 @@ class Material:
 
 class Runtime:
     def __init__(self, root: Path):
-        self.state = root / ".pcw-runtime"
-        self.state.mkdir()
+        self.work_root = root
+        self.root = root / ".pcw" / "unit"
+        self.state = self.root / ".pcw-runtime"
+        self.state.mkdir(parents=True)
+        self.control = control_store(root, "unit")
         self.materials = {}
 
     @contextmanager
     def _guard(self):
         yield
+
+    def _assert_safe(self, path):
+        assert path.is_relative_to(self.root)
+
+    def _allocate_material_id(self):
+        return uuid.uuid4().hex + ".md"
+
+    def durable_state(self):
+        return {"files": {}, "paths": {k: v.path for k, v in self.materials.items()}, "pending": [], "unregistered": []}
+
+    def current_get(self):
+        return {"goal": "Test", "constraints": "Temporary", "completion": "Done", "step": "Work", "blocker": ""}
+
+    def uncheckpointed(self, paths):
+        return []
 
     def _write(self, path: Path, content: str):
         path.write_text(content, encoding="utf-8")
@@ -86,6 +108,7 @@ class WorkflowTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.workflow = AgentWorkflow(Runtime(Path(self.directory.name)))
+        self.workflow.task_begin("Test", "Temporary", "Done")
 
     def test_environment_lifecycle_is_canonical_and_forces_map_refresh(self):
         workflow = self.workflow
@@ -158,7 +181,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue({item["field"] for item in missing_prepare["missing"]} >= {"tools_map", "context.assignment"})
 
         publish_current(workflow)
-        self.assertTrue(workflow.action_requirements("prepare_assignment", {"assignment": assignment()})["ready"])
+        ready = workflow.action_requirements("prepare_assignment", {"assignment": assignment()})
+        self.assertTrue(ready["ready"])
+        aid = ready["handoff"]["assignment_id"]
+        result_id = ready["handoff"]["return_id"]
+        workflow.assignment_bind(aid, "worker-1")
+        workflow.assignment_get(aid, "worker-1")
         empty_scope = workflow.action_requirements("prepare_assignment", {"assignment": assignment(goal="")})
         self.assertFalse(empty_scope["ready"])
         extra_field = workflow.action_requirements("prepare_assignment", {"assignment": assignment(extra=object())})
@@ -172,12 +200,14 @@ class WorkflowTests(unittest.TestCase):
         process_missing = workflow.action_requirements("process_result", {})
         self.assertFalse(process_missing["ready"])
         self.assertEqual("save_subagent_result", process_missing["missing"][0]["action"])
-        workflow.runtime.materials["result.md"] = Material("result.md", saved_at="2026-01-02T03:04:05Z", session="worker-1")
-        material_only = workflow.action_requirements("process_result", {"result": {"material_name": "result.md"}})
+        workflow.runtime.materials[result_id] = Material(result_id, saved_at="2026-01-02T03:04:05Z", session="worker-1")
+        material_only = workflow.action_requirements("process_result", {"result": {"material_name": result_id}})
         self.assertFalse(material_only["ready"])
-        mismatched = workflow.action_requirements("process_result", {"result": {"material_name": "result.md", "executor_session_id": "other"}})
+        mismatched = workflow.action_requirements("process_result", {"result": {"material_name": result_id, "executor_session_id": "other"}})
         self.assertFalse(mismatched["ready"])
-        process = workflow.action_requirements("process_result", {"result": {"material_name": "result.md", "executor_session_id": "worker-1"}})
+        workflow.note_saved(aid, workflow.runtime.materials[result_id])
+        workflow.note_read(aid, workflow.runtime.materials[result_id])
+        process = workflow.action_requirements("process_result", {"result": {"assignment_id": aid, "material_name": result_id, "executor_session_id": "worker-1"}, "assessment": {"status": "accepted", "reason": "Fixture observed"}})
         self.assertTrue(process["ready"])
 
         transition_missing = workflow.action_requirements("transition", {})
@@ -186,16 +216,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(transition_none_due["ready"])
         transition_blocked = workflow.action_requirements("transition", {"mismatch_needs_attention": True, "checks_due": {"status": "none_due", "reason": "Not needed"}})
         self.assertFalse(transition_blocked["ready"])
-        transition_verified = workflow.action_requirements("transition", {"checks_due": {"status": "assigned", "checks": [{"material_name": "result.md", "executor_session_id": "worker-1"}]}})
+        transition_verified = workflow.action_requirements("transition", {"checks_due": {"status": "assigned", "checks": [{"material_name": result_id, "executor_session_id": "worker-1"}]}})
         self.assertTrue(transition_verified["ready"])
 
         finish_missing = workflow.action_requirements("finish", {})
         self.assertFalse(finish_missing["ready"])
         finish_none = workflow.action_requirements("finish", {"acceptance_checks": {"status": "none_assigned", "scope": "Whole requested task", "reason": "No factual check was assigned."}})
         self.assertTrue(finish_none["ready"])
-        finish_material_only = workflow.action_requirements("finish", {"acceptance_checks": {"status": "assigned", "scope": "Whole requested task", "checks": [{"material_name": "result.md"}]}})
+        finish_material_only = workflow.action_requirements("finish", {"acceptance_checks": {"status": "assigned", "scope": "Whole requested task", "checks": [{"material_name": result_id}]}})
         self.assertFalse(finish_material_only["ready"])
-        finish_verified = workflow.action_requirements("finish", {"acceptance_checks": {"status": "assigned", "scope": "Whole requested task", "checks": [{"material_name": "result.md", "executor_session_id": "worker-1"}]}})
+        finish_verified = workflow.action_requirements("finish", {"acceptance_checks": {"status": "assigned", "scope": "Whole requested task", "checks": [{"material_name": result_id, "executor_session_id": "worker-1"}]}})
         self.assertTrue(finish_verified["ready"])
         self.assertEqual("2026-01-02T03:04:05Z", finish_verified["prerequisites"][1]["result"]["saved_at"])
 

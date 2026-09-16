@@ -13,6 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict
 
+from .assignments import TaskLedger
+from .control import RecoveryRequired
+
 
 class WorkflowError(ValueError):
     """A malformed workflow input or stored workflow asset."""
@@ -42,6 +45,7 @@ class ToolsMapProfile(TypedDict):
 class SavedResultCoordinate(TypedDict):
     material_name: str
     executor_session_id: str
+    assignment_id: NotRequired[str]
 
 
 class AssignmentContext(TypedDict):
@@ -55,6 +59,7 @@ class AssignmentContext(TypedDict):
     profile: str
     selection_reason: str
     launch_parameters: NotRequired[dict[str, object]]
+    purpose: NotRequired[Literal["work", "recovery"]]
 
 
 class AssignmentKnowledgeContext(TypedDict):
@@ -82,6 +87,8 @@ class ActionContext(TypedDict):
     acceptance_checks: NotRequired[AcceptanceChecks]
     mismatch_needs_attention: NotRequired[bool]
     planned_checks_due: NotRequired[bool]
+    continuation_of: NotRequired[str]
+    assessment: NotRequired[dict[str, Any]]
 
 
 _ACTION_NAMES = frozenset({"prepare_assignment", "process_result", "transition", "finish"})
@@ -205,10 +212,58 @@ class AgentWorkflow:
 
     def __init__(self, runtime: Any):
         self.runtime = runtime
-        self.path = Path(runtime.state) / _STATE_FILE
+        self.path = runtime.control.root / _STATE_FILE
+        self.ledger = TaskLedger(runtime)
+
+    def _guard(self):
+        return self.runtime.control.guard()
+
+    def task_begin(self, goal: str, constraints: str, completion: str,
+                   checkpoint_policy: str = "required", checkpoint_reason: str = ""):
+        return self.ledger.begin(goal, constraints, completion, checkpoint_policy, checkpoint_reason)
+
+    def task_status(self):
+        return self.ledger.status()
+
+    def assignment_bind(self, assignment_id: str, executor_session_id: str):
+        return self.ledger.bind(assignment_id, executor_session_id)
+
+    def assignment_get(self, assignment_id: str, executor_session_id: str):
+        with self._guard():
+            state = self._load()
+            _, entry = self.ledger.entry(self.ledger.load(), assignment_id)
+            revision = (state.get("environment") or {}).get("environment_revision")
+            if self._map_status(state) != "current" or entry["environment_revision"] != revision:
+                reason = "Environment changed after preparation; refresh the map and prepare the assignment again"
+                handoff = self.ledger.bind(assignment_id, executor_session_id, delivered=True)
+                self.ledger.delivery_blocker(assignment_id, reason)
+                return {**handoff, "status": "blocked", "reason": reason,
+                        "instruction": "Do not execute this assignment. Return this blocker to the primary for save/read and re-preparation."}
+            return {**self.ledger.bind(assignment_id, executor_session_id, delivered=True), "status": "ready"}
+
+    def assignment_cancel(self, assignment_id: str, reason: str):
+        return self.ledger.cancel(assignment_id, reason)
+
+    def result_target(self, assignment_id, executor_session_id):
+        return self.ledger.result_target(assignment_id, executor_session_id)
+
+    def note_saved(self, assignment_id, material):
+        return self.ledger.note_saved(assignment_id, material)
+
+    def note_read(self, assignment_id, material):
+        return self.ledger.note_read(assignment_id, material)
 
     def _load(self) -> dict[str, object]:
+        self.runtime.control.safe(self.path)
         if not self.path.exists():
+            legacy = Path(self.runtime.state) / _STATE_FILE
+            self.runtime._assert_safe(legacy)
+            if legacy.is_file():
+                state = json.loads(legacy.read_text(encoding="utf-8"))
+                if state.get("schema_version") != 1:
+                    raise WorkflowError("Stored legacy workflow state has an unsupported schema")
+                self.runtime.control.write(self.path, json.dumps(state) + "\n")
+                return state
             return {"schema_version": 1, "environment": None, "tools_map": None}
         try:
             state = json.loads(self.path.read_text(encoding="utf-8"))
@@ -223,7 +278,7 @@ class AgentWorkflow:
     def _store(self, state: dict[str, object]) -> dict[str, object]:
         persisted = dict(state)
         persisted["state_revision"] = _revision({key: value for key, value in persisted.items() if key != "state_revision"})
-        self.runtime._write(self.path, json.dumps(persisted, ensure_ascii=False, indent=2) + "\n")
+        self.runtime.control.write(self.path, json.dumps(persisted, ensure_ascii=False, indent=2) + "\n")
         return persisted
 
     @staticmethod
@@ -239,7 +294,7 @@ class AgentWorkflow:
         return "current"
 
     def environment_get(self) -> dict[str, object]:
-        with self.runtime._guard():
+        with self._guard():
             state = self._load()
             environment = state.get("environment")
             return {
@@ -253,7 +308,7 @@ class AgentWorkflow:
     def environment_check(self, environment_snapshot: EnvironmentSnapshot) -> dict[str, object]:
         snapshot = normalize_environment_snapshot(environment_snapshot)
         environment_revision = _revision(snapshot)
-        with self.runtime._guard():
+        with self._guard():
             state = self._load()
             previous = state.get("environment")
             changed = not isinstance(previous, dict) or previous.get("environment_revision") != environment_revision
@@ -276,7 +331,7 @@ class AgentWorkflow:
             }
 
     def tools_map_get(self) -> dict[str, object]:
-        with self.runtime._guard():
+        with self._guard():
             state = self._load()
             return {
                 "status": self._map_status(state),
@@ -327,7 +382,7 @@ class AgentWorkflow:
 
     def tools_map_publish(self, expected_environment_revision: str, profiles: list[ToolsMapProfile]) -> dict[str, object]:
         expected = _string(expected_environment_revision, "expected_environment_revision")
-        with self.runtime._guard():
+        with self._guard():
             state = self._load()
             environment = state.get("environment")
             if not isinstance(environment, dict):
@@ -367,8 +422,21 @@ class AgentWorkflow:
         name = coordinate.get("material_name")
         if not isinstance(name, str) or not _NAME.fullmatch(name) or name.startswith(".") or ".." in name.split("/"):
             return None, [{"field": f"{label}.material_name", "reason": "A safe Markdown material name is required.", "action": "save_subagent_result"}]
-        material = self.runtime.materials.get(name)
+        material = getattr(self.runtime, "materials", {}).get(name)
         if material is None:
+            assignment_id = coordinate.get("assignment_id")
+            if isinstance(assignment_id, str):
+                try:
+                    _, entry = self.ledger.entry(self.ledger.load(), assignment_id)
+                except ValueError:
+                    entry = {}
+                if (entry.get("retired_after_processing") and entry.get("processed_at") and
+                        entry.get("return_id") == name and
+                        entry.get("executor_session_id") == coordinate.get("executor_session_id") and
+                        entry.get("saved_revision") == entry.get("read_revision")):
+                    return {"material_name": name, "executor_session_id": entry["executor_session_id"],
+                            "saved_at": entry["saved_at"], "assignment_id": assignment_id,
+                            "status": "read_and_processed_before_explicit_removal"}, []
             return None, [{"field": f"{label}.material_name", "reason": "The declared saved result does not exist in this workspace.", "action": "save_subagent_result"}]
         metadata = material.metadata
         saved_at = metadata.get("saved_at")
@@ -435,7 +503,12 @@ class AgentWorkflow:
             extras_context = set(supplied_context) - {"summary", "material_ids"}
             if extras_context:
                 missing.append({"field": "context.assignment.context", "reason": "Unknown context fields: " + ", ".join(sorted(extras_context)), "action": "prepare_assignment"})
-        extras = set(value) - required - {"launch_parameters"}
+        purpose = value.get("purpose", "work")
+        if purpose not in {"work", "recovery"}:
+            missing.append({"field": "context.assignment.purpose", "reason": "purpose must be work or recovery", "action": "prepare_assignment"})
+        else:
+            normalized["purpose"] = purpose
+        extras = set(value) - required - {"launch_parameters", "purpose"}
         if extras:
             missing.append({"field": "context.assignment", "reason": "Unknown assignment fields: " + ", ".join(sorted(extras)), "action": "prepare_assignment"})
         if "launch_parameters" in value:
@@ -544,20 +617,35 @@ class AgentWorkflow:
             requirements = "Relative reference links resolve through references_root.\n\n" + requirements
         prerequisites: list[dict[str, object]] = []
         missing: list[dict[str, str]] = []
+        handoff = None
         if not requirements:
             missing.append({"field": "requirements", "reason": "The packaged action-requirements section is unavailable.", "action": "repair_plugin"})
-        with self.runtime._guard():
+        with self._guard():
             state = self._load()
             map_status = self._map_status(state)
             allowed_context = {
-                "prepare_assignment": {"assignment"},
-                "process_result": {"result"},
+                "prepare_assignment": {"assignment", "continuation_of"},
+                "process_result": {"result", "assessment"},
                 "transition": {"checks_due", "mismatch_needs_attention", "planned_checks_due"},
                 "finish": {"acceptance_checks", "mismatch_needs_attention", "planned_checks_due"},
             }[action]
             extras = set(context) - allowed_context
             if extras:
                 missing.append({"field": "context", "reason": "Fields are not valid for this action: " + ", ".join(sorted(extras)), "action": action})
+            try:
+                self.ledger.active(self.ledger.load())
+            except ValueError as exc:
+                missing.append({"field": "task", "reason": str(exc), "action": "task_begin"})
+            recovery_assignment = (action == "prepare_assignment" and
+                                   isinstance(context.get("assignment"), dict) and
+                                   context["assignment"].get("purpose") == "recovery")
+            if not recovery_assignment:
+                try:
+                    with self.runtime._guard():
+                        pass
+                except Exception as exc:
+                    missing.append({"field": "runtime", "reason": str(exc),
+                                    "action": "recover_workspace" if isinstance(exc, RecoveryRequired) else "prepare_assignment"})
             if action == "prepare_assignment":
                 assignment, assignment_missing = self._assignment(context.get("assignment"))
                 missing.extend(assignment_missing)
@@ -585,14 +673,30 @@ class AgentWorkflow:
                         assert assignment is not None
                         material_ids = assignment["context"]["material_ids"]  # type: ignore[index]
                         for material_id in material_ids:
-                            if material_id not in self.runtime.materials:
+                            if material_id not in getattr(self.runtime, "materials", {}):
                                 missing.append({"field": "context.assignment.context.material_ids", "reason": f"Referenced knowledge material is unavailable: {material_id}", "action": "read_or_refresh_knowledge"})
                         missing.extend(self._launch_parameters(assignment.get("launch_parameters"), profile, state))
+                if not missing:
+                    try:
+                        handoff = self.ledger.register(assignment, state["environment"]["environment_revision"], context.get("continuation_of"))
+                    except ValueError as exc:
+                        missing.append({"field": "assignment", "reason": str(exc), "action": "prepare_assignment"})
             if action == "process_result":
                 result, result_missing = self._saved_result(context.get("result"), "context.result")
                 missing.extend(result_missing)
                 if result is not None:
                     prerequisites.append({"field": "context.result", "status": "verified", "result": result})
+                coordinate = context.get("result") or {}
+                if not isinstance(coordinate, dict) or not coordinate.get("assignment_id"):
+                    missing.append({"field": "context.result.assignment_id", "reason": "Identify the registered assignment for this return.", "action": "task_status"})
+                elif not missing:
+                    try:
+                        _, entry = self.ledger.entry(self.ledger.load(), coordinate["assignment_id"])
+                        if entry["return_id"] != coordinate.get("material_name") or entry["executor_session_id"] != coordinate.get("executor_session_id"):
+                            raise ValueError("Result coordinates do not match the registered assignment")
+                        self.ledger.process(coordinate["assignment_id"], context.get("assessment"))
+                    except ValueError as exc:
+                        missing.append({"field": "context.assessment", "reason": str(exc), "action": "process_result"})
             elif action == "transition":
                 for flag in ("mismatch_needs_attention", "planned_checks_due"):
                     if flag in context and type(context[flag]) is not bool:
@@ -609,9 +713,16 @@ class AgentWorkflow:
                 checked, checks_missing = self._checks_declaration(context.get("acceptance_checks"), field="context.acceptance_checks", none_status="none_assigned", require_scope=True, block_none=block_none)
                 prerequisites.extend(checked)
                 missing.extend(checks_missing)
+                try:
+                    missing.extend(self.ledger.completion_missing())
+                except (ValueError, OSError) as exc:
+                    missing.append({"field": "completion", "reason": str(exc), "action": "task_status"})
+                if not missing:
+                    self.ledger.complete()
         return {"action": action, "requirements": requirements,
                 "requirements_source": requirements_source, "references_root": references_root,
                 "ready": not missing,
                 "prerequisites": prerequisites, "missing": missing,
                 "reason": None if not missing else "Required machine-checkable workflow data is missing or does not match saved state.",
-                "next_action": None if not missing else missing[0]["action"]}
+                "next_action": None if not missing else missing[0]["action"],
+                "handoff": handoff}

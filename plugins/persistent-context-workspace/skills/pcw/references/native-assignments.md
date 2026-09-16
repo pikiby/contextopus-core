@@ -1,5 +1,7 @@
 # Native assignments
 
+Use the complete `handoff.launch_message` returned by a successful `prepare_assignment`. After launch, the primary binds the actual native session with `pcw_assignment_bind`. The executor calls `pcw_assignment_get` with the registered assignment ID and its own native session ID before any task work. That response, including current context and acceptance criteria, is the authoritative handoff. A follow-up must be registered anew with complete fresh context and `continuation_of`; a shortened message must not substitute for that stored assignment. Status claims require current observations, not a status copied from an earlier turn.
+
 Read after `pcw_action_requirements(..., action="prepare_assignment", ...)` and before a real-source investigation, implementation, Current update, durable knowledge operation, Git operation, or factual check. The primary retains the user conversation, scope, model/reasoning choice, and final decision. It starts the native subagent directly; PCW neither dispatches it nor supplies a Controller or completion hook.
 
 Choose the concrete model and supported reasoning settings from the current tools-map profile and pass both explicitly. Use a clean, prepared context where the host supports it, such as `fork_turns: "none"`; this is not a separate filesystem sandbox. A prepared local task can use a smaller available model when its map profile and the task justify it. Do not manufacture provider rankings or cross-provider effort labels.

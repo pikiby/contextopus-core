@@ -7,10 +7,10 @@ description: Maintain and use a Persistent Context Workspace from a natural-lang
 
 The primary talks with the user, decides scope, reads PCW memory, chooses native subagents, and accepts work. Native subagents inspect real sources, make authorized changes, check results, write Current and apply knowledge or Git changes. PCW does not dispatch subagents, run a Controller, or use hooks.
 
-After MCP is available, use this short loop throughout the request:
+Open or resume the user request with `pcw_task_begin` and `pcw_task_status`. These coordination calls remain available independently of the workspace index. Use this short loop throughout the request:
 
 1. Call `pcw_action_requirements` for the next action.
-2. Act on its instructions and the user's authority. Before a native launch, obtain `prepare_assignment` with `ready: true` for the complete assignment; correct missing prerequisites and repeat the call when it is false.
+2. Act on its instructions and the user's authority. Before a native launch, obtain `prepare_assignment` with `ready: true` for the complete assignment. Send its complete `handoff.launch_message`, use the selected model/reasoning, and bind the returned native executor with `pcw_assignment_bind`. The executor calls `pcw_assignment_get` before work. Correct missing prerequisites and repeat a rejected preparation.
 3. Submit the result through the applicable MCP operation.
 4. Call it again before the next action.
 
@@ -26,18 +26,20 @@ Read [Native assignments](references/native-assignments.md) before delegating re
 
 ## Receive, save, decide
 
-The worker returns its own free-form Markdown findings, changes, sources, checks, uncertainty, and blocker; memory and Git returns include affected material IDs and status. The primary must first call `pcw_save_subagent_result` with that raw return, an exact filename-ID, and the worker's actual `executor_session_id`. Do not rewrite, summarize, compact, or make a semantic decision before this primary save. Then read the saved material through `pcw_read`, including `saved_at` and `executor_session_id`, before deciding on follow-up, consolidation, links, or acceptance.
+The worker returns its own free-form Markdown findings, changes, sources, checks, uncertainty, and blocker; memory and Git returns include affected material IDs and status. The primary first calls `pcw_save_subagent_result` with the raw return, registered `assignment_id`, and actual `executor_session_id`. MCP uses its allocated return ID. Then call `pcw_read` with both material ID and assignment ID, and `process_result` with an explicit assessment. Do not rewrite or compact the raw return before saving. Mark a discovered discrepancy as `needs_attention` and resolve it through a saved, read clarification/check; never silently erase the original observation.
 
-The primary may itself perform this raw-result save and the environment/tools-map operations needed to choose a native agent. All other Current writes, content application, source checks, and Git operations are native-subagent work. Preserve substantive facts, conditions, uncertainty, tables, and code during consolidation. Compaction does not require retaining source attribution or provenance metadata.
+The primary performs raw-result recording and task/assignment/environment coordination through MCP. Current writes, content application, source checks, preparation and Git operations are native-subagent work. Preserve substantive facts, conditions, uncertainty, tables, and code during consolidation. Compaction does not require retaining source attribution or provenance metadata.
 
 Schedule a factual check at moments chosen from task complexity, and add one when a return reveals a mismatch that needs attention. A return alone never mandates another check. The checker must reproduce the result or inspect the real source, including for a no-change research result. Save and read its raw return by the same order, then the primary decides whether the observed result satisfies the user request.
 
 ## Memory rules
 
-Read [Memory operations](references/memory-operations.md) before durable memory work. A material's filename, including `.md`, is its unique ID within `knowledge`; its path is separate. Rename updates search paths without re-embedding unchanged body text; exact incoming links change only when the filename-ID changes. Moving `a.md` to `nested/a.md` preserves its ID and links. Migrate legacy UUID-addressed memory only under an explicit migration request.
+Read [Memory operations](references/memory-operations.md) before durable memory work. MCP generates each new material ID and its filename; agents supply content, never filenames for creation. Moving a material preserves its generated basename and links. Existing filenames remain readable; migrate existing memory only under an explicit request.
 
 Current is readable Markdown with five sections: Goal, Constraints, Completion, Current step, and Blocker. Keep it compact. Change step or blocker only when the decision or obstacle changes; do not rewrite Current after every tool return.
 
 For new or changed bodies, use [Prepare search](references/prepare-search.md). Preserve the literal semantic split and existing embedding/search behavior. Read [Embedding configuration](references/embeddings.md) only for provider configuration, search settings, or embedding failures. Numerical defaults are engineering defaults, not measured quality, price, latency, or resource claims.
 
 Use `pcw_checkpoint` only through an authorized native assignment for exact durable memory paths. Source commits, pushes, package installation, model download, and absent-component repair need their own user authority as described in Runtime setup.
+
+Before finishing, follow the bounded service-return closeout in [Memory operations](references/memory-operations.md#finite-service-closeout). `finish` must report `ready: true` after all affected memory is prepared and checkpointed and all registered returns are saved, read and assessed. A concrete user prohibition of checkpoint is recorded in `pcw_task_begin`; unfinished authorized work is not a blocker.

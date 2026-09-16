@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from .agent_workflow import (ActionContext, ActionName, AgentWorkflow, EnvironmentSnapshot,
                              ToolsMapProfile)
 from .runtime import PCWRuntime
+from .control import RecoveryRequired
 
 mcp = FastMCP("persistent-context-workspace", instructions=(
     "Operate only on an explicitly selected work_root and .pcw workspace. "
@@ -27,7 +28,7 @@ def runtime(work_root: str, workspace: str) -> PCWRuntime:
     key = (str(Path(work_root).resolve()), workspace)
     with _cache_lock:
         if key not in _runtimes:
-            _runtimes[key] = PCWRuntime(work_root, workspace)
+            _runtimes[key] = PCWRuntime(work_root, workspace, initialize=False)
         return _runtimes[key]
 
 
@@ -47,10 +48,10 @@ _DESCRIPTIONS = {
     "status": "Open selected workspace; report counts, pending preparation and active embedding/search configuration without loading model weights.",
     "list": "List bounded knowledge metadata; does not return material bodies.",
     "read": "Read the complete original material and exact navigation links by its filename-ID.",
-    "create": "Save supplied Markdown as a new material; path is relative to knowledge/. Then prepare and submit original semantic parts.",
+    "create": "Create a material from supplied Markdown. MCP generates its unique ID and filename; do not provide a name. Then prepare and submit original semantic parts.",
     "adopt": "Explicitly add navigation metadata to an existing knowledge Markdown file while preserving its body and other metadata; the filename remains its ID.",
     "update": "Save a supplied final body under the same ID; invalidate stale vectors and return pending preparation. Optional revision prevents overwriting a newer body.",
-    "rename": "Move a material inside knowledge/ and update search paths without re-embedding its unchanged body. Change the filename-ID and exact incoming links only when the basename changes; a move with the same basename preserves ID and links.",
+    "rename": "Move a material inside knowledge/ while preserving its generated filename-ID. Update search paths without re-embedding unchanged text. A different basename is rejected.",
     "delete": "Delete exact material after removing incoming navigation IDs. Reports partial applied changes on failure.",
     "links": "Add/remove exact outgoing IDs, deduplicate and avoid self-links. No semantic editing or embedding calls.",
     "reassign": "Rewrite incoming links using explicit old-ID to surviving-ID mapping; does not delete materials or change bodies.",
@@ -65,7 +66,14 @@ _DESCRIPTIONS = {
     "checkpoint": "Explicit local Git checkpoint of exact current.md/knowledge Markdown paths. Initialize separate memory Git if needed. No source-project commits, broad staging, hooks or remote push.",
     "restore": "Explicitly restore selected exact memory paths from local Git commit, invalidate changed search rows and report pending original semantic preparation. This can replace current contents.",
     "migrate_legacy_ids": "Explicitly migrate legacy YAML UUID identities and links to filename IDs without rewriting material bodies or vectors. Opening a workspace never performs this migration.",
-    "save_subagent_result": "Persist the raw Markdown returned by a completed subagent with its actual executor session ID. An exact retry is idempotent; a distinct later raw return may replace the same saved raw-result material only with its expected_previous_revision and the same executor. The primary agent initiates this save before reading and making content decisions; the tool does not launch or assess the subagent.",
+    "save_subagent_result": "Persist a registered assignment's unmodified return with its actual executor session ID. MCP uses the return ID it allocated when preparing that assignment. Exact delivery is idempotent; a continuation revises the same executor's return only with expected_previous_revision. Primary then reads using assignment_id and declares its assessment. This does not launch or assess the subagent.",
+    "recover_workspace": "Assigned worker explicitly recreates missing runtime directories. Missing knowledge remains blocked unless its recreation is explicitly authorized; this does not restore lost knowledge.",
+    "service_receipt": "A service worker obtains a deterministic factual return for an exact set of prepared materials or checkpointed paths. It verifies actual current state. Return result verbatim; report new errors or mismatches separately and honestly. Volatile revision/commit evidence remains in observed, not in the stable Markdown.",
+    "task_begin": "Primary records the user request before native work. Capture its baseline and checkpoint authority independently of the workspace index; preserve an unfinished request on retry.",
+    "task_status": "Read the active request and every registered assignment, executor, reserved return ID, save/read/assessment state and outstanding discrepancy.",
+    "assignment_bind": "Primary associates the registered assignment with the actual native executor after launch. Never invent the executor ID.",
+    "assignment_get": "Executor obtains its full registered assignment before work using its own native session ID. Verifies the prepared environment revision and records delivery of this exact context.",
+    "assignment_cancel": "Cancel an unlaunched prepared assignment with an explicit reason. A launched worker must return its findings or blocker and cannot be silently discarded.",
     "environment_get": "Read the selected workspace environment snapshot and whether its model map is absent, current, or refresh_required.",
     "environment_check": "Record an actual portable environment snapshot and derive canonical environment_revision from version, launchable models, reasoning capabilities and native launch constraints. A changed revision requires a map refresh.",
     "tools_map_get": "Read profiles published by the primary agent and their binding to the current environment revision. This tool never chooses a model.",
@@ -92,7 +100,10 @@ def _register(method_name: str, description: str):
             parameters.append(parameter.replace(annotation=annotations.get(parameter.name, parameter.annotation)))
 
     def tool(work_root: str, workspace: str, **kwargs):
-        return getattr(runtime(work_root, workspace), method_name)(**kwargs)
+        try:
+            return getattr(runtime(work_root, workspace), method_name)(**kwargs)
+        except RecoveryRequired as exc:
+            return exc.details
 
     tool.__name__ = "pcw_" + method_name
     tool.__doc__ = description
@@ -135,6 +146,28 @@ def pcw_action_requirements(work_root: str, workspace: str, action: ActionName,
     return workflow(work_root, workspace).action_requirements(action, context)
 
 
+def pcw_task_begin(work_root: str, workspace: str, goal: str, constraints: str, completion: str,
+                   checkpoint_policy: str = "required", checkpoint_reason: str = "") -> dict:
+    return workflow(work_root, workspace).task_begin(goal, constraints, completion, checkpoint_policy, checkpoint_reason)
+
+
+def pcw_task_status(work_root: str, workspace: str) -> dict:
+    return workflow(work_root, workspace).task_status()
+
+
+def pcw_assignment_bind(work_root: str, workspace: str, assignment_id: str, executor_session_id: str) -> dict:
+    return workflow(work_root, workspace).assignment_bind(assignment_id, executor_session_id)
+
+
+def pcw_assignment_get(work_root: str, workspace: str, assignment_id: str, executor_session_id: str) -> dict:
+    return workflow(work_root, workspace).assignment_get(assignment_id, executor_session_id)
+
+
+def pcw_assignment_cancel(work_root: str, workspace: str, assignment_id: str, reason: str) -> dict:
+    return workflow(work_root, workspace).assignment_cancel(assignment_id, reason)
+
+
 for _tool_name in ("pcw_environment_get", "pcw_environment_check", "pcw_tools_map_get",
-                   "pcw_tools_map_publish", "pcw_action_requirements"):
+                   "pcw_tools_map_publish", "pcw_action_requirements", "pcw_task_begin", "pcw_task_status",
+                   "pcw_assignment_bind", "pcw_assignment_get", "pcw_assignment_cancel"):
     mcp.tool(name=_tool_name, description=_DESCRIPTIONS[_tool_name.removeprefix("pcw_")])(globals()[_tool_name])

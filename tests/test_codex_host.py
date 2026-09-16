@@ -276,7 +276,7 @@ class CodexHostTests(unittest.TestCase):
         # returned descriptors. Both are host inventory, not a static proxy.
         actual_tools = {tool if isinstance(tool, str) else tool["name"] for tool in server["tools"]}
         self.assertEqual(self._declared_tool_names(), actual_tools, server)
-        item = self.tool("create", path="host.md", content="Запись через настоящий Codex.")
+        item = self.tool("create", content="Запись через настоящий Codex.")
         self.assertEqual("Запись через настоящий Codex.", self.tool("read", material_id=item["id"])["content"])
         changed = self.tool("update", material_id=item["id"], content="Обновлено через Codex.", expected_revision=item["revision"])
         self.assertEqual("Обновлено через Codex.", self.tool("read", material_id=changed["id"])["content"])
@@ -323,25 +323,35 @@ class CodexHostTests(unittest.TestCase):
         self.assertEqual("rejected", stale["status"])
         self.assertEqual("published", self.tool("tools_map_publish", expected_environment_revision=refreshed["environment_revision"], profiles=profile)["status"])
 
+        self.tool("task_begin", goal="Host workflow", constraints="Temporary only", completion="All host APIs are observable")
+        prepared_assignment = self.tool("action_requirements", action="prepare_assignment", context={"assignment": {
+            "goal": "Observe host fixture", "expected_result": "Return observations", "boundaries": "Temporary workspace",
+            "context": {"summary": "API regression", "material_ids": []}, "constraints": [],
+            "acceptance_criteria": ["Observe actual result"], "knowledge_to_return": "Facts and blocker",
+            "profile": "prepared-host-work", "selection_reason": "Bounded API fixture"}})
+        self.assertTrue(prepared_assignment["ready"], prepared_assignment)
+        assignment_id = prepared_assignment["handoff"]["assignment_id"]
+        self.tool("assignment_bind", assignment_id=assignment_id, executor_session_id="codex-native-child-host-test")
+        self.tool("assignment_get", assignment_id=assignment_id, executor_session_id="codex-native-child-host-test")
         raw = "# Worker findings\n\n| fact | value |\n| --- | --- |\n| token | `host-sentinel` |\n"
-        saved = self.tool("save_subagent_result", material_name="host-worker-return.md", result=raw,
+        saved = self.tool("save_subagent_result", assignment_id=assignment_id, result=raw,
                           executor_session_id="codex-native-child-host-test")
         self.assertEqual("saved", saved["status"])
-        reread = self.tool("read", material_id="host-worker-return.md")
+        reread = self.tool("read", material_id=saved["id"], assignment_id=assignment_id)
         self.assertEqual(raw, reread["content"])
         self.assertEqual("codex-native-child-host-test", reread["executor_session_id"])
         self.assertTrue(reread["saved_at"].endswith("Z"))
-        repeated = self.tool("save_subagent_result", material_name="host-worker-return.md", result=raw,
+        repeated = self.tool("save_subagent_result", assignment_id=assignment_id, result=raw,
                              executor_session_id="codex-native-child-host-test")
         self.assertEqual("already_saved", repeated["status"])
         updated_raw = raw + "\nFollow-up completion for the same native worker.\n"
-        revised = self.tool("save_subagent_result", material_name="host-worker-return.md", result=updated_raw,
+        revised = self.tool("save_subagent_result", assignment_id=assignment_id, result=updated_raw,
                             executor_session_id="codex-native-child-host-test",
                             expected_previous_revision=saved["revision"])
         self.assertEqual("updated", revised["status"])
         self.assertNotEqual(saved["saved_at"], revised["saved_at"])
-        self.assertEqual(updated_raw, self.tool("read", material_id="host-worker-return.md")["content"])
-        stale_retry = self.tool("save_subagent_result", material_name="host-worker-return.md", result=updated_raw,
+        self.assertEqual(updated_raw, self.tool("read", material_id=saved["id"], assignment_id=assignment_id)["content"])
+        stale_retry = self.tool("save_subagent_result", assignment_id=assignment_id, result=updated_raw,
                                 executor_session_id="codex-native-child-host-test",
                                 expected_previous_revision=saved["revision"])
         self.assertEqual("already_saved", stale_retry["status"])
@@ -356,12 +366,12 @@ class CodexHostTests(unittest.TestCase):
         status = self.tool("status")
         self.assertEqual("Qwen/Qwen3-Embedding-0.6B", status["active"]["config"]["profile"]["model"])
         text = "Резервные копии PostgreSQL сохраняются ежедневно в три часа ночи."
-        item = self.tool("create", path="backups.md", content=text)
+        item = self.tool("create", content=text)
         prepared = self.tool("prepare", material_id=item["id"])
         self.tool("submit_parts", material_id=item["id"], revision=prepared["revision"], parts=[text])
         found = self.tool("search", query="Когда делают резервные копии PostgreSQL?")
         self.assertEqual(item["id"], found["results"][0]["id"], found)
-        other = self.tool("create", path="related.md", content="Порядок восстановления данных.")
+        other = self.tool("create", content="Порядок восстановления данных.")
         self.tool("links", source_id=other["id"], add=[item["id"]])
         self.assertIn(item["id"], self.tool("read", material_id=other["id"])["links"])
 

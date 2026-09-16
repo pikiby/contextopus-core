@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.5.0 provides one explicit `$pcw` skill, readable Markdown knowledge, a compact Current, and local semantic search. The primary agent remains the user-facing decision maker. Native subagents investigate real sources, make authorized changes, perform factual checks, write Current, apply knowledge changes, and perform Git operations. PCW is an MCP memory interface: it does not run a Controller, dispatch agents, or intercept their completion.
+Version 0.6.0 provides one explicit `$pcw` skill, readable Markdown knowledge, a compact Current, and local semantic search. The primary agent remains the user-facing decision maker. Native subagents investigate real sources, make authorized changes, perform factual checks, write Current, apply knowledge changes, and perform Git operations. PCW is an MCP memory interface: it does not run a Controller, dispatch agents, or intercept their completion.
 
 ## Update the Codex plugin
 
@@ -13,7 +13,7 @@ codex plugin add persistent-context-workspace@persistent-context-workspace
 
 The first command refreshes the marketplace checkout; the second installs the plugin version from that checkout. Start a new Codex thread after installation to load the updated skill and MCP tools.
 
-See [0.5.0 release notes](CHANGELOG.md). Existing UUID-addressed knowledge requires an explicitly requested migration through `pcw_migrate_legacy_ids`; installing the plugin does not migrate it automatically.
+See [0.6.0 release notes](CHANGELOG.md). Existing UUID-addressed knowledge requires an explicitly requested migration through `pcw_migrate_legacy_ids`; installing the plugin does not migrate it automatically.
 
 ## Use PCW
 
@@ -33,7 +33,7 @@ Before a native launch, the complete assignment must pass `prepare_assignment` w
 
 The primary reads Current and knowledge through MCP, determines scope, itself obtains native model/reasoning capabilities from environment tools, descriptors, and needed environment configuration, compares them with roles, maintains a current tools map, selects a suitable profile, directly launches native agents, and decides acceptance. This limited capability work is not delegated source research. A prepared simple task can use a smaller discovered profile when justified by the map. More capability or deeper reasoning must be justified by the actual task, uncertainty, or required check. PCW does not impose a ranking across providers or hard-coded reasoning settings.
 
-After a worker returns, the primary calls `pcw_save_subagent_result` with the exact raw Markdown, filename-ID, and actual `executor_session_id`. MCP writes UTC `saved_at` and the session ID; the primary then calls `pcw_read` before interpreting, compacting, linking, or accepting the result. The raw save and the primary's environment/tools-map operations are the limited direct-MCP exceptions. They are not proof that the task succeeded.
+After a worker returns, the primary calls `pcw_save_subagent_result` with the exact raw Markdown, registered assignment ID, and actual `executor_session_id`. MCP uses its allocated material ID and writes UTC `saved_at` with the executor metadata. The primary reads using `pcw_read` with the assignment ID, then records its assessment through `process_result`. Task/assignment coordination and raw recording do not authorize primary source work, content application, preparation or Git operations, and do not prove that the task succeeded.
 
 Memory and Git returns name the affected materials and their actual status. A new raw return from the same executor can reuse its filename with `expected_previous_revision`: the matching revision permits an update, keeps links, and marks the new body for preparation. Exact repeat delivery remains idempotent. See [Memory operations](plugins/persistent-context-workspace/skills/pcw/references/memory-operations.md) for conflict handling and the save/read order.
 
@@ -54,7 +54,9 @@ Each semantic workspace is stored below its source project:
 └── .git/
 ```
 
-Knowledge is free Markdown: it can contain prose, tables, code, facts, sources, conditions, and uncertainty. Its filename, including `.md`, is the material ID unique within `knowledge`; path is separate. `links` stores exact filename-IDs for directional navigation. A rename updates search paths; it changes the ID and rewrites exact incoming links only when the basename changes. Moving `a.md` to `nested/a.md` preserves the ID and links. Neither operation re-embeds an unchanged body. Legacy UUID-addressed knowledge is migrated only by explicit request, with links rewritten deliberately and content retained.
+Knowledge is free Markdown: it can contain prose, tables, code, facts, sources, conditions, and uncertainty. MCP generates each new ID and uses it as the filename; creation accepts content, not an agent-chosen name. The filename, including `.md`, is the material ID; path is separate. `links` stores these exact IDs. A move preserves the generated basename and updates search paths without re-embedding unchanged text. Existing materials remain readable and are migrated only by explicit request.
+
+The separate `<work-root>/.pcw/.control/<workspace>/` store holds the model map and the explicit task/assignment ledger. It remains available if the workspace index is broken. The primary opens a request with `pcw_task_begin`, uses the complete registered handoff, binds the actual native executor, and saves/reads/assesses each assignment's raw return. Workers retrieve their full assignments with `pcw_assignment_get` before acting. `finish` verifies the retained affected materials, outstanding returns and discrepancies, Current and checkpoint state. Fixed-scope service receipts close preparation/checkpoint work without an endless series of new result files; see [memory closeout](plugins/persistent-context-workspace/skills/pcw/references/memory-operations.md#finite-service-closeout).
 
 Current is readable Markdown with five sections: Goal, Constraints, Completion, Current step, and Blocker. It stays compact. The primary changes its step or blocker only when its decision or obstacle changes, so ordinary returns do not rewrite Current.
 

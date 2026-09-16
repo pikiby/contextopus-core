@@ -245,6 +245,57 @@ class LauncherTests(unittest.TestCase):
                         schema = tool["inputSchema"]
                         self.assertTrue({"work_root", "workspace"} <= set(schema["required"]))
                     self.assertEqual([], list(Path(directory).iterdir()))
+                    schemas = {tool["name"]: tool["inputSchema"] for tool in tools}
+                    self.assertNotIn("path", schemas["pcw_create"]["properties"])
+                    self.assertIn("assignment_id", schemas["pcw_save_subagent_result"]["required"])
+                    self.assertNotIn("material_name", schemas["pcw_save_subagent_result"]["properties"])
+                    request_id = 2
+
+                    def call(name, **arguments):
+                        nonlocal request_id
+                        request_id += 1
+                        send({"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {
+                            "name": "pcw_" + name, "arguments": {"work_root": directory, "workspace": "protocol", **arguments}}})
+                        response = receive(request_id)
+                        self.assertFalse(response.get("isError"), response)
+                        return json.loads(response["content"][0]["text"])
+
+                    call("task_begin", goal="Protocol fixture", constraints="Temporary files", completion="Observed RPC behavior")
+                    env = call("environment_check", environment_snapshot={"environment": "protocol-fixture", "version": "1",
+                               "models": [{"id": "fixture-worker"}], "native": {}})
+                    call("tools_map_publish", expected_environment_revision=env["environment_revision"], profiles=[{
+                        "id": "fixture", "model": "fixture-worker", "reasoning": {}, "roles": ["test"], "suitable_when": ["test"]}])
+                    prepared = call("action_requirements", action="prepare_assignment", context={"assignment": {
+                        "goal": "Record test observation", "expected_result": "Raw Markdown", "boundaries": "Temporary memory",
+                        "context": {"summary": "Protocol test, no actual model launched", "material_ids": []}, "constraints": [],
+                        "acceptance_criteria": ["Read exact bytes"], "knowledge_to_return": "Test observation", "profile": "fixture",
+                        "selection_reason": "Test capability"}})
+                    self.assertTrue(prepared["ready"], prepared)
+                    aid = prepared["handoff"]["assignment_id"]
+                    call("assignment_bind", assignment_id=aid, executor_session_id="fixture-executor")
+                    handoff = call("assignment_get", assignment_id=aid, executor_session_id="fixture-executor")
+                    self.assertIn("Protocol test", handoff["assignment"]["context"]["summary"])
+                    item = call("create", content="Protocol fixture content")
+                    self.assertRegex(item["id"], r"^[a-f0-9]{32}\.md$")
+                    raw = call("save_subagent_result", assignment_id=aid, result="Actual test receipt\n", executor_session_id="fixture-executor")
+                    read = call("read", material_id=raw["id"], assignment_id=aid)
+                    self.assertEqual("Actual test receipt\n", read["content"])
+                    processed = call("action_requirements", action="process_result", context={
+                        "result": {"assignment_id": aid, "material_name": raw["id"], "executor_session_id": "fixture-executor"},
+                        "assessment": {"status": "accepted", "reason": "Read actual protocol output"}})
+                    self.assertTrue(processed["ready"], processed)
+                    finished = call("action_requirements", action="finish", context={"acceptance_checks": {
+                        "status": "none_assigned", "scope": "Protocol fixture", "reason": "No native factual check assigned"}})
+                    self.assertFalse(finished["ready"])
+                    self.assertTrue({"prepare", "checkpoint"} <= {m["action"] for m in finished["missing"]})
+                    shutil.rmtree(Path(directory) / ".pcw/protocol/.pcw-runtime")
+                    self.assertEqual("recovery_required", call("status")["status"])
+                    self.assertEqual("current", call("environment_get")["status"])
+                    unavailable = call("action_requirements", action="finish")
+                    self.assertTrue(unavailable["requirements"])
+                    self.assertFalse(unavailable["ready"])
+                    self.assertEqual("recovered", call("recover_workspace")["status"])
+                    self.assertEqual("Actual test receipt\n", call("read", material_id=raw["id"])["content"])
                 finally:
                     if process.stdin:
                         process.stdin.close()

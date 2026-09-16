@@ -30,6 +30,7 @@ import yaml
 
 from .embeddings import create_provider, default_config, embedding_identity, validate_config
 from .provider_pool import PROCESS_PROVIDERS
+from .control import RecoveryRequired, control_store
 
 
 class PCWError(ValueError):
@@ -139,7 +140,7 @@ class PCWRuntime:
     """
 
     def __init__(self, work_root: str | Path, workspace: str,
-                 provider_factory: Callable = PROCESS_PROVIDERS.acquire):
+                 provider_factory: Callable = PROCESS_PROVIDERS.acquire, *, initialize: bool = True):
         raw_root = Path(work_root)
         if not raw_root.is_absolute() or not raw_root.is_dir():
             raise PCWError("work_root must be an existing absolute directory")
@@ -149,6 +150,8 @@ class PCWRuntime:
         self.root = self.work_root / ".pcw" / workspace
         self.knowledge = self.root / "knowledge"
         self.state = self.root / ".pcw-runtime"
+        self.control = control_store(self.work_root, workspace)
+        self._initialized = False
         self._factory = provider_factory
         self._provider = None
         self._provider_config = None
@@ -157,10 +160,52 @@ class PCWRuntime:
         self._file_cache = {}
         self._reconciled_token = None
         self._assert_safe(self.state / "lancedb")
-        self.knowledge.mkdir(parents=True, exist_ok=True)
-        self.state.mkdir(parents=True, exist_ok=True)
-        with self._guard():
-            pass
+        if initialize:
+            with self._guard():
+                pass
+
+    def _ensure_storage(self):
+        self._assert_safe(self.state / "lock")
+        self._assert_safe(self.knowledge)
+        marker = self.control.root / "workspace-opened.json"
+        self.control.safe(marker)
+        if not self._initialized and not self.root.exists() and not marker.exists():
+            self.knowledge.mkdir(parents=True)
+            self.state.mkdir()
+        missing = [str(path.relative_to(self.root)) for path in (self.knowledge, self.state)
+                   if not path.is_dir()]
+        if missing:
+            raise RecoveryRequired(self.root, missing)
+        self._initialized = True
+        if not marker.exists():
+            self.control.write(marker, json.dumps({"opened_at": datetime.now(timezone.utc).isoformat()}) + "\n")
+
+    def recover_workspace(self, recreate_missing_knowledge: bool = False):
+        """Explicit bounded worker recovery; never silently accept lost knowledge."""
+        with self.control.guard(), self._mutex:
+            self._assert_safe(self.knowledge)
+            self._assert_safe(self.state / "lock")
+            missing_knowledge = not self.knowledge.is_dir()
+            if missing_knowledge and not recreate_missing_knowledge:
+                return {"status": "blocked", "reason": "Knowledge is missing. Restore it or explicitly authorize recreation.",
+                        "next_action": "restore_knowledge", "workspace": str(self.root)}
+            self.knowledge.mkdir(parents=True, exist_ok=True)
+            self.state.mkdir(parents=True, exist_ok=True)
+            self._file_cache.clear()
+            self._reconciled_token = None
+            with self._guard():
+                return {"status": "recovered", "workspace": str(self.root),
+                        "pending_preparation": sorted(self.pending),
+                        "knowledge_recreated": missing_knowledge}
+
+    def _allocate_material_id(self):
+        reservations = self.control.reservations()
+        while True:
+            ident = uuid.uuid4().hex + ".md"
+            if ident not in reservations and not (self.knowledge / ident).exists():
+                reservations[ident] = {"allocated_at": datetime.now(timezone.utc).isoformat()}
+                self.control.save_reservations(reservations)
+                return ident
 
     def _assert_safe(self, path: Path):
         try:
@@ -204,6 +249,9 @@ class PCWRuntime:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, path)
+            if path == self.root / "current.md" or path.is_relative_to(self.knowledge):
+                from .assignments import TaskLedger
+                TaskLedger(self).note_changed(path.relative_to(self.root).as_posix())
             # Durability of the active-pointer rename includes its parent entry.
             descriptor = os.open(path.parent, os.O_DIRECTORY)
             try:
@@ -231,7 +279,7 @@ class PCWRuntime:
 
     @contextlib.contextmanager
     def _guard(self):
-        with self._mutex:
+        with self.control.guard(), self._mutex:
             if self._depth:
                 self._depth += 1
                 try:
@@ -239,7 +287,7 @@ class PCWRuntime:
                 finally:
                     self._depth -= 1
                 return
-            self._assert_safe(self.state / "lock")
+            self._ensure_storage()
             with (self.state / "lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 self._depth = 1
@@ -393,6 +441,68 @@ class PCWRuntime:
                     "unregistered": self.unregistered[:50], "unregistered_count": len(self.unregistered),
                     "active": self.active}
 
+    def durable_state(self):
+        """Observable task boundary, including YAML-only and Current changes."""
+        with self._guard():
+            files = {}
+            for path in [self.root / "current.md", *self.knowledge.rglob("*.md")]:
+                self._assert_safe(path)
+                if path.is_file():
+                    files[path.relative_to(self.root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+            return {"files": files, "paths": {key: value.path for key, value in self.materials.items()},
+                    "pending": sorted(self.pending), "unregistered": self.unregistered}
+
+    def uncheckpointed(self, paths: list[str]):
+        if not paths:
+            return []
+        with self._guard():
+            paths = self._git_paths(paths)
+            if not (self.root / ".git").exists():
+                return paths
+            self._own_git()
+            dirty = []
+            for relative in paths:
+                path = self.root / relative
+                historical = self._git("show", "HEAD:" + relative, check=False)
+                differs = ((path.exists() != (historical.returncode == 0)) or
+                           (path.is_file() and path.read_text(encoding="utf-8") != historical.stdout))
+                if not path.exists() and historical.returncode:
+                    history = self._git("log", "-1", "--format=%H", "--", relative, check=False)
+                    differs = bool(history.returncode or not history.stdout.strip())
+                staged = self._git("diff", "--cached", "--quiet", "--", relative, check=False)
+                if differs or staged.returncode:
+                    dirty.append(relative)
+            return dirty
+
+    def service_receipt(self, kind: str, material_ids: list[str] | None = None,
+                        paths: list[str] | None = None):
+        """Worker obtains a deterministic factual receipt, without volatile commit hashes."""
+        with self._guard():
+            if kind == "preparation":
+                if not material_ids or paths:
+                    raise PCWError("Preparation receipt requires exact material_ids and no paths")
+                ids = sorted(set(material_ids))
+                for ident in ids:
+                    self._material(ident)
+                pending = [ident for ident in ids if ident in self.pending]
+                if pending:
+                    return {"status": "incomplete", "pending_preparation": pending, "next_action": "prepare"}
+                body = "# Search preparation result\n\n" + "".join(f"- `{ident}`: indexed.\n" for ident in ids)
+                evidence = {ident: self.materials[ident].revision for ident in ids}
+            elif kind == "checkpoint":
+                if not paths or material_ids:
+                    raise PCWError("Checkpoint receipt requires exact paths and no material_ids")
+                exact = sorted(set(self._git_paths(paths)))
+                dirty = self.uncheckpointed(exact)
+                if dirty:
+                    return {"status": "incomplete", "uncheckpointed": dirty, "next_action": "checkpoint"}
+                body = "# Memory checkpoint result\n\n" + "".join(f"- `{path}`: checkpointed.\n" for path in exact)
+                evidence = {"commit": self._git("rev-parse", "HEAD").stdout.strip()}
+            else:
+                raise PCWError("kind must be preparation or checkpoint")
+            return {"status": "verified", "result": body, "observed": evidence,
+                    "instruction": "Return result verbatim for primary save. Report any additional mismatch or error instead of claiming this receipt covers it."}
+
     def list(self, offset: int = 0, limit: int = 50):
         with self._guard():
             if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
@@ -404,11 +514,15 @@ class PCWRuntime:
                     "unregistered": self.unregistered[offset:offset + limit],
                     "unregistered_count": len(self.unregistered)}
 
-    def read(self, material_id: str):
+    def read(self, material_id: str, assignment_id: str | None = None):
         with self._guard():
-            return self._result(self._material(material_id), content=True)
+            material = self._material(material_id)
+            if assignment_id is not None:
+                from .agent_workflow import AgentWorkflow
+                AgentWorkflow(self).note_read(assignment_id, material)
+            return self._result(material, content=True)
 
-    def save_subagent_result(self, material_name: str, result: str, executor_session_id: str,
+    def save_subagent_result(self, assignment_id: str, result: str, executor_session_id: str,
                              expected_previous_revision: str | None = None):
         """Persist one returned subagent result without changing its Markdown body."""
         with self._guard():
@@ -416,8 +530,15 @@ class PCWRuntime:
                 raise PCWError("Subagent result must be a text string")
             if not isinstance(executor_session_id, str) or not executor_session_id.strip():
                 raise PCWError("executor_session_id is required and must be the actual executor session ID")
-            if not isinstance(material_name, str) or "/" in material_name or "\\" in material_name:
-                raise PCWError("material_name must be one safe Markdown filename")
+            from .agent_workflow import AgentWorkflow
+            workflow = AgentWorkflow(self)
+            try:
+                material_name = workflow.result_target(assignment_id, executor_session_id)
+            except ValueError as exc:
+                raise PCWError(str(exc)) from exc
+            def completed(record):
+                workflow.note_saved(assignment_id, self.materials[record["id"]])
+                return record
             target = self._knowledge_path(material_name)
             ident = self._material_id(target)
             existing = self.materials.get(ident)
@@ -425,13 +546,13 @@ class PCWRuntime:
                 if (existing.content == result and
                         existing.metadata.get("executor_session_id") == executor_session_id and
                         isinstance(existing.metadata.get("saved_at"), str)):
-                    return {**self._result(existing, content=False), "status": "already_saved"}
+                    return completed({**self._result(existing, content=False), "status": "already_saved"})
                 if expected_previous_revision is None:
                     # Keep the existing occupied-name behavior for callers that
                     # did not explicitly opt into a CAS raw-result revision.
                     raise PCWError(
                         f"Material filename {ident} is already occupied by a different result or executor session; "
-                        "choose another material_name")
+                        "register a separate assignment or supply the previous revision")
                 if not isinstance(existing.metadata.get("saved_at"), str):
                     raise PCWError(
                         f"Material filename {ident} is not a saved raw subagent result and cannot be revised")
@@ -458,7 +579,7 @@ class PCWRuntime:
                 # A successful body revision must never leave its prior vector
                 # rows visible while literal semantic preparation is pending.
                 self._delete_rows(ident)
-                return {**self._result(replacement), "status": "updated"}
+                return completed({**self._result(replacement), "status": "updated"})
             if target.exists():
                 # A path that scan did not register must never be overwritten by
                 # a primary save just because its basename looks available.
@@ -471,10 +592,11 @@ class PCWRuntime:
             self.materials[ident] = material
             if result.strip():
                 self.pending.add(ident)
-            return {**self._result(material), "status": "saved"}
+            return completed({**self._result(material), "status": "saved"})
 
-    def create(self, path: str, content: str, links: list[str] | None = None):
+    def create(self, content: str, links: list[str] | None = None):
         with self._guard():
+            path = self._allocate_material_id()
             target = self._knowledge_path(path)
             if target.exists():
                 raise PCWError("Knowledge path already exists; use update or explicit adoption")
@@ -609,6 +731,8 @@ class PCWRuntime:
         # and completes only the derived path update; it never needs a copied
         # second material with the same filename-ID.
         material.path = destination_relative
+        from .assignments import TaskLedger
+        TaskLedger(self).note_changed(old_path, destination_relative)
         applied = [f"moved:{material.id}:{old_path}:{destination_relative}"]
         try:
             aliases = [material.id] + [old for old, target in self._legacy_ids.items() if target == material.id]
@@ -626,61 +750,13 @@ class PCWRuntime:
         with self._guard():
             material = self._material(material_id)
             destination = self._knowledge_path(path)
+            if destination.name != material.id:
+                raise PCWError("A move must preserve the MCP-generated filename ID; existing IDs are migrated only by explicit migration")
             if destination == self.root / material.path:
                 return self._result(material)
-            old_id = material.id
-            new_id = self._material_id(destination)
-            if new_id == old_id:
-                if destination.exists():
-                    raise PCWError("Destination already exists")
-                return self._move_same_id(material, destination, path)
-            destination_relative = destination.relative_to(self.root).as_posix()
-            destination_metadata = copy.deepcopy(material.metadata)
-            # A copied legacy id would make a fresh runtime see two legacy
-            # sources. The destination already has its filename identity.
-            destination_metadata.pop("id", None)
-            prepared = Material(new_id, destination_relative, destination_metadata, material.content)
-            existing = self.materials.get(new_id)
             if destination.exists():
-                # A matching destination is an interrupted rename. Retrying the
-                # same call completes it; a different file remains protected.
-                if (existing is None or existing.content != prepared.content or
-                        existing.metadata != prepared.metadata):
-                    raise PCWError("Destination already exists")
-            else:
-                if existing is not None:
-                    raise PCWError(f"Material filename ID already exists: {new_id}")
-                self._save(prepared)
-                self.materials[new_id] = prepared
-
-            # Keep the old source file addressable while every incoming link is
-            # saved. On a write failure, both old and new IDs still resolve and
-            # retrying this exact rename resumes from the prepared destination.
-            applied = [f"destination_prepared:{new_id}:{destination_relative}"]
-            try:
-                self._rewrite({old_id: new_id}, applied)
-                legacy_aliases = [old for old, target in self._legacy_ids.items() if target == old_id]
-                aliases = [old_id, *legacy_aliases]
-                for stored_id in dict.fromkeys(aliases):
-                    self.table.update(where=f"material_id = '{_id(stored_id)}'",
-                                      values={"material_id": new_id, "path": destination_relative})
-                (self.root / material.path).unlink()
-                self.materials.pop(old_id)
-                self.materials[new_id] = prepared
-                for legacy, target in list(self._legacy_ids.items()):
-                    if target == old_id:
-                        self._legacy_ids[legacy] = new_id
-                if old_id in self.pending:
-                    self.pending.remove(old_id)
-                    self.pending.add(new_id)
-                applied.append(f"renamed:{old_id}:{new_id}:{destination_relative}")
-            except Exception as exc:
-                self._reconciled_token = None
-                return {"status": "partial", "applied": applied,
-                        "error": str(exc),
-                        "repair": f"Retry pcw_rename({old_id!r}, {path!r}) to complete the prepared rename"}
-            self._reconciled_token = None
-            return self._result(prepared)
+                raise PCWError("Destination already exists")
+            return self._move_same_id(material, destination, path)
 
     def links(self, source_id: str, add: list[str] | None = None, remove: list[str] | None = None):
         with self._guard():
@@ -725,6 +801,10 @@ class PCWRuntime:
         applied.append(f"deleted:{material.id}")
         self.materials.pop(material.id)
         self.pending.discard(material.id)
+        from .assignments import TaskLedger
+        ledger = TaskLedger(self)
+        ledger.note_changed(material.path)
+        ledger.note_retired(material.id)
 
     def delete(self, material_id: str):
         with self._guard():
@@ -1088,6 +1168,9 @@ class PCWRuntime:
                 previous_exclude = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
                 if "/.pcw-runtime/" not in previous_exclude.splitlines():
                     self._write(exclude, previous_exclude.rstrip("\n") + "\n/.pcw-runtime/\n")
+                if not self.uncheckpointed(paths):
+                    return {"status": "ok", "commit": self._git("rev-parse", "HEAD").stdout.strip(),
+                            "paths": paths, "already_checkpointed": True}
                 self._git("add", "--", *paths)
                 applied.append("staged exact requested paths")
                 self._git("commit", "--only", "-m", message, "--", *paths)

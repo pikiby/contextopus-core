@@ -4,6 +4,10 @@ Use this reference when the bundled `pcw` tools are unavailable or an embedding 
 
 When diagnostics or repair are needed, the primary obtains requirements, asks the user for any needed authority, and delegates the bounded work to a native subagent. Reuse results already established in this conversation. The primary still gathers model capabilities and selects the diagnostic executor itself; this work is not assigned to that executor. A missing interpreter or distribution does not require broad source research or web diagnosis.
 
+An exposed server with a broken workspace returns `recovery_required`. Task registration, action instructions and environment/model-map tools use the separate `.pcw/.control/<workspace>/` store and remain usable without opening the index. Open the request, publish the actual model map, and prepare a bounded assignment with `purpose: "recovery"`. Send its full handoff, bind the native session and require the worker to obtain it through `pcw_assignment_get` before inspecting or repairing anything.
+
+For missing runtime directories, the assigned worker calls `pcw_recover_workspace`. If knowledge itself is missing, this reports a blocker; `recreate_missing_knowledge: true` requires actual authority to recreate it and never means lost content was restored. Do not interpret a missing lock as proof that a new workspace cannot bootstrap. After recovery, save, read and assess every outstanding diagnostic return shown by `pcw_task_status`, then save the request's Current and continue. An unavailable MCP process still requires the bounded native startup procedure below; preserve its diagnostic returns in the conversation and register/save them as soon as the server becomes available.
+
 ## Check the active plugin
 
 The diagnostic worker resolves the active plugin root from this skill's location: it is two directories above `skills/pcw/`. It uses that exact copy, including when it is under a host plugin cache, and does not infer that editing a source checkout changed an installed copy. It sets `setup_plugin` to that absolute root and runs:
