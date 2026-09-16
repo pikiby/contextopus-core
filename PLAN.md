@@ -1,27 +1,37 @@
 # Persistent Context Workspace
 
-Version 0.7.0 defines one `$pcw` skill and a persistent local MCP server. This plan records the adopted design and the acceptance boundaries for its implementation.
+Version 0.7.1 defines one `$pcw` skill and a persistent local MCP server. This plan records the adopted design and acceptance boundaries; it is not a claim that live-host validation has passed.
 
 ## Responsibilities and workflow
 
-User instructions define role authority. PCW belongs to the primary: it reads memory, prepares assignments, manages models/reasoning, saves substantive returns, applies Current/knowledge/links/compaction and authorized memory Git operations. Workers receive only complete standalone task text with needed facts and explicitly allowed sources. They must not use PCW or discover/read/change `.pcw` through files, shell or scripts. The current scope is an assignment-level prohibition, not technical isolation.
+The primary alone reads and changes knowledge, Current, links and task state, chooses models and authorized memory checkpoints. Workers receive complete standalone tasks with necessary facts and explicitly allowed real sources. They must not use PCW or discover/read/change `.pcw` through tools, shell or scripts. This is an assignment-level prohibition, not OS isolation.
 
-The primary launches native agents in separate contexts and binds actual session IDs. PCW does not dispatch agents or intercept completion. Worker-side `pcw_assignment_get` is removed. Only `handoff.launch_message` is sent; IDs, memory coordinates, environment/map and bookkeeping remain primary-only. Environment changes require the primary to refresh the model map.
+Only `handoff.launch_message` goes to a clean native context without the primary conversation, memory paths/IDs, Current or ledger. The primary binds the actual executor session. Every follow-up is a fresh complete registered assignment, even when a suitable existing worker session is reused. PCW does not dispatch agents, intercept completion or require worker-side assignment retrieval.
 
-## Results and preparation
+## Compact control operations
 
-Contentful work/check assignments receive separate MCP-generated filename IDs, including continuations. Primary saves exact raw Markdown, UTC time and executor session metadata, reads it and assesses it. An identical retry is idempotent. Conflicting actual/saved text is outstanding work until explicitly resolved. Compaction need not retain provenance.
+One `pcw_startup` read restores task, Current, memory status and saved environment/map state. The primary reuses the tools map while actual model/reasoning capabilities are unchanged. Environment version excludes warning output and session identity.
 
-Semantic helpers receive source text with end positions and return only boundaries. Primary calls `pcw_submit_boundaries`; original parts are reconstructed with full coverage and revision checks, then the existing provider/LanceDB path indexes them. Boundaries and operation evidence remain service state, not knowledge. Current and checkpoints do not require worker assignments or technical knowledge reports.
+`pcw_rules_get` supplies instructions on demand without operation side effects. `pcw_assignment_prepare`, `pcw_result_assess`, `pcw_transition` and `pcw_finish` perform their operations and return compact relevant state. Do not fetch rules before every call. Bind a planned checker with `check_id` during preparation rather than repeating `pcw_task_checks_set`. Batch independent saving, reading, linking, preparing and boundary submission without removing explicit reads, assessments or factual checks.
 
-## Persistent task state and verification
+## Topic materials and embedding parts
 
-The independent control store retains the request, assignments, actual sessions, result processing, check plan and discrepancies across compaction or index loss. Current focus is taken from the registered request. Explicit `pcw_task_update` requires its request revision and a reason, preserving unfinished work. Default checkpoint policy is `not_authorized`; an actual permission/prohibition is distinguished and respected.
+Immediately after a substantive return, the primary divides its text into large, independently meaningful knowledge materials and links related topics. Preserve actual facts, conditions, implementation details, uncertainty, code and tables. Do not split mechanically by headings or fixed sizes and do not require an extra unmodified monolithic return.
 
-Primary records intermediate/final factual checks by complexity, and adds checks for unexpected mismatches. A return alone never causes another checker. Observations of real sources/behavior, including no-change research, inform acceptance. `finish` checks the saved plan, outstanding assignments/discrepancies, Current, affected indexed materials and required authorized checkpoints.
+`pcw_save_result_blocks` generates IDs and records each block's assignment, actual executor session and UTC save time. Read all blocks with `pcw_read_many`, link with `pcw_links_many` and assess explicitly. Exact retries are idempotent; conflicting payloads need explicit revision-checked correction. Later consolidation does not require preserving source attribution or provenance metadata in resulting knowledge.
+
+Only then does a cheap suitable semantic helper choose embedding boundaries within the saved topic materials. `pcw_prepare_many` supplies literal numbered text; the helper returns arrays without tools. `pcw_submit_boundaries_many` checks coverage and revisions and uses the existing provider/indexing path. Helper boundaries and technical receipts remain service state. Search still addresses whole topic files and their links; this is not a change to snippet-search architecture.
+
+## Corrections and factual completion
+
+A discrepancy assessment identifies affected knowledge. Incorrect active bodies must be updated or replaced before an accepted clarification/check resolves the discrepancy. Adding a clarification link and closing the ledger is insufficient. Uncorrected invalidated bodies are excluded from active search; direct reads warn. Corrected contents require preparation as usual.
+
+The independent control store retains the request, outstanding assignments, return blocks, check plan and discrepancies across compaction or index loss. `pcw_task_update` requires the request revision and an authorized reason and preserves outstanding work. Default checkpoint policy is `not_authorized`.
+
+The primary schedules intermediate/final factual checks for task complexity and adds checks for observed mismatches. A return alone does not trigger a checker. Checks inspect real sources or behavior, including no-change research. `pcw_finish` validates recorded prerequisites, while the primary verifies the whole requested outcome. Readiness, saved files or passing static tests alone are not completion; continue authorized unfinished work.
 
 ## Validation boundaries
 
-Test content preservation, new IDs, metadata, conflicts, service handling, Current synchronization, recovery, planned checks and checkpoint authority using temporary state and test vectors. Exercise the MCP schema/stdio contract separately. Run bounded native assignments to inspect the actual handoff and return. An instruction-compliant run is not proof of technical access isolation.
+Verify block content/metadata/accounting, idempotency/conflicts, explicit read/assessment, correction of active knowledge, compact APIs, batch operations, helper boundaries, task recovery, check binding and checkpoint authority in temporary state. Check MCP schema/stdio separately. Bounded native runs can demonstrate handoff and return behavior; instruction compliance does not prove OS isolation.
 
-Existing search/provider mechanics and the [search assessment](docs/search-assessment.md) remain unchanged. Historical reports about workers applying memory changes describe the old design and are not acceptance evidence for this change. Existing user knowledge is not migrated or cleaned by this update. Release, installation and publication are separate from these local implementation changes.
+Existing search/provider mechanics and the [search assessment](docs/search-assessment.md) remain unchanged. Historical reports about worker memory writes or monolithic returns describe earlier designs. Existing user knowledge is not migrated or cleaned by this update. Release, installation and publication remain separate from local implementation work.

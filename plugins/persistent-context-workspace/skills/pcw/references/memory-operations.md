@@ -1,42 +1,50 @@
 # Memory operations
 
-Read this reference through the PCW action loop before selecting a workspace, changing durable memory, or recovering it. All MCP calls receive an existing absolute `work_root` and one semantic `workspace`; durable storage is `<work-root>/.pcw/<workspace>/`.
+Consult this reference when its rules are needed; do not retrieve it before each operation. All MCP calls receive an existing absolute `work_root` and semantic `workspace`; durable storage is `<work-root>/.pcw/<workspace>/`. The primary alone owns memory operations.
 
 ## Read before deciding
 
-The primary calls `pcw_status`, `pcw_current_get`, `pcw_search`, `pcw_read`, and `pcw_list` to obtain PCW context. It reads Current on start or recovery and opens only relevant full materials. Search returns a bounded selection; an empty result does not prove that knowledge is absent or fresh. The primary does not inspect real project sources, diffs, logs, or external services itself while the skill is active. Native capability descriptors and the necessary environment configuration used to build the tools map are a limited primary responsibility, not project-source research.
+Use `pcw_startup` once at start or recovery for combined task, Current, memory and environment state. Search relevant knowledge, read full selected materials with `pcw_read_many` or `pcw_read`, and navigate links. Use `pcw_list` when useful. Empty search output does not prove knowledge is absent or fresh. Refresh specific state when it changes instead of repeating startup calls.
 
-Knowledge bodies are free Markdown. They can contain prose, sources, conditions, uncertainty, tables, and code. `links` is a directional list of filename-IDs for navigation; it has no required relation type, explanation, or mirror edge. The body, not a link, carries claims and conditions.
+The primary does not inspect real project sources, diffs, logs or external services itself while the skill is active. Native capability descriptors and necessary environment configuration used to build the tools map are a limited primary responsibility, not project-source research.
+
+Knowledge is free Markdown: prose, conditions, uncertainty, tables and code are all valid. `links` is a directional list of exact filename-IDs. Preserve meaningful navigation without inventing relation types, explanatory metadata or mandatory mirror edges. The body carries claims and conditions. Batch independent link changes through `pcw_links_many(changes=[{source_id, add, remove}, ...])`.
 
 ## Filename IDs and legacy memory
 
-MCP generates a unique ID and uses it as the filename (`<generated-id>.md`). `pcw_create` accepts content and optional links, not a chosen filename. Substantive assignment preparation reserves a generated ID for its raw return. Semantic service assignments reserve no knowledge ID. Store the IDs returned by MCP and use them in reads, updates, links and preparation. The ID is also the filename; there is no second identity hidden in YAML. Existing descriptive filenames remain readable until an explicitly requested migration.
+MCP generates each new filename-ID (`<generated-id>.md`). Creation accepts content, not an agent-chosen filename. The filename is the material ID; its path is separate. A substantive return can have several independently meaningful materials, all accounted for under its assignment. Semantic helper assignments create no knowledge IDs.
 
-`pcw_rename` moves a material to another directory while preserving its generated basename and links. It updates search paths without preparing unchanged text and rejects a different basename or occupied destination.
+Store returned IDs for reading, updates, links and preparation. Existing descriptive filenames remain readable until explicitly requested migration. `pcw_rename` moves a material while preserving its basename and links; it updates search paths without preparing unchanged text and rejects a different basename or occupied destination.
 
-Migration is explicit. For a legacy UUID-addressed material, first establish its filename mapping, rewrite exact legacy links to filename-IDs, preserve body text, metadata, tables, code, sources, and meaningful relation prose, and reconcile search addresses. Do not re-embed an unchanged body merely because its filename or links changed. Do not adopt, normalize, or replace legacy memory merely because it was encountered during ordinary work.
+Migration is explicit. Establish the filename mapping, rewrite exact legacy links, preserve body text and useful metadata, tables, code and relation prose, and reconcile search addresses. Do not re-embed unchanged content for a filename or link change. Do not migrate or normalize legacy knowledge merely because ordinary work encounters it.
 
-## Save and apply
+## Save substantive returns
 
-An investigating or checking worker writes its own raw result. The primary first calls:
+On a worker's substantive work/check return, the primary immediately divides its text into large, independently useful topic materials and links the related materials. Preserve actual facts, conditions, implementation detail, uncertainty, code and tables. Choose boundaries by meaning, not mechanically by heading or fixed size. A short coherent return may stay one material. Do not require an additional giant unmodified raw file.
+
+Save the primary's chosen blocks together:
 
 ```text
-pcw_save_subagent_result(work_root, workspace, assignment_id, result, executor_session_id)
+pcw_save_result_blocks(work_root, workspace, assignment_id, executor_session_id, blocks)
 ```
 
-`assignment_id` selects the registered assignment and MCP-allocated return ID. `result` is unmodified raw Markdown. `executor_session_id` is the actual bound worker session, never a generated substitute. MCP assigns `saved_at` in ISO 8601 UTC and saves it with the executor metadata. An exact repeat retains the original body and timestamp. The primary calls `pcw_read(material_id, assignment_id)` and then `process_result` with the saved coordinates and an explicit assessment.
+`blocks` is an array of Markdown bodies. MCP generates the filenames and UTC `saved_at` metadata for every block. Use the actual bound executor session, never an invented substitute. Control state records all blocks and their assignment/session/time so the whole substantive return remains accountable.
 
-Each new substantive assignment, including a continuation, receives a new return ID. Retaining a worker session does not authorize overwriting an earlier result. Retry the same unchanged return idempotently. For an explicit correction of that same assignment's recorded raw return, pass `expected_previous_revision` from the previously read material; a conflict remains unresolved until the actual return is saved and read. Never accept another text in its place. Register factual discrepancies as `needs_attention`; resolve them through an accepted saved/read clarification whose assessment names the earlier assignment in `resolves`.
+Read every saved block with `pcw_read_many(material_ids, assignment_id)`, add useful links through `pcw_links_many`, and explicitly assess the assignment with `pcw_result_assess`. Saving and reading do not prove factual correctness. Each new assignment, including a same-session continuation, has separate return accounting and new material IDs.
 
-The primary alone calls `pcw_create`, `pcw_update`, `pcw_links`, `pcw_merge`, `pcw_reassign`, `pcw_rename`, `pcw_delete`, `pcw_current_set`, authorized `pcw_checkpoint` and `pcw_restore`. Workers have no memory-operation assignment. The primary chooses and applies content, consolidation, links and mappings; PCW does not infer them from similarity. Raw substantive findings belong in knowledge, while Current/indexing/checkpoint receipts stay outside it.
+An exact repeated save is idempotent. A different payload conflicts rather than silently replacing recorded content. For an explicit correction of the same assignment's same-count blocks, pass `expected_previous_revisions` from the previous read. Repartitioning stored topics is a primary consolidation operation, not a save retry. An unresolved conflict or failed save/read blocks acceptance.
 
-Content writes are readable immediately and are `pending_preparation` until literal semantic parts are accepted. Links-only changes and renames do not prepare or embed text. A failed preparation or embedding leaves the material readable and honestly pending.
+Operational receipts such as “Current updated” or “index built” are service state, not knowledge. The primary alone calls `pcw_create`, `pcw_update`, `pcw_links`, `pcw_links_many`, `pcw_merge`, `pcw_reassign`, `pcw_rename`, `pcw_delete`, `pcw_current_set`, authorized `pcw_checkpoint` and `pcw_restore`. PCW does not infer consolidation decisions from similarity.
 
-## Consolidation and deletion
+Saved bodies remain readable while `pending_preparation`. After topic division, use `pcw_prepare_many` and a narrow helper for embedding boundaries within each material; see [Prepare search](prepare-search.md). Failed preparation leaves honest pending state. Links-only changes and moves do not prepare or embed text.
 
-Consolidate actual duplicate content rather than adding a summary beside it. Preserve useful implementation details, conditions, exceptions, uncertainty, tables, and code. Compaction does not require retaining source attribution or provenance metadata.
+## Incorrect knowledge and consolidation
 
-For a replacement, the primary explicitly chooses the final target content and every old filename-ID to new filename-ID mapping. The primary ensures targets exist, then uses `pcw_merge` to save targets, preserve or explicitly set outgoing links, rewrite incoming links, remove duplicates and self-links, and only then remove replaced materials and their current search rows. `pcw_reassign` changes exact navigation only; partial extraction is not a global redirect. `pcw_delete` removes incoming links, material, and current search rows, not linked targets or their prose. Report any `partial` response with applied effects.
+Record factual discrepancies through a `needs_attention` assessment. Use `affected_material_ids` for the incorrect active materials; omission captures all saved blocks of that return. Known incorrect active knowledge must be updated or replaced, not merely accompanied by a linked clarification. An accepted clarification/check names earlier assignment IDs in `resolves`; the discrepancy remains until every captured body is corrected or replaced. Invalidated, uncorrected bodies are excluded from active search; a direct read warns about their state. Exclusion prevents reuse while correction is outstanding; it does not complete the task.
+
+Consolidate actual duplicate content rather than adding a summary beside it. Preserve useful implementation details, conditions, exceptions, uncertainty, tables and code. Initial return accounting includes assignment, executor and save time; later consolidation does not require preserving source attribution or provenance metadata in the resulting bodies.
+
+For replacement, explicitly choose final target content and every old-to-new filename-ID mapping. Ensure targets exist, then use `pcw_merge` to save targets, preserve or explicitly set outgoing links, rewrite incoming links, remove duplicates/self-links and remove replaced materials and their active search rows. `pcw_reassign` changes exact navigation only; partial extraction is not a global redirect. `pcw_delete` removes incoming links, the material and current search rows, not linked targets or their prose. Inspect and report any `partial` response and its applied effects.
 
 ## Current and checkpoint
 

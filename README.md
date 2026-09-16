@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.7.0 provides one explicit `$pcw` skill, readable Markdown knowledge, a compact Current, and local semantic search. The primary agent remains the user-facing decision maker. The primary alone reads and changes PCW memory, Current, links and authorized memory history. Native subagents investigate or change explicitly authorized real sources and return findings; the semantic helper returns only block endings. The current prohibition on worker access to PCW is implemented in the assignment, not by a technical sandbox. PCW is an MCP memory interface: it does not run a Controller, dispatch agents, or intercept their completion.
+Version 0.7.1 provides one explicit `$pcw` skill, readable Markdown knowledge, a compact Current, and local semantic search. The primary agent remains the user-facing decision maker. The primary alone reads and changes PCW memory, Current, links and authorized memory history. Native subagents investigate or change explicitly authorized real sources and return findings; the semantic helper returns only embedding boundaries inside topic materials already divided by the primary. The current prohibition on worker access to PCW is implemented in the assignment, not by a technical sandbox. PCW is an MCP memory interface: it does not run a Controller, dispatch agents, or intercept their completion.
 
 ## Update the Codex plugin
 
@@ -13,7 +13,9 @@ codex plugin add persistent-context-workspace@persistent-context-workspace
 
 The first command refreshes the marketplace checkout; the second installs the plugin version from that checkout. Start a new Codex thread after installation to load the updated skill and MCP tools.
 
-See [0.7.0 release notes](CHANGELOG.md). Existing UUID-addressed knowledge requires an explicitly requested migration through `pcw_migrate_legacy_ids`; installing the plugin does not migrate it automatically.
+See [0.7.1 release notes](CHANGELOG.md). Existing UUID-addressed knowledge requires an explicitly requested migration through `pcw_migrate_legacy_ids`; installing the plugin does not migrate it automatically.
+
+The [0.7.1 verification report](docs/compact-memory-assessment.md) covers topic storage, compact operations, regression checks, the native-agent cycle and the measured response-size reduction.
 
 ## Use PCW
 
@@ -27,17 +29,21 @@ Everything after `$pcw` is natural language. Preparing or refining context does 
 
 ## Work cycle
 
-Before each meaningful action, the primary calls `pcw_action_requirements` with one of `prepare_assignment`, `process_result`, `transition`, or `finish`. It then acts within the user request, submits the applicable result, and gets requirements for the next action. This short loop supplies detailed instructions at the time they apply.
+The primary calls `pcw_startup` once to obtain task, Current, memory status and the saved model-map state. It resumes an unfinished request or opens a new one. Rules are available through `pcw_rules_get` and the skill references when needed; rule retrieval is separate from operations and has no operation side effects. There is no mandatory rules call before every action.
 
-Before a native launch, the complete assignment must pass `prepare_assignment` with `ready: true` and an exact profile ID from the current tools map. A `ready: false` response still supplies instructions; the primary corrects the missing prerequisites and repeats the call before launching.
+The primary reads relevant full materials, selects necessary facts and prepares a complete standalone assignment. `pcw_assignment_prepare` validates prerequisites and the exact published model profile. Launch only after `ready: true`, sending only `handoff.launch_message` in a clean native context without inherited conversation. Workers receive no memory coordinates, IDs, Current, ledger or PCW instructions. Their task prohibits PCW access through MCP, filesystem tools, shell and scripts. This is an assignment-level restriction, not an OS or tool-access guarantee.
 
-The primary reads Current and knowledge through MCP, determines scope, itself obtains native model/reasoning capabilities from environment tools, descriptors, and needed environment configuration, compares them with roles, maintains a current tools map, selects a suitable profile, directly launches native agents, and decides acceptance. This limited capability work is not delegated source research. A prepared simple task can use a smaller discovered profile when justified by the map. More capability or deeper reasoning must be justified by the actual task, uncertainty, or required check. PCW does not impose a ranking across providers or hard-coded reasoning settings.
+The primary itself discovers current native model/reasoning capabilities and publishes the tools map. It reuses the map while actual capabilities remain unchanged. A new session or diagnostic warning is not a capability change; neither belongs in the environment version. Choose a sufficient profile and supported reasoning settings for the actual task, explaining the choice without inventing provider rankings.
 
-After a worker returns, the primary calls `pcw_save_subagent_result` with the exact raw Markdown, registered assignment ID, and actual `executor_session_id`. MCP uses its allocated material ID and writes UTC `saved_at` with the executor metadata. The primary reads using `pcw_read` with the assignment ID, then records its assessment through `process_result`. Saving a return does not prove that the task succeeded. The primary applies memory changes itself within the user-authorized scope.
+On a substantive work/check return, the primary immediately divides its text into large, independently meaningful topic materials. It preserves actual facts, conditions, implementation detail, tables, code and uncertainty, and links related materials. It does not mechanically split by heading or fixed size, and no additional giant unmodified return file is required.
 
-Each substantive assignment, including a continuation in the same executor session, receives its own generated return ID. Technical receipts remain in control state rather than knowledge. Exact repeat delivery is idempotent; replacing a conflicting return requires `expected_previous_revision` and explicit resolution before acceptance. See [Memory operations](plugins/persistent-context-workspace/skills/pcw/references/memory-operations.md) for conflict handling and the save/read order.
+`pcw_save_result_blocks` saves these bodies together under the registered assignment and actual bound executor session. MCP generates each filename-ID and UTC save metadata. The primary reads every saved block with `pcw_read_many`, adds useful links with `pcw_links_many`, and explicitly assesses through `pcw_result_assess`. Every continuation has a fresh complete assignment and separate return accounting, even if it reuses the worker session.
 
-Factual checks are scheduled by the primary at moments chosen from task complexity, or when a saved return shows a mismatch needing attention. They are not created for every return. A checker reproduces behavior or checks real sources, including a no-change research conclusion. Its result is saved and read in the same order before acceptance.
+Identical saves are idempotent; conflicting changes require explicit revision-checked correction. Known incorrect active knowledge must be updated or replaced. A linked clarification and a closed discrepancy record do not correct the old body. Uncorrected invalidated knowledge is excluded from active search and direct reads warn about it. See [Memory operations](plugins/persistent-context-workspace/skills/pcw/references/memory-operations.md).
+
+Factual checks are chosen for task complexity, at planned intermediate/final moments or after a mismatch requiring attention. They are not automatic for each return. A checker observes real sources or reproduces behavior, including research without changes; its findings are saved, read and assessed. Bind a planned check by passing `check_id` to assignment preparation without rewriting the plan.
+
+The primary uses `pcw_transition` and `pcw_finish` to record actual operation state, then judges factual conformity with the user's full requested outcome. A `ready` response does not by itself mean the task is complete. Remaining authorized work continues until completion or a concrete blocker.
 
 ## Memory layout
 
@@ -56,17 +62,19 @@ Each semantic workspace is stored below its source project:
 
 Knowledge is free Markdown: it can contain prose, tables, code, facts, sources, conditions, and uncertainty. MCP generates each new ID and uses it as the filename; creation accepts content, not an agent-chosen name. The filename, including `.md`, is the material ID; path is separate. `links` stores these exact IDs. A move preserves the generated basename and updates search paths without re-embedding unchanged text. Existing materials remain readable and are migrated only by explicit request.
 
-The separate `<work-root>/.pcw/.control/<workspace>/` store retains task state, the model map, assignments, check plans and discrepancies independently of the derived index. The primary opens/resumes a task and sends only its generated `handoff.launch_message` in a separate context without inherited conversation or memory coordinates. It binds the actual native session, saves/reads/assesses substantive returns and applies all memory operations itself. Each contentful assignment gets a new generated ID. Semantic helper boundaries are applied through `pcw_submit_boundaries` and recorded only in service state. There is no report-about-preparation loop or worker-side assignment retrieval. See [memory operations](plugins/persistent-context-workspace/skills/pcw/references/memory-operations.md).
+The separate `<work-root>/.pcw/.control/<workspace>/` store retains task state, models, assignments, actual executor sessions, return blocks, check plans and discrepancies independently of the derived index. The primary owns this state; workers receive only the prepared task text. Technical receipts and semantic-helper boundaries stay in control state rather than becoming knowledge reports.
 
-Default checkpoint policy is `not_authorized`; `required` and `forbidden` need an actual authority reason. `pcw_task_update` corrects the active request with its revision without losing assignments. `pcw_task_checks_set` preserves planned factual checks; `finish` checks their results, outstanding work, Current, preparation and genuinely required checkpoints.
+Default checkpoint policy is `not_authorized`; `required` and `forbidden` need an actual authority reason. `pcw_task_update` corrects the active request with its revision without losing assignments. `pcw_task_checks_set` preserves planned factual checks; assignment preparation can bind their `check_id`. `pcw_finish` checks outstanding work, the check plan, corrected discrepancies, Current, affected preparation and authorized required checkpoints.
 
-Current is readable Markdown with five sections: Goal, Constraints, Completion, Current step, and Blocker. It stays compact. The primary changes its step or blocker only when its decision or obstacle changes, so ordinary returns do not rewrite Current.
+Current is readable Markdown with five sections: Goal, Constraints, Completion, Current step, and Blocker. It stays compact. The primary changes the step or blocker when the decision or obstacle changes, rather than after every return.
 
-New or changed bodies are saved first and remain readable while `pending_preparation`. The primary supplies the literal text and positions to a dedicated native helper, which returns only semantic block endings. The primary submits these boundaries through MCP; the runtime reconstructs the unchanged parts and checks the source revision. Tables, code, conditions, and explanations are preserved. Links-only edits and renames do not invoke splitting or embedding. Consolidation changes the actual materials and retains useful conditions, exceptions, uncertainty, tables, and code; source attribution and provenance metadata need not be retained after compaction.
+New or changed bodies remain readable while `pending_preparation`. **After** the primary saves the topic materials, `pcw_prepare_many` prepares them for a cheap suitable semantic helper. It receives only literal numbered text and returns arrays of embedding-block endings without tools. The primary submits them through `pcw_submit_boundaries_many`; MCP reconstructs unchanged parts and checks revisions. Single-material APIs remain available. The helper does not decide which knowledge files to create.
+
+Links-only changes and moves do not re-embed. Consolidation changes actual materials and preserves useful conditions, exceptions, uncertainty, tables and code. Initial assignment/session/time accounting is retained in control state; source attribution and provenance metadata need not survive in consolidated knowledge.
 
 ## Search and embeddings
 
-LanceDB stores literal semantic parts, their vectors, material filename-IDs, and current paths. Search returns a bounded set of candidates; the primary reads full selected materials and follows useful links. Semantic search and knowledge consolidation solve different problems. Empty search output does not prove that knowledge is absent.
+LanceDB stores literal semantic parts, their vectors, material filename-IDs, and current paths. Search returns a bounded set of whole topic-material candidates; the primary reads full selected bodies and follows useful links. Indexed parts help select those materials; they do not become a new snippet-search interface. Semantic search and knowledge consolidation solve different problems. Empty search output does not prove that knowledge is absent.
 
 The bundled default is local `sentence-transformers` with `Qwen/Qwen3-Embedding-0.6B`; Qwen documents use literal parts and queries use its configured retrieval instruction. Ollama `/api/embed` and explicitly configured OpenAI-compatible `/v1/embeddings` are supported alternatives. Connection details are separate from the vector-space profile. A provider switch rebuilds vectors from stored literal parts into an inactive table, and activates source/profile/table together only after success. No provider fallback, fabricated vector, silent truncation, or re-splitting on a pure provider change is allowed.
 
@@ -106,7 +114,7 @@ PCW_TEST_CODEX=1 PCW_TEST_QWEN=1 python3 -m unittest tests.test_codex_host -v
 PCW_TEST_NATIVE=1 python3 -m unittest tests.test_native_workflow -v
 ```
 
-`PCW_TEST_QWEN` uses already cached model weights in offline mode. `PCW_TEST_NATIVE` makes actual model turns and selects the installed skill through Codex's native skill selector. It preserves process and thread IDs, selected model capabilities, and streamed events under `.pcw/project-update/.pcw-runtime/verification/native/`. Its trace must be assessed separately for instruction compliance, actor responsibilities, raw-result save/read order, executor sessions, and factual checks; a completed model turn or a returned marker alone is not acceptance.
+`PCW_TEST_QWEN` uses already cached model weights in offline mode. `PCW_TEST_NATIVE` makes actual model turns and selects the installed skill through Codex's native skill selector. It preserves process and thread IDs, selected model capabilities, and streamed events under `.pcw/project-update/.pcw-runtime/verification/native/`. Its trace must be assessed separately for instruction compliance, actor responsibilities, topic-block save/read/assessment order, executor sessions, and factual checks; a completed model turn or a returned marker alone is not acceptance.
 
 The [implementation assessment](docs/implementation-assessment.md) records changes, checks, and acceptance status. The [regulation assessment](docs/regulation-assessment.md) checks the written instructions, and the [independent coverage assessment](docs/final-coverage-assessment.md) maps the guide's requirements to evidence and its limits.
 

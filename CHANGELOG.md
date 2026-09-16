@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.1
+
+- Save primary-selected coherent topic blocks as distinct generated-ID materials before within-file embedding segmentation; no duplicate full-return file.
+- Separate read-only rules from operational assignment, assessment, transition and finish commands; add compact startup and operation responses.
+- Add batch save/read/link/preparation/boundary operations and direct planned-check binding.
+- Require actual knowledge correction before resolving discrepancies; keep uncorrected findings out of ordinary search.
+- Normalize legacy search IDs to readable filename IDs without implicit migration or re-embedding.
+- Reuse current tools maps and derive supported launch parameters from recorded capabilities without duplicate declarations.
+
+### Upgrade and verification
+
+Refresh the marketplace, reinstall and start a new thread. The MCP surface replaces `pcw_action_requirements` with separate rules/assignment/assessment/transition/finish tools, and `pcw_save_subagent_result` with `pcw_save_result_blocks`. Existing user knowledge is not automatically split, migrated or deleted.
+
+The suite passed 171 tests and 73 subtests with six opt-in skips. A native-agent cycle saved two linked topic files, corrected an observed wording error and completed indexing without technical knowledge files. Four equivalent workflow response bodies decreased from 12,072 to 1,770 bytes; this is not an end-to-end speed measurement. See the [0.7.1 assessment](docs/compact-memory-assessment.md) for evidence and limits.
+
 ## 0.7.0
 
 - Make PCW the primary agent's memory: the primary reads and changes knowledge, Current, links, compaction and authorized memory history.

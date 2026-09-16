@@ -10,7 +10,8 @@ from typing import get_type_hints
 from mcp.server.fastmcp import FastMCP
 
 from .agent_workflow import (ActionContext, ActionName, AgentWorkflow, EnvironmentSnapshot,
-                             ToolsMapProfile, PlannedCheck)
+                             ToolsMapProfile, PlannedCheck, AssignmentContext, SplitSource,
+                             ResultAssessment, ChecksDue, AcceptanceChecks)
 from .assignments import CheckpointPolicy
 from .runtime import PCWRuntime
 from .control import RecoveryRequired
@@ -49,6 +50,17 @@ def close_runtimes():
 atexit.register(close_runtimes)
 
 _DESCRIPTIONS = {
+    "startup": "Read task, Current, memory counts and tools-map freshness in one compact response. Use task_status or map getters only when full recovery details are needed.",
+    "rules_get": "Read workflow rules on demand at startup or context recovery. Read-only: never registers, assesses or completes work.",
+    "assignment_prepare": "Validate and register a complete standalone assignment. Return only its ID and handoff. Optional check_id binds a planned check; split sources stay primary-only. Launch only when ready.",
+    "result_assess": "Record primary assessment after every saved topic block has been read. Resolving a discrepancy requires actual correction of affected knowledge. It never dispatches agents or gives semantic acceptance.",
+    "transition": "Verify declared planned or mismatch-triggered checks before changing stage. Return only status and concrete missing prerequisites.",
+    "finish": "Verify registered work, accepted checks, corrected knowledge, Current, preparation and authorized checkpoint. Return completion or actionable blockers; primary still judges meaning.",
+    "save_result_blocks": "Save a primary-partitioned substantive return as separate coherent topic files with generated IDs, UTC time and executor. No monolithic duplicate. Exact retry is idempotent; conflicting same-count correction needs prior revisions.",
+    "read_many": "Read selected complete topic materials and links in one call. With assignment_id, record that its saved blocks were read before assessment.",
+    "links_many": "Apply a batch of explicit outgoing-link changes. Links do not correct claims or require new embeddings.",
+    "prepare_many": "Read selected saved topic bodies and revisions for subsequent within-topic semantic boundary selection.",
+    "submit_boundaries_many": "Apply a semantic helper's separate end arrays for numbered texts. Validate original revisions and literal coverage; record service state only.",
     "service_error": "Primary records an actual semantic-helper failure in control state, without creating knowledge. A successful corrected continuation is needed before finish.",
     "status": "Open selected workspace; report counts, pending preparation and active embedding/search configuration without loading model weights.",
     "list": "List bounded knowledge metadata; does not return material bodies.",
@@ -72,7 +84,6 @@ _DESCRIPTIONS = {
     "checkpoint": "Explicit local Git checkpoint of exact current.md/knowledge Markdown paths. Initialize separate memory Git if needed. No source-project commits, broad staging, hooks or remote push.",
     "restore": "Explicitly restore selected exact memory paths from local Git commit, invalidate changed search rows and report pending original semantic preparation. This can replace current contents.",
     "migrate_legacy_ids": "Explicitly migrate legacy YAML UUID identities and links to filename IDs without rewriting material bodies or vectors. Opening a workspace never performs this migration.",
-    "save_subagent_result": 'Primary saves an unmodified substantive return with actual executor session ID. MCP allocates a distinct filename-ID for each contentful assignment. A retry is idempotent; conflicting text must be resolved explicitly. Primary reads the saved result and assesses it. Semantic boundaries and operation receipts never become knowledge.',
     "recover_workspace": 'Primary explicitly recreates missing runtime directories. Missing knowledge remains blocked unless its recreation is explicitly authorized; this does not restore lost knowledge.',
     "task_begin": "Primary records the user request before native work. Capture its baseline and checkpoint authority independently of the workspace index; preserve an unfinished request on retry.",
     "task_update": "Primary explicitly corrects the active request with request_revision and a reason based on user authority; preserves all outstanding assignments. Then synchronize Current.",
@@ -84,14 +95,6 @@ _DESCRIPTIONS = {
     "environment_check": "Record an actual portable environment snapshot and derive canonical environment_revision from version, launchable models, reasoning capabilities and native launch constraints. A changed revision requires a map refresh.",
     "tools_map_get": "Read profiles published by the primary agent and their binding to the current environment revision. This tool never chooses a model.",
     "tools_map_publish": "Publish exact model/reasoning profiles, roles and suitable_when only for the supplied current environment revision. Rejects stale revisions and unavailable model/reasoning combinations.",
-    "action_requirements": (
-        "Return the packaged instructions for prepare_assignment, process_result, transition or finish "
-        "with verified prerequisites and concrete missing data. Instructions remain available when "
-        "ready is false; this does not confirm native launch readiness. For prepare_assignment, "
-        "resolve missing prerequisites and resubmit the complete assignment until ready is true "
-        "before launching. Creating or saving prerequisite data remains available. "
-        "It never dispatches agents or gives semantic acceptance."
-    ),
 }
 
 
@@ -152,21 +155,64 @@ def pcw_action_requirements(work_root: str, workspace: str, action: ActionName,
     return workflow(work_root, workspace).action_requirements(action, context)
 
 
+def pcw_startup(work_root: str, workspace: str) -> dict:
+    return workflow(work_root, workspace).startup()
+
+
+def pcw_rules_get(work_root: str, workspace: str, action: ActionName | None = None) -> dict:
+    return workflow(work_root, workspace).rules_get(action)
+
+
+def pcw_assignment_prepare(work_root: str, workspace: str, assignment: AssignmentContext,
+                           continuation_of: str | None = None, check_id: str | None = None,
+                           split_source: SplitSource | None = None,
+                           split_sources: list[SplitSource] | None = None) -> dict:
+    return workflow(work_root, workspace).assignment_prepare(
+        assignment, continuation_of=continuation_of, check_id=check_id,
+        split_source=split_source, split_sources=split_sources)
+
+
+def pcw_result_assess(work_root: str, workspace: str, assignment_id: str,
+                       assessment: ResultAssessment) -> dict:
+    return workflow(work_root, workspace).result_assess(assignment_id, assessment)
+
+
+def pcw_transition(work_root: str, workspace: str, checks_due: ChecksDue,
+                    mismatch_needs_attention: bool = False, planned_checks_due: bool = False) -> dict:
+    return workflow(work_root, workspace).transition(checks_due,
+        mismatch_needs_attention=mismatch_needs_attention, planned_checks_due=planned_checks_due)
+
+
+def pcw_finish(work_root: str, workspace: str, acceptance_checks: AcceptanceChecks,
+                mismatch_needs_attention: bool = False, planned_checks_due: bool = False) -> dict:
+    return workflow(work_root, workspace).finish(acceptance_checks,
+        mismatch_needs_attention=mismatch_needs_attention, planned_checks_due=planned_checks_due)
+
+
+def _task_receipt(result: dict) -> dict:
+    """Mutations acknowledge state; explicit reads recover the full ledger."""
+    task = result.get("task")
+    if not isinstance(task, dict):
+        return result
+    return {"task_id": task["id"], "status": task["status"],
+            "request_revision": result.get("request_revision")}
+
+
 def pcw_task_begin(work_root: str, workspace: str, goal: str, constraints: str, completion: str,
                    checkpoint_policy: CheckpointPolicy = "not_authorized", checkpoint_reason: str = "") -> dict:
-    return workflow(work_root, workspace).task_begin(goal, constraints, completion, checkpoint_policy, checkpoint_reason)
+    return _task_receipt(workflow(work_root, workspace).task_begin(goal, constraints, completion, checkpoint_policy, checkpoint_reason))
 
 
 def pcw_task_update(work_root: str, workspace: str, expected_request_revision: str, reason: str,
                     goal: str | None = None, constraints: str | None = None,
                     completion: str | None = None, checkpoint_policy: CheckpointPolicy | None = None,
                     checkpoint_reason: str | None = None) -> dict:
-    return workflow(work_root, workspace).task_update(expected_request_revision, reason, goal, constraints,
-                                                       completion, checkpoint_policy, checkpoint_reason)
+    return _task_receipt(workflow(work_root, workspace).task_update(expected_request_revision, reason, goal, constraints,
+                                                       completion, checkpoint_policy, checkpoint_reason))
 
 
 def pcw_task_checks_set(work_root: str, workspace: str, checks: list[PlannedCheck], reason: str) -> dict:
-    return workflow(work_root, workspace).task_checks_set(checks, reason)
+    return _task_receipt(workflow(work_root, workspace).task_checks_set(checks, reason))
 
 
 def pcw_task_status(work_root: str, workspace: str) -> dict:
@@ -186,6 +232,7 @@ def pcw_assignment_cancel(work_root: str, workspace: str, assignment_id: str, re
 
 
 for _tool_name in ("pcw_environment_get", "pcw_environment_check", "pcw_tools_map_get",
-                   "pcw_tools_map_publish", "pcw_action_requirements", "pcw_task_begin", "pcw_task_status",
+                   "pcw_tools_map_publish", "pcw_startup", "pcw_rules_get", "pcw_assignment_prepare",
+                   "pcw_result_assess", "pcw_transition", "pcw_finish", "pcw_task_begin", "pcw_task_status",
                    "pcw_assignment_bind", "pcw_assignment_cancel", "pcw_task_update", "pcw_task_checks_set", "pcw_service_error"):
     mcp.tool(name=_tool_name, description=_DESCRIPTIONS[_tool_name.removeprefix("pcw_")])(globals()[_tool_name])

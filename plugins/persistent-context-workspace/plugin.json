@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "persistent-context-workspace",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Linked project memory with local semantic search and bounded agent work",
   "extensions": {
     "com.openai": {

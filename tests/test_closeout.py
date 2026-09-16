@@ -108,6 +108,11 @@ def test_complete_context_is_retrieved_and_read_is_required(workspace):
     assert any("discrepancy" in m["reason"] for m in finish(runtime)["missing"])
     clarification = register(runtime, goal="Recheck actual index status", continuation_of=assignment)
     corrected = runtime.save_subagent_result(clarification, "Observed indexed", "worker-1", raw["revision"])
+    runtime.read(corrected["id"], assignment_id=clarification)
+    blocked = flow.result_assess(clarification, {"status": "accepted", "reason": "Clarification alone",
+                                               "resolves": [assignment]})
+    assert not blocked["ready"]
+    runtime.update(raw["id"], "Actual observed state is indexed", expected_revision=raw["revision"])
     process(runtime, clarification, corrected, resolves=[assignment])
     assert not any("discrepancy" in m["reason"] for m in finish(runtime)["missing"])
 

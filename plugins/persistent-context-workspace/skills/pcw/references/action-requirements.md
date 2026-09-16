@@ -1,22 +1,24 @@
 # Action requirements
 
-The primary obtains one action immediately before performing it. This protocol records state and supplies instructions; it does not launch agents or grant authority. All PCW calls and memory changes belong to the primary. Workers receive only prepared task text.
+Read this reference or call `pcw_rules_get` when the relevant rule is needed. Rule retrieval does not prepare assignments, assess results, register checks or finish tasks. Do not fetch these instructions before every operation. All PCW operations belong to the primary; workers receive only complete prepared task text.
 
 ## prepare_assignment
 
-Open/resume the user request with `pcw_task_begin` and `pcw_task_status`. Set Current yourself with `pcw_current_set(step=..., blocker="")`; registered goal/constraints/completion are supplied automatically. Correct task meaning only through `pcw_task_update` with actual authority and the current request revision.
+Use `pcw_startup` once to restore state. Open a new request through `pcw_task_begin` only when needed. Set Current's step and blocker yourself; goal, constraints and completion come from the registered request. An authorized request correction uses `pcw_task_update` with the current request revision and reason.
 
-Discover available native models and reasoning yourself, record the actual environment, gather model information, compare capabilities with roles and publish a current tools map. Do not launch a bootstrap worker for map construction. Choose a sufficient profile with an explicit selection reason. Environment changes invalidate the old map.
+The primary discovers actual available native models and reasoning, records the environment and publishes a tools map. Reuse the map while those capabilities remain unchanged. Keep the actual version separate from warning output and session identity. Choose a sufficient published profile and state why it fits. Do not launch a worker to build the map.
 
-Supply the complete assignment with an exact published profile ID. If `ready` is false, resolve every missing prerequisite and repeat the call with corrected context. Launch only after it returns `ready: true`. Readiness checks supplied data, not semantic suitability or user authority. Instructions remain available without a complete assignment.
+Call `pcw_assignment_prepare` with a complete assignment and the exact profile. Resolve missing prerequisites before launching; only `ready: true` permits the prepared launch. Readiness validates supplied state, not semantic suitability or user authority.
 
-The primary reads relevant knowledge and supplies the necessary facts as text. Do not forward memory paths, material IDs, Current or PCW state. Include the allowed real source objects, constraints, expected result, criteria and what to return. If implementation facts are missing, first assign bounded research; an overall goal and source paths alone do not fill that gap. Empty knowledge needs source research, not a search of empty memory.
+Read relevant knowledge and supply needed facts as text. Do not forward memory paths, material IDs, Current or ledger state. Include allowed real source objects, constraints, expected result, observable criteria and what to return. Missing implementation facts call for bounded research; an overall goal and source paths alone do not supply them. Empty knowledge needs source research, not a search of empty memory.
 
-Send only `handoff.launch_message` to a native agent in a separate context without the primary conversation or PCW instructions. Select model/reasoning explicitly at launch. The message prohibits PCW calls and any discovery, reading or modification of `.pcw` via files, shell or scripts. Only explicitly authorized actions are permitted. These are assignment restrictions, not a technical sandbox. Bind the actual executor session with `pcw_assignment_bind` after sending the message. Workers do not retrieve assignments through MCP. See [Native assignments](native-assignments.md).
+Send only `handoff.launch_message` in a separate native context without the primary conversation or PCW instructions. Select supported model/reasoning explicitly. The handoff prohibits PCW and discovery, reading or modification of `.pcw` via any tool, shell or script. This is an assignment restriction, not a technical sandbox. Bind the actual session with `pcw_assignment_bind`. See [Native assignments](native-assignments.md).
 
-For a continuation, provide `continuation_of` and a complete fresh assignment. It can retain the executor but receives a separate substantive return ID. Cancel an unused, unlaunched preparation explicitly. A launched worker must return findings or a blocker.
+A continuation uses `continuation_of` and a complete fresh assignment, even in the same worker session. It has separate return accounting. Use a new clean session when old context is inappropriate. Cancel an unused unlaunched preparation explicitly; a launched worker must return findings or its blocker.
 
-Choose factual-check timing and scope according to complexity; persist the plan with `pcw_task_checks_set`. Use purpose `check` for a checker. For the narrowly scoped boundary helper use purpose `semantic_split` and a primary-only `split_source` outside the assignment; see [Prepare search](prepare-search.md). Recovery of PCW, Current, compaction, links and checkpoints are primary operations, not worker assignments.
+Record planned checks through `pcw_task_checks_set`; pass their `check_id` when preparing purpose `check` assignments so binding does not require rewriting the plan. For purpose `semantic_split`, supply primary-only `split_source` or `split_sources` outside the assignment; see [Prepare search](prepare-search.md). PCW recovery, Current, consolidation, links and memory checkpoints are primary operations.
+
+Assignment example; shared `work_root` and `workspace` arguments are omitted:
 
 ```json
 {"assignment": {
@@ -35,44 +37,47 @@ Choose factual-check timing and scope according to complexity; persist the plan 
 
 ## process_result
 
-For a substantive work/check return, the primary calls `pcw_save_subagent_result` with assignment ID, actual executor session ID and unmodified Markdown. MCP generates the filename-ID and UTC `saved_at`. Read it using `pcw_read(material_id, assignment_id)` before assessment. Each substantive assignment gets its own material; a repeated delivery of the identical result is idempotent.
+Immediately divide each substantive work/check return into large, independently meaningful knowledge materials. The primary makes these topic decisions, preserves actual facts, conditions, details, tables, code and uncertainty, and links related materials. Do not split mechanically by headings or size. No additional unmodified monolithic return is required.
 
-An unexpected different body is a conflict. Do not accept a different stored report merely because it exists. Resolve the actual returned text explicitly; a deliberate correction of that assignment's raw record requires `expected_previous_revision`. A different assignment must not overwrite it. A missing executor identity or failed save/read is a concrete blocker.
+Call `pcw_save_result_blocks` with the assignment ID, actual executor session ID and `blocks` as an array of Markdown bodies. MCP generates all filename-IDs and UTC save metadata and records the blocks under that return. Read every saved block with `pcw_read_many`, supplying the assignment ID. Add useful links through `pcw_links_many`. Then call `pcw_result_assess` with the assignment ID and explicit assessment.
 
-Declare `accepted` or `needs_attention` with a reason. An accepted clarification/check resolves a prior discrepancy by naming it in `assessment.resolves`; omission or a later false flag does not clear it. Reading/saving is not factual proof or acceptance. Technical MCP statuses and boundary-helper results remain in control state; do not send them through this substantive-material route.
+An identical retry is idempotent. Different content conflicts rather than silently replacing a saved return. An explicit correction of the same registered blocks uses their `expected_previous_revisions`; repartitioning existing knowledge is consolidation, not a retry. A different assignment never overwrites a prior return. Missing actual executor identity or failed save/read remains a concrete blocker.
+
+Declare `accepted` or `needs_attention` with a reason. For `needs_attention`, `assessment.affected_material_ids` identifies incorrect active knowledge; omission selects all saved blocks of this return. The assessment captures their body state. An accepted clarification/check names earlier assignment IDs in `assessment.resolves`; every captured body must have been corrected or replaced before resolution. A link-only change leaves the wrong body unchanged. Saving, reading and a worker success claim do not establish factual acceptance.
+
+Technical receipts and helper boundaries stay in control state. The later boundary helper does not decide the topic materials and does not produce another knowledge report.
 
 ```json
-{"result": {"assignment_id": "registered-assignment", "material_name": "MCP-returned-ID.md", "executor_session_id": "actual-executor"}, "assessment": {"status": "accepted", "reason": "The saved observations address the assignment."}}
+{"assignment_id": "registered-assignment", "assessment": {
+  "status": "accepted",
+  "reason": "The saved and read observations satisfy the assignment."
+}}
 ```
 
 ## transition
 
-Choose checks at planned intermediate/final moments or when an observed mismatch needs attention, not automatically after every return. Give the checker necessary facts as text, the original requirements, allowed real objects and observable criteria. It inspects actual sources or reproduces behavior, including for research without changes. Inspect an existing artifact before regenerating it; distinguish that observation from later reproduction. Save, read and assess the substantive check result.
+Call `pcw_transition` with the applicable check state. Choose factual checks at planned intermediate/final moments or when an observed mismatch needs attention, not automatically after each return. Give the checker the original requirement, necessary facts, allowed real objects and observable criteria. It checks actual sources or reproduces behavior, including research without changes.
 
-The primary records planned checks with timing, scope and criteria through `pcw_task_checks_set`, and associates each with its purpose=check assignment. Revise the plan explicitly with a reason when the task changes. State whether any check is currently due. A previously declared due check is retained across compaction until results are supplied; omitting flags does not resolve it.
+Inspect existing artifacts before regenerating them and distinguish observations from later reproduction. Save, read and assess substantive findings. Bind a planned checker using `check_id` during preparation; revise the saved plan with a reason only when its timing, scope or criteria change.
 
-```json
-{"checks_due": {"status": "none_due", "reason": "No planned moment or mismatch requires a check now."}}
-```
+State whether a check is due. An already declared due check remains outstanding across compaction; omitted flags do not clear it.
 
 ```json
-{"checks_due": {"status": "assigned", "checks": [{"assignment_id": "check-assignment", "material_name": "MCP-returned-ID.md", "executor_session_id": "actual-checker"}]}}
+{"checks_due": {"status": "none_due", "reason": "No planned moment or observed mismatch requires a check now."}}
 ```
+
+For an assigned check, use its actual saved result coordinates returned by MCP, including the assignment and executor session. All blocks must have been read and assessed; one coordinate is not a substitute for processing the whole return.
 
 ## finish
 
-Read the registered task, saved substantive results, check plan and actual memory state. Compare observed results with the user's outcome, constraints and completion condition. Planned checks need accepted results; known discrepancies and conflicting returns remain outstanding until resolved. A worker's success claim, saved file, passing static test or `ready` response alone does not prove actual conformity.
+Compare the registered request and actual observations with the user's whole outcome, constraints and completion condition. Reuse known state and refresh what changed; do not repeat the startup sequence. Planned checks need accepted results. Known discrepancies, conflicting returns and unfinished assignments remain outstanding until addressed.
 
-The primary applies needed compaction, links and Current updates. Prepare retained new/changed content with the narrow semantic helper; its boundaries and indexing status are service state, never a new knowledge material. There is no report-about-preparation loop. Inspect actual preparation state. All registered work must be accounted for, but no helper is launched merely to update Current or checkpoint memory.
+The primary corrects inaccurate active knowledge, applies needed consolidation and links, and updates Current. Prepare retained changed bodies with the narrow helper and verify actual preparation state. Its arrays and indexing receipts remain service state; there is no report-about-preparation loop.
 
-Checkpoint exact affected durable paths only when the registered policy is `required` with actual authority. Default `not_authorized` and an explicit `forbidden` policy do not require a commit and do not permit one. Do not infer authorization from the workspace location or absence of a prohibition. Respect user and applicable repository instructions. See [Memory operations](memory-operations.md).
+Checkpoint exact affected durable paths only when policy is `required` with actual authority. Default `not_authorized` and explicit `forbidden` do not require or permit a commit. See [Memory operations](memory-operations.md).
 
-Call finish with the whole acceptance scope and results of all factual checks assigned for it. `none_assigned` means none were assigned, not that earlier checks have finished. A missing required preparation/checkpoint remains work to complete; report a concrete blocker when authorized continuation is impossible. A successful finish records the observable conditions; the primary still makes the semantic acceptance decision.
+Call `pcw_finish` with the whole acceptance scope and results of its factual checks. `none_assigned` means none were assigned, not that earlier checks have finished. A `ready` response, saved file, static test or worker success claim alone is not factual completion. Continue remaining authorized work until the requested outcome is achieved; if that is impossible, report the concrete blocker and unfinished step.
 
 ```json
 {"acceptance_checks": {"status": "none_assigned", "scope": "whole requested task", "reason": "No separate factual check was assigned for this task."}}
-```
-
-```json
-{"acceptance_checks": {"status": "assigned", "scope": "whole requested task", "checks": [{"assignment_id": "check-assignment", "material_name": "MCP-returned-ID.md", "executor_session_id": "actual-checker"}]}}
 ```

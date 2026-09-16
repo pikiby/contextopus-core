@@ -274,9 +274,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(absent["requirements_source"].endswith("action-requirements.md#prepare_assignment"))
         instructions = absent["requirements"].replace("`", "")
         self.assertIn("complete assignment", instructions)
-        self.assertIn("exact published profile ID", instructions)
-        self.assertRegex(instructions, r"ready.*false.*repeat.*corrected context")
-        self.assertRegex(instructions, r"Launch only after.*ready:\s*true")
+        self.assertIn("exact profile", instructions)
+        self.assertIn("Resolve missing prerequisites before launching", instructions)
+        self.assertRegex(instructions, r"only ready:\s*true permits")
 
         publish_current(workflow)
         no_assignment = workflow.action_requirements("prepare_assignment")

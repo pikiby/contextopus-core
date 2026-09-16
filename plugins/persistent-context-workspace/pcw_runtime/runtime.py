@@ -432,12 +432,26 @@ class PCWRuntime:
         for field in ("saved_at", "executor_session_id"):
             if field in material.metadata:
                 result[field] = material.metadata[field]
+        invalidations = self._material_invalidations(material)
+        if invalidations:
+            result.update(knowledge_status="needs_correction", invalidations=invalidations,
+                          warning="This saved revision has a known discrepancy. Correct the knowledge before using it as an established fact.")
         return result
+
+    def _material_invalidations(self, material: Material):
+        from .assignments import TaskLedger
+        return TaskLedger(self).invalidations(material.id, material.revision)
+
+    def _needs_correction(self):
+        return sorted(material.id for material in self.materials.values()
+                      if self._material_invalidations(material))
 
     def status(self):
         with self._guard():
+            needs_correction = self._needs_correction()
             return {"workspace": str(self.root), "materials": len(self.materials),
                     "pending_preparation": sorted(self.pending)[:50], "pending_count": len(self.pending),
+                    "needs_correction": needs_correction[:50], "needs_correction_count": len(needs_correction),
                     "unregistered": self.unregistered[:50], "unregistered_count": len(self.unregistered),
                     "active": self.active}
 
@@ -492,6 +506,97 @@ class PCWRuntime:
                 from .agent_workflow import AgentWorkflow
                 AgentWorkflow(self).note_read(assignment_id, material)
             return self._result(material, content=True)
+
+    @staticmethod
+    def _batch_ids(material_ids: list[str]):
+        if (not isinstance(material_ids, list) or not material_ids or len(material_ids) > 100 or
+                any(not isinstance(value, str) for value in material_ids)):
+            raise PCWError("material_ids must contain between 1 and 100 exact filename IDs")
+        if len(set(material_ids)) != len(material_ids):
+            raise PCWError("material_ids must not contain duplicates")
+        return [_id(value) for value in material_ids]
+
+    def read_many(self, material_ids: list[str], assignment_id: str | None = None):
+        """Read complete saved bodies and atomically account for this assignment's reads."""
+        with self._guard():
+            materials = [self._material(ident) for ident in self._batch_ids(material_ids)]
+            if assignment_id is not None:
+                from .assignments import TaskLedger
+                TaskLedger(self).note_read_many(assignment_id, materials)
+            return {"materials": [self._result(material, content=True) for material in materials],
+                    "assignment_id": assignment_id}
+
+    def save_result_blocks(self, assignment_id: str, executor_session_id: str, blocks: list[str],
+                           expected_previous_revisions: list[str] | None = None):
+        """Save the primary's standalone knowledge blocks before search segmentation.
+
+        The ledger reserves every filename before the first body write. Retrying
+        a partially completed operation therefore never creates duplicate files.
+        """
+        from .assignments import TaskLedger
+        with self._guard():
+            if (not isinstance(blocks, list) or not blocks or len(blocks) > 100 or
+                    any(not isinstance(body, str) or not body.strip() for body in blocks)):
+                raise PCWError("blocks must contain between 1 and 100 nonempty standalone text blocks")
+            ledger = TaskLedger(self)
+            try:
+                targets = ledger.reserve_result_blocks(assignment_id, executor_session_id, blocks,
+                                                       expected_previous_revisions=expected_previous_revisions)
+            except ValueError as exc:
+                raise PCWError(str(exc)) from exc
+            saved = []
+            for target, body in zip(targets, blocks):
+                ident = target["material_id"]
+                try:
+                    existing = self.materials.get(ident)
+                    if existing is not None:
+                        matches = (existing.content == body and
+                                   existing.metadata.get("executor_session_id") == executor_session_id and
+                                   existing.metadata.get("saved_at") == target["saved_at"])
+                        replaceable = (target.get("previous_revision") == existing.revision and
+                                       existing.metadata.get("executor_session_id") == executor_session_id and
+                                       isinstance(existing.metadata.get("saved_at"), str))
+                        if not matches and not replaceable:
+                            ledger.note_conflict(assignment_id, blocks)
+                            raise PCWError(f"Reserved material filename {ident} is occupied by a different result")
+                        if matches:
+                            material, status = existing, "already_saved"
+                        else:
+                            material = Material(existing.id, existing.path, {
+                                **existing.metadata, "saved_at": target["saved_at"],
+                                "executor_session_id": executor_session_id,
+                            }, body)
+                            self._save(material)
+                            self.materials[ident] = material
+                            self.pending.add(ident)
+                            self._delete_rows(ident)
+                            status = "updated"
+                    else:
+                        path = self._knowledge_path(ident)
+                        if path.exists():
+                            raise PCWError(f"Reserved material filename {ident} already exists")
+                        material = Material(ident, path.relative_to(self.root).as_posix(), {
+                            "links": [], "saved_at": target["saved_at"],
+                            "executor_session_id": executor_session_id,
+                        }, body)
+                        self._save(material)
+                        self.materials[ident] = material
+                        self.pending.add(ident)
+                        status = "saved"
+                    ledger.note_saved(assignment_id, material)
+                    saved.append({**self._result(material), "status": status})
+                except Exception as exc:
+                    # A rename/fsync or ledger write can fail after publication.
+                    # The persisted reservation remains authoritative on retry.
+                    self._file_cache.clear()
+                    self._reconciled_token = None
+                    return {"status": "partial", "assignment_id": assignment_id,
+                            "materials": saved, "complete": False, "failed_material_id": ident,
+                            "reserved_material_ids": [item["material_id"] for item in targets],
+                            "error": str(exc),
+                            "repair": "The failed file may already be published. Retry pcw_save_result_blocks with the same assignment, executor and ordered blocks; reserved filenames are retained."}
+            return {"status": "already_saved" if all(item["status"] == "already_saved" for item in saved) else "saved",
+                    "assignment_id": assignment_id, "materials": saved, "complete": True}
 
     def save_subagent_result(self, assignment_id: str, result: str, executor_session_id: str,
                              expected_previous_revision: str | None = None):
@@ -740,6 +845,38 @@ class PCWRuntime:
             self._save(material)
             return self._result(material)
 
+    def links_many(self, changes: list[dict]):
+        """Validate all exact-ID navigation changes before the first file write."""
+        with self._guard():
+            if not isinstance(changes, list) or not changes or len(changes) > 100:
+                raise PCWError("changes must contain between 1 and 100 link updates")
+            prepared, seen = [], set()
+            for change in changes:
+                if (not isinstance(change, dict) or "source_id" not in change or
+                        set(change) - {"source_id", "add", "remove"}):
+                    raise PCWError("Each link update needs source_id and optional add/remove ID lists")
+                source_id = _id(change["source_id"])
+                if source_id in seen:
+                    raise PCWError("Each source_id may appear only once in a link batch")
+                seen.add(source_id)
+                material = self._material(source_id)
+                additions = self._check_links(change.get("add", []), source_id)
+                removals = set(_unique_links(change.get("remove", []), source_id))
+                links = _unique_links([value for value in material.links if value not in removals] + additions, source_id)
+                prepared.append((material, links))
+            applied = []
+            for material, links in prepared:
+                replacement = Material(material.id, material.path, {**material.metadata, "links": links}, material.content)
+                try:
+                    if material.links != links:
+                        self._save(replacement)
+                        self.materials[material.id] = replacement
+                    applied.append(self._result(replacement))
+                except Exception as exc:
+                    return {"status": "partial", "materials": applied, "failed_material_id": material.id,
+                            "error": str(exc), "repair": "Retry the same pcw_links_many changes; completed additions and removals are idempotent."}
+            return {"status": "ok", "materials": applied}
+
     def _mapping(self, mapping: dict[str, str]):
         for old, target in mapping.items():
             self._material(old)
@@ -839,6 +976,19 @@ class PCWRuntime:
                     "content": material.content,
                     "instruction": "Primary: prepare a semantic_split assignment with this material ID and revision in split_source. Send only its launch_message to the helper. The helper returns end positions; primary applies them with pcw_submit_boundaries. Never forward this response or its memory coordinates to a worker."}
 
+    def prepare_many(self, material_ids: list[str]):
+        """Read saved block revisions for one service assignment, without embedding."""
+        with self._guard():
+            materials = [self._material(ident) for ident in self._batch_ids(material_ids)]
+            if any(not material.content.strip() for material in materials):
+                raise PCWError("Empty materials do not need semantic splitting")
+            return {
+                "materials": [{**self._result(material, content=True), "text_number": index}
+                              for index, material in enumerate(materials, 1)],
+                "split_sources": [{"material_id": material.id, "revision": material.revision} for material in materials],
+                "instruction": "Primary: use split_sources to prepare one semantic_split assignment. Send only its launch_message containing numbered texts to the helper. Apply its numbered boundaries with pcw_submit_boundaries_many. These saved blocks remain separate knowledge files; semantic parts are search representations only.",
+            }
+
     @staticmethod
     def _validate_parts(content: str, parts: list[str]):
         if not isinstance(parts, list):
@@ -890,25 +1040,81 @@ class PCWRuntime:
                 raise PCWError("This is not a semantic_split assignment")
             if not entry.get("launched_at") or entry.get("executor_session_id") != executor_session_id:
                 raise PCWError("Bind the actual executor before submitting its boundaries")
+            if "split_source" not in entry["assignment"]:
+                raise PCWError("Use pcw_submit_boundaries_many for a numbered-text assignment")
             source = entry["assignment"]["split_source"]
             material = self._material(source["material_id"])
             if material.revision != source["revision"]:
                 raise PCWError("Stale semantic preparation: material revision changed")
-            units = material.content.splitlines(keepends=True)
-            if (not isinstance(boundaries, list) or not boundaries or
-                    any(type(end) is not int for end in boundaries) or
-                    boundaries != sorted(set(boundaries)) or boundaries[0] <= 0 or
-                    boundaries[-1] != len(units)):
-                raise PCWError("boundaries must be increasing positive source-unit end positions including the last unit")
-            parts = []
-            start = 0
-            for end in boundaries:
-                parts.append("".join(units[start:end]))
-                start = end
+            parts = self._parts_from_boundaries(material.content, boundaries)
             # The source, not a model's reproduced text, supplies every byte.
             result = self.submit_parts(material.id, material.revision, parts)
             ledger.note_service(assignment_id, {"boundaries": boundaries}, result)
             return {**result, "assignment_id": assignment_id, "result_storage": "control"}
+
+    @classmethod
+    def _parts_from_boundaries(cls, content: str, boundaries: list[int]):
+        units = content.splitlines(keepends=True)
+        if (not isinstance(boundaries, list) or not boundaries or
+                any(type(end) is not int for end in boundaries) or
+                boundaries != sorted(set(boundaries)) or boundaries[0] <= 0 or
+                boundaries[-1] != len(units)):
+            raise PCWError("boundaries must be increasing positive source-unit end positions including the last unit")
+        parts, start = [], 0
+        for end in boundaries:
+            parts.append("".join(units[start:end]))
+            start = end
+        cls._validate_parts(content, parts)
+        return parts
+
+    def submit_boundaries_many(self, assignment_id: str, executor_session_id: str, boundaries: list[dict]):
+        """Apply one helper's boundaries to every supplied text with exact coverage."""
+        from .assignments import TaskLedger, digest
+        with self._guard():
+            ledger = TaskLedger(self)
+            _, entry = ledger.entry(ledger.load(), assignment_id)
+            sources = entry["assignment"].get("split_sources")
+            if (entry["assignment"].get("purpose") != "semantic_split" or
+                    entry.get("return_id") is not None or not sources):
+                raise PCWError("A semantic_split assignment with numbered split_sources is required")
+            if (not entry.get("launched_at") or entry.get("executor_session_id") != executor_session_id or
+                    entry.get("delivered_revision") != digest(entry["assignment"])):
+                raise PCWError("Bind the actual executor after delivering the complete assignment")
+            if not isinstance(boundaries, list) or len(boundaries) != len(sources):
+                raise PCWError("boundaries must cover every supplied text exactly once")
+            numbered = {}
+            for item in boundaries:
+                if (not isinstance(item, dict) or set(item) != {"text_number", "boundaries"} or
+                        type(item["text_number"]) is not int or
+                        not 1 <= item["text_number"] <= len(sources) or item["text_number"] in numbered):
+                    raise PCWError("boundaries must identify each supplied text_number exactly once")
+                numbered[item["text_number"]] = item["boundaries"]
+            prepared = []
+            for number, source in enumerate(sources, 1):
+                material = self._material(source["material_id"])
+                if material.revision != source["revision"]:
+                    raise PCWError("Stale semantic preparation: material revision changed")
+                prepared.append((number, material, self._parts_from_boundaries(material.content, numbered[number])))
+            service_result = {"boundaries": [{"text_number": number, "boundaries": numbered[number]}
+                                              for number in range(1, len(sources) + 1)]}
+            if entry.get("service_result") is not None and entry["service_result"] != service_result:
+                raise PCWError("The assignment already has a different accepted boundary result")
+            # Exact retries reuse a completed index if every material remains indexed.
+            if entry.get("service_result") == service_result and all(material.id not in self.pending for _, material, _ in prepared):
+                return {**entry["service_observed"], "status": "already_applied", "assignment_id": assignment_id,
+                        "result_storage": "control"}
+            applied = []
+            try:
+                for number, material, parts in prepared:
+                    result = self.submit_parts(material.id, material.revision, parts)
+                    applied.append({**result, "text_number": number})
+                observed = {"status": "ok", "materials": applied, "complete": True}
+                ledger.note_service(assignment_id, service_result, observed)
+            except Exception as exc:
+                return {"status": "partial", "assignment_id": assignment_id, "result_storage": "control",
+                        "materials": applied, "complete": False, "error": str(exc),
+                        "repair": "Retry pcw_submit_boundaries_many with the same numbered boundaries. Saved knowledge bodies are unchanged."}
+            return {**observed, "assignment_id": assignment_id, "result_storage": "control"}
 
     def submit_parts(self, material_id: str, revision: str, parts: list[str]):
         with self._guard():
@@ -951,16 +1157,27 @@ class PCWRuntime:
                     options[key] = value
             config = SearchConfig(**options)
             results = []
+            needs_correction = self._needs_correction()
             if self.table.count_rows():
                 vector = self._vectors(self._get_provider(), [query],
                                        self.active["config"]["profile"]["dimensions"], "query")[0]
                 # No fast_search: LanceDB includes fresh rows outside an ANN index.
-                rows = (self.table.search(vector).distance_type(config.metric)
-                        .select(["material_id", "path"]).limit(config.N).to_list())
-                results = select_candidates([{"id": row["material_id"], "path": row["path"],
-                                              "distance": row["_distance"]} for row in rows], config)
+                lookup = self.table.search(vector).distance_type(config.metric).select(["material_id", "path"])
+                excluded = set(needs_correction)
+                excluded.update(old for old, target in self._legacy_ids.items() if target in excluded)
+                if excluded:
+                    lookup = lookup.where("material_id NOT IN (" + ",".join("'" + _id(ident) + "'" for ident in sorted(excluded)) + ")")
+                rows = lookup.limit(config.N).to_list()
+                canonical = []
+                for row in rows:
+                    ident = self._legacy_ids.get(row["material_id"], row["material_id"])
+                    material = self.materials.get(ident)
+                    if material is not None and ident not in excluded:
+                        canonical.append({"id": ident, "path": material.path, "distance": row["_distance"]})
+                results = select_candidates(canonical, config)
             return {"results": results, "pending_preparation": sorted(self.pending)[:50],
                     "pending_count": len(self.pending), "unregistered": self.unregistered[:50],
+                    "needs_correction": needs_correction[:50], "needs_correction_count": len(needs_correction),
                     "unregistered_count": len(self.unregistered), "search": dataclasses.asdict(config),
                     "search_calibration": self.active["search_calibration"]}
 
