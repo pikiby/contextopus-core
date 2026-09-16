@@ -2,6 +2,9 @@
 
 > Примечание: личные пути и идентификаторы трасс/материалов обезличены; результаты измерений сохранены.
 
+> Historical assessment: the role assignments and native traces below describe earlier releases. They do not validate the current primary-only memory workflow or its assignment-level prohibition. Current validation is recorded in [primary-memory-assessment.md](primary-memory-assessment.md).
+
+
 ## Вывод
 
 Реализация и регламенты покрывают обязательную модель работы из

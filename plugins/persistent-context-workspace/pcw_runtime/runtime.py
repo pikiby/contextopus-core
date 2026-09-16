@@ -474,35 +474,6 @@ class PCWRuntime:
                     dirty.append(relative)
             return dirty
 
-    def service_receipt(self, kind: str, material_ids: list[str] | None = None,
-                        paths: list[str] | None = None):
-        """Worker obtains a deterministic factual receipt, without volatile commit hashes."""
-        with self._guard():
-            if kind == "preparation":
-                if not material_ids or paths:
-                    raise PCWError("Preparation receipt requires exact material_ids and no paths")
-                ids = sorted(set(material_ids))
-                for ident in ids:
-                    self._material(ident)
-                pending = [ident for ident in ids if ident in self.pending]
-                if pending:
-                    return {"status": "incomplete", "pending_preparation": pending, "next_action": "prepare"}
-                body = "# Search preparation result\n\n" + "".join(f"- `{ident}`: indexed.\n" for ident in ids)
-                evidence = {ident: self.materials[ident].revision for ident in ids}
-            elif kind == "checkpoint":
-                if not paths or material_ids:
-                    raise PCWError("Checkpoint receipt requires exact paths and no material_ids")
-                exact = sorted(set(self._git_paths(paths)))
-                dirty = self.uncheckpointed(exact)
-                if dirty:
-                    return {"status": "incomplete", "uncheckpointed": dirty, "next_action": "checkpoint"}
-                body = "# Memory checkpoint result\n\n" + "".join(f"- `{path}`: checkpointed.\n" for path in exact)
-                evidence = {"commit": self._git("rev-parse", "HEAD").stdout.strip()}
-            else:
-                raise PCWError("kind must be preparation or checkpoint")
-            return {"status": "verified", "result": body, "observed": evidence,
-                    "instruction": "Return result verbatim for primary save. Report any additional mismatch or error instead of claiming this receipt covers it."}
-
     def list(self, offset: int = 0, limit: int = 50):
         with self._guard():
             if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
@@ -547,6 +518,7 @@ class PCWRuntime:
                         existing.metadata.get("executor_session_id") == executor_session_id and
                         isinstance(existing.metadata.get("saved_at"), str)):
                     return completed({**self._result(existing, content=False), "status": "already_saved"})
+                workflow.ledger.note_conflict(assignment_id, result)
                 if expected_previous_revision is None:
                     # Keep the existing occupied-name behavior for callers that
                     # did not explicitly opt into a CAS raw-result revision.
@@ -865,7 +837,7 @@ class PCWRuntime:
             material = self._material(material_id)
             return {"id": material.id, "path": material.path, "revision": material.revision,
                     "content": material.content,
-                    "instruction": "A native subagent in the agent environment must return original semantic parts in order, without paraphrase or additions. Preserve tables, code, conditions and explanations together. Only inter-part whitespace may be omitted. Do not open source files."}
+                    "instruction": "Primary: prepare a semantic_split assignment with this material ID and revision in split_source. Send only its launch_message to the helper. The helper returns end positions; primary applies them with pcw_submit_boundaries. Never forward this response or its memory coordinates to a worker."}
 
     @staticmethod
     def _validate_parts(content: str, parts: list[str]):
@@ -907,6 +879,36 @@ class PCWRuntime:
                 raise PCWError("Embedding vector is not representable as nonzero finite float32")
             converted.append(stored)
         return converted
+
+    def submit_boundaries(self, assignment_id: str, executor_session_id: str, boundaries: list[int]):
+        """Primary applies the helper's end positions; no service material is created."""
+        from .assignments import TaskLedger
+        with self._guard():
+            ledger = TaskLedger(self)
+            _, entry = ledger.entry(ledger.load(), assignment_id)
+            if entry.get("return_id") is not None or entry["assignment"].get("purpose") != "semantic_split":
+                raise PCWError("This is not a semantic_split assignment")
+            if not entry.get("launched_at") or entry.get("executor_session_id") != executor_session_id:
+                raise PCWError("Bind the actual executor before submitting its boundaries")
+            source = entry["assignment"]["split_source"]
+            material = self._material(source["material_id"])
+            if material.revision != source["revision"]:
+                raise PCWError("Stale semantic preparation: material revision changed")
+            units = material.content.splitlines(keepends=True)
+            if (not isinstance(boundaries, list) or not boundaries or
+                    any(type(end) is not int for end in boundaries) or
+                    boundaries != sorted(set(boundaries)) or boundaries[0] <= 0 or
+                    boundaries[-1] != len(units)):
+                raise PCWError("boundaries must be increasing positive source-unit end positions including the last unit")
+            parts = []
+            start = 0
+            for end in boundaries:
+                parts.append("".join(units[start:end]))
+                start = end
+            # The source, not a model's reproduced text, supplies every byte.
+            result = self.submit_parts(material.id, material.revision, parts)
+            ledger.note_service(assignment_id, {"boundaries": boundaries}, result)
+            return {**result, "assignment_id": assignment_id, "result_storage": "control"}
 
     def submit_parts(self, material_id: str, revision: str, parts: list[str]):
         with self._guard():
@@ -1111,6 +1113,14 @@ class PCWRuntime:
                     completion: str | None = None, step: str | None = None,
                     blocker: str | None = None, replace_legacy: bool = False):
         with self._guard():
+            from .assignments import TaskLedger
+            task = TaskLedger(self).status()["task"]
+            if task is not None and task["status"] != "complete":
+                supplied = {"goal": goal, "constraints": constraints, "completion": completion}
+                for key, value in supplied.items():
+                    if value is not None and value != task["request"][key]:
+                        raise PCWError("Current focus comes from the active request; use pcw_task_update for an authorized correction")
+                goal, constraints, completion = (task["request"][k] for k in ("goal", "constraints", "completion"))
             current = self.current_get()
             if "legacy_content" in current:
                 if not replace_legacy or any(value is None for value in (goal, constraints, completion)):
@@ -1156,6 +1166,10 @@ class PCWRuntime:
 
     def checkpoint(self, paths: list[str], message: str):
         with self._guard():
+            from .assignments import TaskLedger
+            task = TaskLedger(self).status()["task"]
+            if task is not None and task["request"]["checkpoint_policy"] != "required":
+                raise PCWError("Checkpoint is not authorized by the active task; record explicit authority with pcw_task_update first")
             paths = self._git_paths(paths)
             applied = []
             try:

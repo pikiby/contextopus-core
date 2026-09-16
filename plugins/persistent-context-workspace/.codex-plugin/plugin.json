@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Linked project memory with local semantic search and bounded agent work",
   "author": {
     "name": "pikiby",

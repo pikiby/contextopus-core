@@ -92,7 +92,7 @@ def assignment(**overrides):
         "goal": "Investigate the selected source",
         "expected_result": "Return observations",
         "boundaries": "Read only selected source",
-        "context": {"summary": "User requested a bounded investigation.", "material_ids": []},
+        "context": {"summary": "User requested a bounded investigation."},
         "constraints": [],
         "acceptance_criteria": ["Observed result is recorded"],
         "knowledge_to_return": "Facts, sources and blocker",
@@ -109,6 +109,14 @@ class WorkflowTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.workflow = AgentWorkflow(Runtime(Path(self.directory.name)))
         self.workflow.task_begin("Test", "Temporary", "Done")
+
+    def test_due_check_without_a_task_still_returns_action_instructions(self):
+        self.workflow.ledger.path.unlink()
+        for action in ("transition", "finish"):
+            result = self.workflow.action_requirements(action, {"planned_checks_due": True})
+            self.assertFalse(result["ready"])
+            self.assertTrue(result["requirements"])
+            self.assertTrue(any(item["field"] == "task" for item in result["missing"]))
 
     def test_environment_lifecycle_is_canonical_and_forces_map_refresh(self):
         workflow = self.workflow
@@ -181,12 +189,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue({item["field"] for item in missing_prepare["missing"]} >= {"tools_map", "context.assignment"})
 
         publish_current(workflow)
-        ready = workflow.action_requirements("prepare_assignment", {"assignment": assignment()})
+        ready = workflow.action_requirements("prepare_assignment", {"assignment": assignment(purpose="check")})
         self.assertTrue(ready["ready"])
         aid = ready["handoff"]["assignment_id"]
         result_id = ready["handoff"]["return_id"]
         workflow.assignment_bind(aid, "worker-1")
-        workflow.assignment_get(aid, "worker-1")
         empty_scope = workflow.action_requirements("prepare_assignment", {"assignment": assignment(goal="")})
         self.assertFalse(empty_scope["ready"])
         extra_field = workflow.action_requirements("prepare_assignment", {"assignment": assignment(extra=object())})
@@ -216,16 +223,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(transition_none_due["ready"])
         transition_blocked = workflow.action_requirements("transition", {"mismatch_needs_attention": True, "checks_due": {"status": "none_due", "reason": "Not needed"}})
         self.assertFalse(transition_blocked["ready"])
-        transition_verified = workflow.action_requirements("transition", {"checks_due": {"status": "assigned", "checks": [{"material_name": result_id, "executor_session_id": "worker-1"}]}})
+        transition_verified = workflow.action_requirements("transition", {"checks_due": {"status": "assigned", "checks": [{"assignment_id": aid, "material_name": result_id, "executor_session_id": "worker-1"}]}})
         self.assertTrue(transition_verified["ready"])
 
         finish_missing = workflow.action_requirements("finish", {})
         self.assertFalse(finish_missing["ready"])
         finish_none = workflow.action_requirements("finish", {"acceptance_checks": {"status": "none_assigned", "scope": "Whole requested task", "reason": "No factual check was assigned."}})
-        self.assertTrue(finish_none["ready"])
+        self.assertFalse(finish_none["ready"])
         finish_material_only = workflow.action_requirements("finish", {"acceptance_checks": {"status": "assigned", "scope": "Whole requested task", "checks": [{"material_name": result_id}]}})
         self.assertFalse(finish_material_only["ready"])
-        finish_verified = workflow.action_requirements("finish", {"acceptance_checks": {"status": "assigned", "scope": "Whole requested task", "checks": [{"material_name": result_id, "executor_session_id": "worker-1"}]}})
+        finish_verified = workflow.action_requirements("finish", {"acceptance_checks": {"status": "assigned", "scope": "Whole requested task", "checks": [{"assignment_id": aid, "material_name": result_id, "executor_session_id": "worker-1"}]}})
         self.assertTrue(finish_verified["ready"])
         self.assertEqual("2026-01-02T03:04:05Z", finish_verified["prerequisites"][1]["result"]["saved_at"])
 

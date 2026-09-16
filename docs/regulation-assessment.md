@@ -1,5 +1,8 @@
 # Аудит текстовых регламентов PCW
 
+> Historical assessment: the role assignments and native traces below describe earlier releases. They do not validate the current primary-only memory workflow or its assignment-level prohibition. Current validation is recorded in [primary-memory-assessment.md](primary-memory-assessment.md).
+
+
 Дата: 2026-09-15. Область: `README.md`, `PLAN.md`, `skills/pcw/SKILL.md` и
 ссылочные инструкции этого скила. Это сопоставление текста с
 `plugin-update-design.md`. Отдельный раздел ниже проверяет narrow contract

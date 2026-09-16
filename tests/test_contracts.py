@@ -267,13 +267,12 @@ class LauncherTests(unittest.TestCase):
                         "id": "fixture", "model": "fixture-worker", "reasoning": {}, "roles": ["test"], "suitable_when": ["test"]}])
                     prepared = call("action_requirements", action="prepare_assignment", context={"assignment": {
                         "goal": "Record test observation", "expected_result": "Raw Markdown", "boundaries": "Temporary memory",
-                        "context": {"summary": "Protocol test, no actual model launched", "material_ids": []}, "constraints": [],
+                        "context": {"summary": "Protocol test, no actual model launched"}, "constraints": [],
                         "acceptance_criteria": ["Read exact bytes"], "knowledge_to_return": "Test observation", "profile": "fixture",
                         "selection_reason": "Test capability"}})
                     self.assertTrue(prepared["ready"], prepared)
                     aid = prepared["handoff"]["assignment_id"]
-                    call("assignment_bind", assignment_id=aid, executor_session_id="fixture-executor")
-                    handoff = call("assignment_get", assignment_id=aid, executor_session_id="fixture-executor")
+                    handoff = call("assignment_bind", assignment_id=aid, executor_session_id="fixture-executor")
                     self.assertIn("Protocol test", handoff["assignment"]["context"]["summary"])
                     item = call("create", content="Protocol fixture content")
                     self.assertRegex(item["id"], r"^[a-f0-9]{32}\.md$")
@@ -287,7 +286,8 @@ class LauncherTests(unittest.TestCase):
                     finished = call("action_requirements", action="finish", context={"acceptance_checks": {
                         "status": "none_assigned", "scope": "Protocol fixture", "reason": "No native factual check assigned"}})
                     self.assertFalse(finished["ready"])
-                    self.assertTrue({"prepare", "checkpoint"} <= {m["action"] for m in finished["missing"]})
+                    self.assertIn("prepare", {m["action"] for m in finished["missing"]})
+                    self.assertNotIn("checkpoint", {m["action"] for m in finished["missing"]})
                     shutil.rmtree(Path(directory) / ".pcw/protocol/.pcw-runtime")
                     self.assertEqual("recovery_required", call("status")["status"])
                     self.assertEqual("current", call("environment_get")["status"])

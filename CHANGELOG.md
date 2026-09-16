@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+- Make PCW the primary agent's memory: the primary reads and changes knowledge, Current, links, compaction and authorized memory history.
+- Generate standalone worker assignments with inline facts and explicit prohibitions on PCW tools and `.pcw` access. This is an assignment-level restriction, not a filesystem or tool sandbox.
+- Replace worker-side assignment retrieval and service receipts with primary delivery and semantic block-boundary submission. Technical results remain in control state and do not generate knowledge materials.
+- Allocate a separate MCP-generated return ID for every substantive assignment, including continuations; retain exact raw text, UTC save time and actual executor session identity.
+- Block acceptance of conflicting returns; persist factual-check plans, due checks and unresolved discrepancies.
+- Keep Current aligned with the registered task; support revision-checked task updates without losing outstanding assignments. Distinguish an unauthorized checkpoint from an explicitly forbidden one.
+
+### Upgrade
+
+Refresh the Git marketplace and reinstall using [the update commands](README.md#update-the-codex-plugin), then start a new Codex thread. The MCP API removes `pcw_assignment_get` and `pcw_service_receipt`; new operations include `pcw_submit_boundaries`, `pcw_service_error`, `pcw_task_update` and `pcw_task_checks_set`. `pcw_task_begin` defaults to `checkpoint_policy=not_authorized`. Existing knowledge is not migrated or cleaned automatically.
+
+### Verification records
+
+The complete test suite passed 147 tests and 73 subtests, with six opt-in skips. A bounded native-agent cycle using the real MCP server and test vectors produced one indexed substantive material and no technical knowledge files. The semantic helper returned only `[3,7]` without tool calls. The author made an extra progress-only tool call; this limitation and the distinction from technical isolation are recorded in the [primary-memory assessment](docs/primary-memory-assessment.md).
+
 ## 0.6.0
 
 - Generate material IDs and filenames in MCP; keep the ID unchanged when moving a material.

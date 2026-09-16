@@ -2,6 +2,9 @@
 
 > Примечание: личные пути и идентификаторы трасс/материалов обезличены; результаты измерений сохранены.
 
+> Historical assessment: the role assignments and native traces below describe earlier releases. They do not validate the current primary-only memory workflow or its assignment-level prohibition. Current validation is recorded in [primary-memory-assessment.md](primary-memory-assessment.md).
+
+
 Историческая оценка выпуска 0.5.0 приведена ниже. Она не подтверждает исправность новой реализации: рабочий цикл `kubernetes-clusters` выявил пропущенные возвраты, незавершённую подготовку/checkpoint и недостаточность проверки `finish`. Также уточнено исходное требование: ID генерирует MCP, и этот ID становится именем файла.
 
 Текущая правка добавляет независимое от индекса служебное хранилище, регистрацию и полную передачу поручений, учёт save/read/assessment, незакрытых расхождений и фактического состояния затронутых файлов. Конечное закрытие служебных возвратов проверяется в `tests/test_closeout.py` на реальных LanceDB и временном Git с тестовыми векторами. Эти проверки не запускают модели и не являются новой проверкой поведения реального агента.

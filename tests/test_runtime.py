@@ -82,12 +82,12 @@ def named(runtime, path, content, links=None):
     return item
 
 
-def raw_result(runtime, name, result, session, expected_previous_revision=None):
+def raw_result(runtime, name, result, session, expected_previous_revision=None, *, purpose="work"):
     if not hasattr(runtime, "_test_assignments"):
         runtime._test_assignments = {}
     if name not in runtime._test_assignments and session:
         with patch.object(runtime, "_allocate_material_id", return_value=name):
-            runtime._test_assignments[name] = register(runtime, session, goal="Return " + name)
+            runtime._test_assignments[name] = register(runtime, session, goal="Return observation " + str(len(runtime._test_assignments)), purpose=purpose)
     aid = runtime._test_assignments.get(name, "unregistered")
     return runtime.save_subagent_result(aid, result, session, expected_previous_revision)
 
@@ -525,7 +525,7 @@ def test_save_subagent_result_cas_write_error_keeps_previous_body_and_index(memo
 
 def test_saved_result_lookup_survives_nested_path_rename(memory):
     runtime, _ = memory
-    raw_result(runtime, "returned.md", "worker output", "executor-session-17")
+    raw_result(runtime, "returned.md", "worker output", "executor-session-17", purpose="check")
     renamed = runtime.rename("returned.md", "nested/returned.md")
     assert renamed["id"] == "returned.md"
     workflow = AgentWorkflow(runtime)
@@ -538,12 +538,12 @@ def test_saved_result_lookup_survives_nested_path_rename(memory):
     })
     transition = workflow.action_requirements("transition", {
         "checks_due": {"status": "assigned", "checks": [{
-            "material_name": "returned.md", "executor_session_id": "executor-session-17",
+            "assignment_id": aid, "material_name": "returned.md", "executor_session_id": "executor-session-17",
         }]},
     })
     finish = workflow.action_requirements("finish", {
         "acceptance_checks": {"status": "assigned", "scope": "whole task", "checks": [{
-            "material_name": "returned.md", "executor_session_id": "executor-session-17",
+            "assignment_id": aid, "material_name": "returned.md", "executor_session_id": "executor-session-17",
         }]},
     })
     assert process["ready"] and transition["ready"]

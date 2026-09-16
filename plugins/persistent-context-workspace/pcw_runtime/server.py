@@ -10,16 +10,20 @@ from typing import get_type_hints
 from mcp.server.fastmcp import FastMCP
 
 from .agent_workflow import (ActionContext, ActionName, AgentWorkflow, EnvironmentSnapshot,
-                             ToolsMapProfile)
+                             ToolsMapProfile, PlannedCheck)
+from .assignments import CheckpointPolicy
 from .runtime import PCWRuntime
 from .control import RecoveryRequired
 
 mcp = FastMCP("persistent-context-workspace", instructions=(
-    "Operate only on an explicitly selected work_root and .pcw workspace. "
-    "Create/update saves return pending preparation. Pass pcw_prepare content to a native "
-    "semantic-preparation subagent for original semantic parts, then pcw_submit_parts with the same revision. "
-    "Semantic knowledge decisions belong to the main agent; assigned subagents apply Current, knowledge and Git changes. "
-    "No tool authorizes running the user task or reading source-project files."))
+    "PCW is the primary agent's working memory. Only the primary may call these tools. "
+    "Workers receive a standalone assignment with facts as text, no memory coordinates, "
+    "and return findings to the primary. Workers must not use PCW or access .pcw through "
+    "filesystem tools or shell. The primary saves substantive returns, updates Current, "
+    "applies compaction, links and authorized checkpoints. Semantic helpers return only "
+    "end positions; the primary calls pcw_submit_boundaries. Service results are control "
+    "state, never knowledge. These are assignment restrictions, not filesystem isolation. "
+    "No tool grants authority to execute the user task or expand its scope."))
 _runtimes: dict[tuple[str, str], PCWRuntime] = {}
 _cache_lock = threading.Lock()
 
@@ -45,6 +49,7 @@ def close_runtimes():
 atexit.register(close_runtimes)
 
 _DESCRIPTIONS = {
+    "service_error": "Primary records an actual semantic-helper failure in control state, without creating knowledge. A successful corrected continuation is needed before finish.",
     "status": "Open selected workspace; report counts, pending preparation and active embedding/search configuration without loading model weights.",
     "list": "List bounded knowledge metadata; does not return material bodies.",
     "read": "Read the complete original material and exact navigation links by its filename-ID.",
@@ -56,23 +61,24 @@ _DESCRIPTIONS = {
     "links": "Add/remove exact outgoing IDs, deduplicate and avoid self-links. No semantic editing or embedding calls.",
     "reassign": "Rewrite incoming links using explicit old-ID to surviving-ID mapping; does not delete materials or change bodies.",
     "merge": "Apply supplied final target bodies and explicit replacements, union outgoing links unless supplied, rewrite all incoming IDs before deleting old materials. Targets must already exist. Reports partial failure.",
-    "prepare": "Return complete original body and revision for a native semantic-preparation subagent. This tool does not split or summarize text.",
+    "prepare": 'Primary obtains source text and revision. Prepare a semantic_split assignment; pass only its launch_message, never this memory-coordinate response, to the helper.',
+    "submit_boundaries": "Primary submits the semantic helper end positions. Validate order, full coverage and revision; reconstruct exact source parts, index them and record only service state.",
     "submit_parts": "Accept original semantic parts for unchanged revision, validate source fidelity, embed and replace the material rows in real LanceDB.",
     "search": "Return bounded nearest material IDs, paths and distances; apply d_max then first median-gap jump before ID deduplication. Pending count is visible; empty results are not proof of absent knowledge.",
     "reconcile": "Reconcile LanceDB with current saved knowledge after external edits/restoration; remove stale rows and queue changed bodies for native semantic preparation. Does not inspect project sources.",
     "switch_embeddings": "Explicitly switch embedding config. Requires separate search settings; lock search/writes, reembed stored original parts into inactive table, atomically activate provider+table, then remove old table. Failure retains old active index.",
     "current_get": "Load compact task focus and current step into the main agent's context, or report existing legacy Current verbatim.",
-    "current_set": "Save supplied goal, constraints, completion criterion, step and blocker. Omitted fields stay unchanged; replacing legacy Current requires explicit replace_legacy and full focus fields.",
+    "current_set": 'Primary updates Current. With an active task, goal/constraints/completion come from its registered request; pass step and blocker (empty string means no blocker). Use task_update for authorized changes to the request. No worker is needed.',
     "checkpoint": "Explicit local Git checkpoint of exact current.md/knowledge Markdown paths. Initialize separate memory Git if needed. No source-project commits, broad staging, hooks or remote push.",
     "restore": "Explicitly restore selected exact memory paths from local Git commit, invalidate changed search rows and report pending original semantic preparation. This can replace current contents.",
     "migrate_legacy_ids": "Explicitly migrate legacy YAML UUID identities and links to filename IDs without rewriting material bodies or vectors. Opening a workspace never performs this migration.",
-    "save_subagent_result": "Persist a registered assignment's unmodified return with its actual executor session ID. MCP uses the return ID it allocated when preparing that assignment. Exact delivery is idempotent; a continuation revises the same executor's return only with expected_previous_revision. Primary then reads using assignment_id and declares its assessment. This does not launch or assess the subagent.",
-    "recover_workspace": "Assigned worker explicitly recreates missing runtime directories. Missing knowledge remains blocked unless its recreation is explicitly authorized; this does not restore lost knowledge.",
-    "service_receipt": "A service worker obtains a deterministic factual return for an exact set of prepared materials or checkpointed paths. It verifies actual current state. Return result verbatim; report new errors or mismatches separately and honestly. Volatile revision/commit evidence remains in observed, not in the stable Markdown.",
+    "save_subagent_result": 'Primary saves an unmodified substantive return with actual executor session ID. MCP allocates a distinct filename-ID for each contentful assignment. A retry is idempotent; conflicting text must be resolved explicitly. Primary reads the saved result and assesses it. Semantic boundaries and operation receipts never become knowledge.',
+    "recover_workspace": 'Primary explicitly recreates missing runtime directories. Missing knowledge remains blocked unless its recreation is explicitly authorized; this does not restore lost knowledge.',
     "task_begin": "Primary records the user request before native work. Capture its baseline and checkpoint authority independently of the workspace index; preserve an unfinished request on retry.",
+    "task_update": "Primary explicitly corrects the active request with request_revision and a reason based on user authority; preserves all outstanding assignments. Then synchronize Current.",
+    "task_checks_set": "Primary records intermediate/final checks with timing, scope, observable criteria and optional check assignment IDs. State the reason when revising the plan. Finish requires accepted results for planned checks.",
     "task_status": "Read the active request and every registered assignment, executor, reserved return ID, save/read/assessment state and outstanding discrepancy.",
-    "assignment_bind": "Primary associates the registered assignment with the actual native executor after launch. Never invent the executor ID.",
-    "assignment_get": "Executor obtains its full registered assignment before work using its own native session ID. Verifies the prepared environment revision and records delivery of this exact context.",
+    "assignment_bind": 'Primary binds the actual executor after sending only handoff.launch_message in a separate context. This records delivery; the worker does not call PCW. Detects an environment change after preparation.',
     "assignment_cancel": "Cancel an unlaunched prepared assignment with an explicit reason. A launched worker must return its findings or blocker and cannot be silently discarded.",
     "environment_get": "Read the selected workspace environment snapshot and whether its model map is absent, current, or refresh_required.",
     "environment_check": "Record an actual portable environment snapshot and derive canonical environment_revision from version, launchable models, reasoning capabilities and native launch constraints. A changed revision requires a map refresh.",
@@ -147,20 +153,32 @@ def pcw_action_requirements(work_root: str, workspace: str, action: ActionName,
 
 
 def pcw_task_begin(work_root: str, workspace: str, goal: str, constraints: str, completion: str,
-                   checkpoint_policy: str = "required", checkpoint_reason: str = "") -> dict:
+                   checkpoint_policy: CheckpointPolicy = "not_authorized", checkpoint_reason: str = "") -> dict:
     return workflow(work_root, workspace).task_begin(goal, constraints, completion, checkpoint_policy, checkpoint_reason)
+
+
+def pcw_task_update(work_root: str, workspace: str, expected_request_revision: str, reason: str,
+                    goal: str | None = None, constraints: str | None = None,
+                    completion: str | None = None, checkpoint_policy: CheckpointPolicy | None = None,
+                    checkpoint_reason: str | None = None) -> dict:
+    return workflow(work_root, workspace).task_update(expected_request_revision, reason, goal, constraints,
+                                                       completion, checkpoint_policy, checkpoint_reason)
+
+
+def pcw_task_checks_set(work_root: str, workspace: str, checks: list[PlannedCheck], reason: str) -> dict:
+    return workflow(work_root, workspace).task_checks_set(checks, reason)
 
 
 def pcw_task_status(work_root: str, workspace: str) -> dict:
     return workflow(work_root, workspace).task_status()
 
 
+def pcw_service_error(work_root: str, workspace: str, assignment_id: str, executor_session_id: str, error: str) -> dict:
+    return workflow(work_root, workspace).service_error(assignment_id, executor_session_id, error)
+
+
 def pcw_assignment_bind(work_root: str, workspace: str, assignment_id: str, executor_session_id: str) -> dict:
     return workflow(work_root, workspace).assignment_bind(assignment_id, executor_session_id)
-
-
-def pcw_assignment_get(work_root: str, workspace: str, assignment_id: str, executor_session_id: str) -> dict:
-    return workflow(work_root, workspace).assignment_get(assignment_id, executor_session_id)
 
 
 def pcw_assignment_cancel(work_root: str, workspace: str, assignment_id: str, reason: str) -> dict:
@@ -169,5 +187,5 @@ def pcw_assignment_cancel(work_root: str, workspace: str, assignment_id: str, re
 
 for _tool_name in ("pcw_environment_get", "pcw_environment_check", "pcw_tools_map_get",
                    "pcw_tools_map_publish", "pcw_action_requirements", "pcw_task_begin", "pcw_task_status",
-                   "pcw_assignment_bind", "pcw_assignment_get", "pcw_assignment_cancel"):
+                   "pcw_assignment_bind", "pcw_assignment_cancel", "pcw_task_update", "pcw_task_checks_set", "pcw_service_error"):
     mcp.tool(name=_tool_name, description=_DESCRIPTIONS[_tool_name.removeprefix("pcw_")])(globals()[_tool_name])

@@ -61,7 +61,7 @@ def test_unsaved_recovery_return_blocks_finish_after_repair(workspace):
     assert flow.environment_get()["status"] == "current"
     req = flow.action_requirements("finish")
     assert req["requirements"] and not req["ready"]
-    assignment = register(runtime, "diagnostic", purpose="recovery")
+    assignment = register(runtime, "diagnostic", purpose="work")
     with pytest.raises(RecoveryRequired):
         runtime.status()
     assert runtime.recover_workspace()["status"] == "recovered"
@@ -94,7 +94,7 @@ def test_missing_knowledge_is_not_silently_recreated(workspace):
 def test_complete_context_is_retrieved_and_read_is_required(workspace):
     runtime = workspace
     assignment = register(runtime, goal="Fresh indexed state, not earlier pending status")
-    handoff = AgentWorkflow(runtime).assignment_get(assignment, "worker-1")
+    handoff = AgentWorkflow(runtime).ledger.handoff(AgentWorkflow(runtime).task_status()["task"]["assignments"][assignment])
     assert handoff["assignment"]["context"]["summary"] == "Fresh indexed state, not earlier pending status"
     raw = runtime.save_subagent_result(assignment, "pending_preparation", "worker-1")
     flow = AgentWorkflow(runtime)
@@ -119,7 +119,7 @@ def test_instructions_and_recovery_assignment_survive_an_index_exception(workspa
         assert flow.tools_map_get()["status"] == "current"
         requirements = flow.action_requirements("finish")
         assert requirements["requirements"] and not requirements["ready"]
-        assignment = register(runtime, "recovery", purpose="recovery")
+        assignment = register(runtime, "recovery", purpose="work")
         assert flow.task_status()["task"]["assignments"][assignment]["delivered_at"]
 
 
@@ -143,7 +143,7 @@ def test_checkpoint_prohibition_and_unrelated_changes_are_respected(tmp_path):
 
 def test_invalid_material_and_stale_current_block_completion(workspace):
     runtime = workspace
-    runtime.current_set(goal="Different request")
+    (runtime.root / "current.md").write_text(runtime._render_current({**runtime.current_get(), "goal": "Different request"}))
     result = finish(runtime)
     assert not result["ready"]
     assert any(m["field"] == "current.goal" for m in result["missing"])
@@ -156,7 +156,7 @@ def test_invalid_material_and_stale_current_block_completion(workspace):
 
 def test_processed_raw_can_be_compacted_without_retaining_source_metadata(workspace):
     runtime = workspace
-    assignment = register(runtime)
+    assignment = register(runtime, purpose="check")
     raw = runtime.save_subagent_result(assignment, "Verified fact with redundant wording", "worker-1")
     process(runtime, assignment, raw)
     final = runtime.create("Verified fact")
@@ -168,45 +168,3 @@ def test_processed_raw_can_be_compacted_without_retaining_source_metadata(worksp
         "material_name": raw["id"], "executor_session_id": "worker-1"}]}})
     assert result["ready"], result
     assert "saved_at" not in runtime.read(final["id"])
-
-
-def test_finite_service_closeout_preserves_every_return_and_reaches_clean_indexed_state(workspace):
-    runtime = workspace
-    item = runtime.create("# Durable cluster facts\n")
-    previous = {}
-    receipts = {}
-    for session in ("preparer", "checkpointer"):
-        assignment = register(runtime, session, goal="Initialize " + session)
-        raw = runtime.save_subagent_result(assignment, "Ready to perform " + session + ".\n", session)
-        process(runtime, assignment, raw)
-        previous[session], receipts[session] = assignment, raw
-    ids = sorted([item["id"], *(r["id"] for r in receipts.values())])
-    paths = ["current.md", *("knowledge/" + ident for ident in ids)]
-    deliveries = []
-    # Fixed-scope phase: two preparation passes establish its stable report;
-    # first checkpoint changes its report, one more preparation/checkpoint closes it.
-    for kind, session in [("preparation", "preparer"), ("preparation", "preparer"),
-                          ("checkpoint", "checkpointer"), ("preparation", "preparer"),
-                          ("checkpoint", "checkpointer"), ("checkpoint", "checkpointer")]:
-        assignment = register(runtime, session, goal="Close fixed " + kind + " scope", continuation_of=previous[session])
-        if kind == "preparation":
-            for ident in ids:
-                if runtime.read(ident)["index_status"] == "pending_preparation":
-                    prepare(runtime, ident)
-            receipt = runtime.service_receipt(kind, material_ids=ids)
-        else:
-            cp = runtime.checkpoint(paths, "Checkpoint fixed durable scope")
-            assert cp["status"] == "ok", cp
-            receipt = runtime.service_receipt(kind, paths=paths)
-        assert receipt["status"] == "verified", receipt
-        raw = runtime.save_subagent_result(assignment, receipt["result"], session, receipts[session]["revision"])
-        process(runtime, assignment, raw)
-        deliveries.append(raw["status"])
-        previous[session], receipts[session] = assignment, raw
-    assert deliveries == ["updated", "already_saved", "updated", "already_saved", "already_saved", "already_saved"]
-    assert runtime.status()["pending_count"] == 0
-    assert runtime.uncheckpointed(paths) == []
-    assert finish(runtime)["ready"]
-    for raw in receipts.values():
-        assert runtime.read(raw["id"])["saved_at"].endswith("Z")
-        assert runtime.read(raw["id"])["index_status"] == "indexed"

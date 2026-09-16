@@ -5,7 +5,7 @@ from pcw_runtime.agent_workflow import AgentWorkflow
 def open_task(runtime, checkpoint_policy="required"):
     flow = AgentWorkflow(runtime)
     flow.task_begin("Test request", "Temporary test memory", "Verified result",
-                    checkpoint_policy, "User explicitly forbids a checkpoint" if checkpoint_policy == "forbidden" else "")
+                    checkpoint_policy, "User explicitly forbids a checkpoint" if checkpoint_policy == "forbidden" else "Test authorizes temporary checkpoint")
     checked = flow.environment_check({"environment": "test", "version": "1", "models": [{"id": "worker"}], "native": {}})
     flow.tools_map_publish(checked["environment_revision"], [{"id": "test-worker", "model": "worker", "reasoning": {},
                           "roles": ["test"], "suitable_when": ["bounded fixture"]}])
@@ -17,7 +17,7 @@ def register(runtime, session="worker-1", *, goal="Observe state", continuation_
     if flow.task_status()["status"] == "absent":
         open_task(runtime)
     assignment = {"goal": goal, "expected_result": "Return actual observations", "boundaries": "Temporary memory",
-                  "context": {"summary": goal, "material_ids": []}, "constraints": [],
+                  "context": {"summary": goal}, "constraints": [],
                   "acceptance_criteria": ["Facts are observed"], "knowledge_to_return": "Facts and blockers",
                   "profile": "test-worker", "selection_reason": "Bounded test", "purpose": purpose}
     context = {"assignment": assignment}
@@ -27,7 +27,6 @@ def register(runtime, session="worker-1", *, goal="Observe state", continuation_
     assert ready["ready"], ready
     ident = ready["handoff"]["assignment_id"]
     flow.assignment_bind(ident, session)
-    flow.assignment_get(ident, session)
     return ident
 
 

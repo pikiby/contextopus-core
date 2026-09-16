@@ -215,7 +215,7 @@ class CodexHostTests(unittest.TestCase):
     def tool(self, name, **arguments):
         result = self.host.call("mcpServer/tool/call", {
             "threadId": self.thread_id, "server": "pcw", "tool": "pcw_" + name,
-            "arguments": {"work_root": self.work, "workspace": "regression", **arguments},
+            "arguments": {"work_root": self.work, "workspace": self._testMethodName, **arguments},
         })
         self.assertFalse(result.get("isError"), result)
         if result.get("structuredContent") is not None:
@@ -326,13 +326,12 @@ class CodexHostTests(unittest.TestCase):
         self.tool("task_begin", goal="Host workflow", constraints="Temporary only", completion="All host APIs are observable")
         prepared_assignment = self.tool("action_requirements", action="prepare_assignment", context={"assignment": {
             "goal": "Observe host fixture", "expected_result": "Return observations", "boundaries": "Temporary workspace",
-            "context": {"summary": "API regression", "material_ids": []}, "constraints": [],
+            "context": {"summary": "API regression"}, "constraints": [],
             "acceptance_criteria": ["Observe actual result"], "knowledge_to_return": "Facts and blocker",
             "profile": "prepared-host-work", "selection_reason": "Bounded API fixture"}})
         self.assertTrue(prepared_assignment["ready"], prepared_assignment)
         assignment_id = prepared_assignment["handoff"]["assignment_id"]
         self.tool("assignment_bind", assignment_id=assignment_id, executor_session_id="codex-native-child-host-test")
-        self.tool("assignment_get", assignment_id=assignment_id, executor_session_id="codex-native-child-host-test")
         raw = "# Worker findings\n\n| fact | value |\n| --- | --- |\n| token | `host-sentinel` |\n"
         saved = self.tool("save_subagent_result", assignment_id=assignment_id, result=raw,
                           executor_session_id="codex-native-child-host-test")
