@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.8.0 is the primary agent's working memory: ordinary Markdown topic materials, exact links, compact Current and automatic token-window embeddings in LanceDB. The primary uses saved context first, performs work directly or delegates optionally, and retains useful new facts during work.
+Version 0.8.1 is the primary agent's working memory: ordinary Markdown topic materials, exact links, compact Current and automatic token-window embeddings in LanceDB. The primary uses saved context first, performs work directly or delegates optionally, and retains useful new facts during work.
 
 There is no environment discovery, model map, assignment registration, executor binding or splitting agent. See the [governing document](docs/context-workspace-design.md) and [release notes](CHANGELOG.md).
 
@@ -8,7 +8,7 @@ There is no environment discovery, model map, assignment registration, executor 
 
 1. Invoke `$pcw` with a work root, workspace and natural-language task.
 2. `pcw_startup` returns Current and bounded memory status without loading model weights.
-3. Search accumulated knowledge, read relevant whole topic files and needed links before investigating external sources.
+3. Search accumulated knowledge, read relevant whole topic files and needed links before investigating external sources. Information in the conversation does not replace this search and reading. Retrieve only context needed for the current task.
 4. Perform and verify authorized work directly or optionally delegate it. Workers get standalone facts and allowed task sources, no PCW access or memory coordinates.
 5. Save useful facts and corrections through `pcw_create` / `pcw_update` as complete ordinary Markdown topic materials. The plugin generates filename-IDs and verifies disk writes.
 6. The plugin automatically tokenizes saved text, forms overlapping windows, computes embeddings and updates LanceDB. No boundary arrays or second transfer of the body.

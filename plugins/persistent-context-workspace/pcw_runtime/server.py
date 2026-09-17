@@ -10,8 +10,10 @@ from .runtime import PCWRuntime
 from .control import RecoveryRequired
 
 mcp = FastMCP("persistent-context-workspace", instructions=(
-    "PCW is the primary agent's working memory. Read Current and search relevant knowledge "
-    "before external investigation. Save new facts during work as ordinary Markdown topic materials. "
+    "PCW is the primary agent's working memory. Read Current, search relevant knowledge and read "
+    "selected materials before external investigation. Information in the conversation does not "
+    "replace PCW search and reading. Retrieve only context needed for the current task. "
+    "Save new facts during work as ordinary Markdown topic materials. "
     "The primary may work directly or optionally delegate. Workers receive standalone facts and "
     "allowed task sources, never PCW coordinates. Only the primary uses PCW and .pcw. This is an "
     "instruction boundary, not filesystem isolation. The plugin automatically splits token windows "

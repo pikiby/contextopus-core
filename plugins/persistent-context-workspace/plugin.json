@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "persistent-context-workspace",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Primary-owned project memory with automatic token-window embedding and local search",
   "extensions": {
     "com.openai": {

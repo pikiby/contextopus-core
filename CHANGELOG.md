@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1 — 2026-09-17
+
+- Remove the exception that allowed conversation context to replace searching PCW and reading selected knowledge materials.
+- Align the governing document, skill, README and MCP instructions: retrieve only the context needed for the current task.
+
 ## 0.8.0 — 2026-09-17
 
 - Replace mandatory native-agent workflow with primary-owned memory: direct work and optional delegation.

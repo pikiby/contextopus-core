@@ -11,7 +11,7 @@ PCW is the primary agent's working memory. The primary reads and changes knowled
 
 Call `pcw_startup` for the selected work root and workspace. Recover the five Current fields and pending memory operations. Missing knowledge is a recovery problem, not an empty successful workspace. For missing MCP/runtime components, read [Setup](references/setup.md).
 
-Before external investigation, search accumulated knowledge with `pcw_search`, read relevant whole topic materials through `pcw_read` or `pcw_read_many`, and follow only useful links. Avoid rereading unchanged facts already in context. If memory is empty or insufficient, proceed to allowed sources. Search absence does not prove absence of facts.
+Before external investigation, search accumulated knowledge with `pcw_search`, read relevant whole topic materials through `pcw_read` or `pcw_read_many`, and follow only useful links. Information already present in the conversation does not replace searching PCW and reading the selected materials. Retrieve only what is needed for the current task, minimizing the context loaded. If memory is empty or insufficient, proceed to allowed sources. Search absence does not prove absence of facts.
 
 ## Work and retain knowledge
 
