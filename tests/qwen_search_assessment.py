@@ -1,4 +1,8 @@
-"""Offline, bounded Qwen/LanceDB retrieval assessment for PCW documentation.
+"""Historical Qwen/LanceDB assessment for the pre-0.8 documentation corpus.
+
+Reproduce this fixture from tag v0.7.2, where its corpus and workflow still
+exist. It is not a benchmark or calibration of 0.8 token-window retrieval.
+Current runtime/index tests are in test_context_memory.py and test_codex_host.py.
 
 This is an assessment fixture, never a PCW runtime migration: it does not
 change product defaults or a workspace's active search table.  All artifacts

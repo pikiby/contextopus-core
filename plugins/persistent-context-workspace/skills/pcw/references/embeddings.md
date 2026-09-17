@@ -15,7 +15,7 @@ An embedding configuration has two objects:
 - `provider`: connection `type`, local `device`, `cache_folder`, and `local_files_only`; or remote `base_url`, `api_key_env`, `timeout_seconds`, and optional `send_dimensions`.
 - `profile`: `model`, `revision`, `dimensions`, `normalization`, `input_format`, `max_input_tokens`, and `precision`; `query_instruction` for Qwen formatting, or `query_prefix` and `document_prefix` for prefix formatting.
 
-Supply the complete intended configuration and search settings to `pcw_switch_embeddings`. Search settings contain `N`, `d_max`, `min_jump`, `multiplier`, and `metric`. Numerical defaults are provisional. Choose thresholds for the selected profile and metric; do not describe them as calibrated without relevant retrieval evidence.
+Supply the complete intended configuration, search settings and optional `chunking` to `pcw_switch_embeddings`. Search settings contain `N`, `d_max`, `min_jump`, `multiplier`, and `metric`. Numerical defaults are provisional. Choose thresholds for the selected profile and metric; do not describe them as calibrated without relevant retrieval evidence.
 
 Supported remote provider types:
 
@@ -32,7 +32,29 @@ The local adapter rejects oversized inputs before encoding; Ollama is told not t
 
 The runtime binds the active LanceDB table to the full vector-space profile. A different model, revision, precision, input format, dimension, normalization, or unverified computation source requires new vectors even when dimensions or model names match.
 
-Switching re-embeds stored literal parts into an inactive table. It neither invokes the preparation helper again nor changes knowledge, IDs, or navigation. New connection, profile, thresholds, and table become active together after success; the previous table is then removed. A failed rebuild leaves the previous source and table active. Pending content remains excluded from search and still requires preparation under the active profile.
+Switching rebuilds token windows and vectors into an inactive table whenever the embedding space or chunk settings change. It does not change knowledge, IDs or links. New provider, chunk settings, thresholds and table become active together after all source revisions are checked; failure retains the previous active source and table. Pending saved materials are included in a successful rebuild.
+
+## Tokenization
+
+Default `chunking`:
+
+```json
+{"chunk_size_tokens": 512, "overlap_tokens": 64, "tokenizer": {"type": "provider"}}
+```
+
+`provider` reuses a local sentence-transformers model's tokenizer. For a remote source, explicitly configure its matching tokenizer; do not use Qwen's tokenizer for an unrelated model. Supported specifications:
+
+```json
+{"type": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B", "revision": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3", "local_files_only": true}
+```
+
+```json
+{"type": "tiktoken", "encoding": "cl100k_base"}
+```
+
+The latter is appropriate only for a model documented to use that encoding. Hugging Face tokenization needs transformers and offset support; tiktoken needs the optional tiktoken dependency and its encoding cache. Missing tokenizer components produce pending indexing, not a silent substitute. Model calls do not choose boundaries. Window and overlap must be integers with `0 < overlap < size`; actual formatted inputs including special tokens must fit the model limit.
+
+Changing only token settings uses the same `pcw_switch_embeddings` operation with unchanged embedding configuration and explicit new `chunking`. Source text is re-read by the plugin, not sent back by the primary.
 
 Credential rotation does not change vector identity. Cache location, offline-loading preference, and transport timeout do not change the computed vectors. Different endpoints or execution settings are treated conservatively unless compatibility is established; matching a quantized model's name is insufficient.
 

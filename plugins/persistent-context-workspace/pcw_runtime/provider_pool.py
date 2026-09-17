@@ -50,6 +50,12 @@ class _Lease:
                 raise EmbeddingError("Embedding provider lease is closed")
             return self._provider.embed(texts, purpose=purpose)
 
+    def tokenizer(self):
+        with self._lock:
+            if self._closed:
+                raise EmbeddingError("Embedding provider lease is closed")
+            return self._provider.tokenizer()
+
     def close(self):
         with self._lock:
             if not self._closed:

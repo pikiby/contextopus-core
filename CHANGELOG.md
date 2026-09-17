@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 — 2026-09-17
+
+- Replace mandatory native-agent workflow with primary-owned memory: direct work and optional delegation.
+- Remove environment/model maps, task/assignment/executor tools, manual boundary submission and semantic-split helpers. Current is editable without a ledger.
+- Automatically index ordinary Markdown saves with configurable overlapping token windows (512/64 by default), Qwen local embeddings, or an explicitly configured local/API source and matching tokenizer.
+- Preserve saved text on indexing failure; retry pending work without resubmission. Rebuild legacy indexes and changed model/chunk profiles without rewriting knowledge.
+- Retain exact-ID links, compaction, revision checks, storage-loss detection and authorized local memory checkpoints. Preserve warnings for known incorrect legacy revisions.
+
 ## 0.7.2
 
 - Add control-only incomplete/error and operational returns; continuations no longer require technical knowledge files or premature acceptance.

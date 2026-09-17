@@ -108,16 +108,6 @@ class PluginContractTests(unittest.TestCase):
                     pending.append(resolved)
         self.assertTrue(set((SKILL / "references").glob("*.md")) <= reached)
 
-    def test_action_requirements_have_exact_action_sections(self):
-        document = (SKILL / "references" / "action-requirements.md").read_text(encoding="utf-8")
-        self.assertEqual(
-            ["prepare_assignment", "process_result", "transition", "finish"],
-            re.findall(r"^## ([a-z_]+)$", document, re.MULTILINE),
-        )
-        self.assertIn("pcw_result_store", document)
-        self.assertIn("pcw_return_record", document)
-        self.assertIn("disk read-back", document)
-        self.assertIn("pcw_result_assess", document)
 
     def test_documented_tools_exist_in_runtime(self):
         documented = set()
@@ -249,8 +239,10 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual([], list(Path(directory).iterdir()))
                     schemas = {tool["name"]: tool["inputSchema"] for tool in tools}
                     self.assertNotIn("path", schemas["pcw_create"]["properties"])
-                    self.assertIn("assignment_id", schemas["pcw_save_result_blocks"]["required"])
-                    self.assertNotIn("material_name", schemas["pcw_save_result_blocks"]["properties"])
+                    self.assertNotIn("pcw_environment_check", schemas)
+                    self.assertNotIn("pcw_assignment_prepare", schemas)
+                    self.assertNotIn("pcw_submit_parts", schemas)
+                    self.assertIn("chunking", schemas["pcw_switch_embeddings"]["properties"])
                     request_id = 2
 
                     def call(name, **arguments):
@@ -262,47 +254,18 @@ class LauncherTests(unittest.TestCase):
                         self.assertFalse(response.get("isError"), response)
                         return json.loads(response["content"][0]["text"])
 
-                    call("task_begin", goal="Protocol fixture", constraints="Temporary files", completion="Observed RPC behavior")
-                    env = call("environment_check", environment_snapshot={"environment": "protocol-fixture", "version": "1",
-                               "models": [{"id": "fixture-worker"}], "native": {}})
-                    call("tools_map_publish", expected_environment_revision=env["environment_revision"], profiles=[{
-                        "id": "fixture", "model": "fixture-worker", "reasoning": {}, "roles": ["test"], "suitable_when": ["test"]}])
-                    prepared = call("assignment_prepare", assignment={
-                        "goal": "Record test observation", "expected_result": "Raw Markdown", "boundaries": "Temporary memory",
-                        "context": {"summary": "Protocol test, no actual model launched"}, "constraints": [],
-                        "acceptance_criteria": ["Read exact bytes"], "knowledge_to_return": "Test observation", "profile": "fixture",
-                        "selection_reason": "Test capability"})
-                    self.assertTrue(prepared["ready"], prepared)
-                    aid = prepared["handoff"]["assignment_id"]
-                    handoff = call("assignment_bind", assignment_id=aid, executor_session_id="fixture-executor",
-                                   evidence={"source": "native_launch", "reference": "synthetic protocol fixture, no native model",
-                                             "executor_session_id": "fixture-executor"})
-                    self.assertEqual(aid, handoff["assignment_id"])
-                    self.assertNotIn("assignment", handoff)
+                    self.assertEqual(0, call("startup")["materials"])
                     item = call("create", content="Protocol fixture content")
                     self.assertRegex(item["id"], r"^[a-f0-9]{32}\.md$")
-                    stored = call("result_store", assignment_id=aid, blocks=["Actual fixture fact\n"], executor_session_id="fixture-executor",
-                                  links=[{"block": 1, "to_materials": [item["id"]]}])
-                    self.assertTrue(stored["complete"] and stored["read_back_verified"])
-                    raw = stored["materials"][0]
-                    self.assertEqual("Actual fixture fact\n", raw["content"])
-                    self.assertEqual([item["id"]], raw["links"])
-                    processed = call("result_assess", assignment_id=aid, assessment={"status": "accepted", "reason": "Read actual protocol output"})
-                    self.assertTrue(processed["ready"], processed)
-                    finished = call("finish", acceptance_checks={
-                        "status": "none_assigned", "scope": "Protocol fixture", "reason": "No native factual check assigned"})
-                    self.assertFalse(finished["ready"])
-                    self.assertIn("prepare", {m["action"] for m in finished["missing"]})
-                    self.assertNotIn("checkpoint", {m["action"] for m in finished["missing"]})
+                    self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
+                    other = call("create", content="Related fact", links=[item["id"]])
+                    self.assertEqual([item["id"]], call("read", material_id=other["id"])["links"])
+                    current = call("current_set", goal="Protocol memory", constraints="Temporary files", completion="Saved", step="Done", blocker="")
+                    self.assertEqual(current, call("current_get"))
                     shutil.rmtree(Path(directory) / ".pcw/protocol/.pcw-runtime")
                     self.assertEqual("recovery_required", call("status")["status"])
-                    self.assertEqual("current", call("environment_get")["status"])
-                    rules = call("rules_get", action="finish")
-                    self.assertTrue(rules["requirements"])
-                    unavailable = call("finish", acceptance_checks={"status": "none_assigned", "scope": "Protocol fixture", "reason": "No checks"})
-                    self.assertFalse(unavailable["ready"])
                     self.assertEqual("recovered", call("recover_workspace")["status"])
-                    self.assertEqual("Actual fixture fact\n", call("read", material_id=raw["id"])["content"])
+                    self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
                 finally:
                     if process.stdin:
                         process.stdin.close()

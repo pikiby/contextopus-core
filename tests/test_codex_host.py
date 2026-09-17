@@ -295,71 +295,6 @@ class CodexHostTests(unittest.TestCase):
         self.assertTrue(matching[0]["enabled"])
         self.assertTrue(matching[0]["path"].endswith("/skills/pcw/SKILL.md"))
 
-    def test_new_workflow_and_memory_apis_work_through_codex(self):
-        """Exercise map, raw result, readable Current and migration APIs in a fresh workspace."""
-        self.assertEqual("absent", self.tool("environment_get")["status"])
-        snapshot = {
-            "environment": "codex-host-regression",
-            "version": "host-v1",
-            "native": {"launch": {"supports_clean_context": True, "fork_turns": "none"}},
-            "models": [{
-                "id": "host-worker", "reasoning": {"effort": ["low"]},
-                "launch_constraints": {"fork_turns": ["none"]},
-            }],
-        }
-        checked = self.tool("environment_check", environment_snapshot=snapshot)
-        self.assertEqual("updated", checked["status"])
-        profile = [{
-            "id": "prepared-host-work", "model": "host-worker", "reasoning": {"effort": "low"},
-            "roles": ["investigation"], "suitable_when": ["bounded host regression"],
-        }]
-        published = self.tool("tools_map_publish", expected_environment_revision=checked["environment_revision"], profiles=profile)
-        self.assertEqual("published", published["status"])
-        self.assertEqual("current", self.tool("tools_map_get")["status"])
-
-        refreshed = self.tool("environment_check", environment_snapshot={**snapshot, "version": "host-v2"})
-        self.assertEqual("refresh_required", refreshed["tools_map_status"])
-        stale = self.tool("tools_map_publish", expected_environment_revision=checked["environment_revision"], profiles=profile)
-        self.assertEqual("rejected", stale["status"])
-        self.assertEqual("published", self.tool("tools_map_publish", expected_environment_revision=refreshed["environment_revision"], profiles=profile)["status"])
-
-        self.tool("task_begin", goal="Host workflow", constraints="Temporary only", completion="All host APIs are observable")
-        prepared_assignment = self.tool("assignment_prepare", assignment={
-            "goal": "Observe host fixture", "expected_result": "Return observations", "boundaries": "Temporary workspace",
-            "context": {"summary": "API regression"}, "constraints": [],
-            "acceptance_criteria": ["Observe actual result"], "knowledge_to_return": "Facts and blocker",
-            "profile": "prepared-host-work", "selection_reason": "Bounded API fixture"})
-        self.assertTrue(prepared_assignment["ready"], prepared_assignment)
-        assignment_id = prepared_assignment["handoff"]["assignment_id"]
-        self.tool("assignment_bind", assignment_id=assignment_id, executor_session_id="codex-native-child-host-test",
-                  evidence={"source": "native_launch", "reference": "synthetic host protocol fixture, no native child",
-                            "executor_session_id": "codex-native-child-host-test"})
-        raw = "# Worker findings\n\n| fact | value |\n| --- | --- |\n| token | `host-sentinel` |\n"
-        def save_blocks(body, revisions=None):
-            result = self.tool("save_result_blocks", assignment_id=assignment_id, blocks=[body],
-                               executor_session_id="codex-native-child-host-test",
-                               expected_previous_revisions=revisions)
-            self.assertIn(result["status"], {"saved", "already_saved"})
-            return result["materials"][0]
-
-        saved = save_blocks(raw)
-        reread = self.tool("read", material_id=saved["id"], assignment_id=assignment_id)
-        self.assertEqual(raw, reread["content"])
-        self.assertEqual("codex-native-child-host-test", reread["executor_session_id"])
-        self.assertTrue(reread["saved_at"].endswith("Z"))
-        repeated = save_blocks(raw)
-        self.assertEqual("already_saved", repeated["status"])
-        updated_raw = raw + "\nAdditional fact in this bounded topic.\n"
-        revised = save_blocks(updated_raw, [saved["revision"]])
-        self.assertNotEqual(saved["saved_at"], revised["saved_at"])
-        self.assertEqual(updated_raw, self.tool("read", material_id=saved["id"], assignment_id=assignment_id)["content"])
-        stale_retry = save_blocks(updated_raw, [saved["revision"]])
-        self.assertEqual("already_saved", stale_retry["status"])
-
-        current = self.tool("current_set", goal="Host workflow", constraints="Temporary only",
-                            completion="All host APIs are observable", step="Read back", blocker="")
-        self.assertEqual(current, self.tool("current_get"))
-        self.assertEqual("already_migrated", self.tool("migrate_legacy_ids")["status"])
 
     @unittest.skipUnless(os.environ.get("PCW_TEST_QWEN") == "1", "Set PCW_TEST_QWEN=1 after provisioning local Qwen")
     def test_local_qwen_index_search_and_links_through_codex(self):
@@ -367,8 +302,7 @@ class CodexHostTests(unittest.TestCase):
         self.assertEqual("Qwen/Qwen3-Embedding-0.6B", status["active"]["config"]["profile"]["model"])
         text = "Резервные копии PostgreSQL сохраняются ежедневно в три часа ночи."
         item = self.tool("create", content=text)
-        prepared = self.tool("prepare", material_id=item["id"])
-        self.tool("submit_parts", material_id=item["id"], revision=prepared["revision"], parts=[text])
+        self.assertEqual("indexed", item["index_status"], item)
         found = self.tool("search", query="Когда делают резервные копии PostgreSQL?")
         self.assertEqual(item["id"], found["results"][0]["id"], found)
         other = self.tool("create", content="Порядок восстановления данных.")

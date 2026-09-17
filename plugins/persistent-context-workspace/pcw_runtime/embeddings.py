@@ -302,12 +302,18 @@ class LocalProvider(_Provider):
                 if len(token_ids) > max_tokens:
                     raise EmbeddingError(
                         f"Embedding input {index} has {len(token_ids)} tokens; limit is {max_tokens}. "
-                        "Split the source into smaller semantic parts; input was not truncated."
+                        "Reduce chunk_size_tokens; input was not truncated."
                     )
         except EmbeddingError:
             raise
         except Exception:
             raise EmbeddingError("Could not verify local embedding token limits") from None
+
+    def tokenizer(self):
+        with self._lock:
+            if self._closed:
+                raise EmbeddingError("Embedding provider is closed")
+            return self._load().tokenizer
 
     def embed(self, texts: list[str], purpose: Purpose = "document") -> list[list[float]]:
         with self._lock:

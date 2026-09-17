@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import shutil
 import os
 from pathlib import Path
 import sys
@@ -22,8 +23,18 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "persistent-context-workspace"))
 
 from pcw_runtime import PCWRuntime, PCWError, SearchConfig, select_candidates
-from pcw_runtime.agent_workflow import AgentWorkflow
-from workflow_helpers import register, process
+from pcw_runtime.control import RecoveryRequired
+
+
+class CharacterTokenizer:
+    """Test-only deterministic tokenizer; production uses the selected model."""
+    model_max_length = 32768
+
+    def __call__(self, text, add_special_tokens=False, **kwargs):
+        if isinstance(text, list):
+            return {"input_ids": [list(range(len(value))) for value in text]}
+        return {"input_ids": list(range(len(text))) + ([999] if add_special_tokens else []),
+                "offset_mapping": [(i, i + 1) for i in range(len(text))]}
 
 
 class TestProvider:
@@ -33,6 +44,9 @@ class TestProvider:
         self.config = config
         self.owner = owner
         self.closed = False
+
+    def tokenizer(self):
+        return CharacterTokenizer()
 
     def embed(self, texts, purpose="document"):
         assert not self.closed
@@ -82,19 +96,11 @@ def named(runtime, path, content, links=None):
     return item
 
 
-def raw_result(runtime, name, result, session, expected_previous_revision=None, *, purpose="work"):
-    if not hasattr(runtime, "_test_assignments"):
-        runtime._test_assignments = {}
-    if name not in runtime._test_assignments and session:
-        with patch.object(runtime, "_allocate_material_id", return_value=name):
-            runtime._test_assignments[name] = register(runtime, session, goal="Return observation " + str(len(runtime._test_assignments)), purpose=purpose)
-    aid = runtime._test_assignments.get(name, "unregistered")
-    return runtime.save_subagent_result(aid, result, session, expected_previous_revision)
 
 
 def indexed(runtime, path="one.md", content="original material"):
     item = named(runtime, path, content)
-    return runtime.submit_parts(item["id"], item["revision"], [content])
+    return item
 
 
 def changed_config(runtime, revision="new-model", dimensions=4):
@@ -108,66 +114,12 @@ def cutoff():
     return dataclasses.asdict(SearchConfig(N=30, d_max=2, min_jump=10))
 
 
-def test_real_lance_pending_and_exact_original_parts(memory):
-    runtime, factory = memory
-    source = "# Export\n\nCondition applies.\n\n| k | v |\n|---|---|\n| a | 1 |\n\n```py\nprint(1)\n```\n"
-    item = named(runtime, "exports/a.md", source)
-    assert runtime.db.__class__.__module__.startswith("lancedb")
-    assert not factory.calls
-    assert runtime.search("Export")["pending_count"] == 1
-    assert runtime.search("Export")["results"] == []
-    preparation = runtime.prepare(item["id"])
-    assert preparation["content"] == source
-    parts = ["# Export\n\nCondition applies.", "| k | v |\n|---|---|\n| a | 1 |", "```py\nprint(1)\n```"]
-    result = runtime.submit_parts(item["id"], preparation["revision"], parts)
-    assert result["index_status"] == "indexed"
-    assert factory.calls[-1][1:] == ("document", parts)
-    rows = runtime._rows()
-    assert [row["text"] for row in rows] == parts
-    assert all(row["material_id"] == item["id"] for row in rows)
-    assert runtime.read(item["id"])["content"] == source
-    assert not any(runtime.root.rglob("*parts*.md"))
-    results = runtime.search(parts[0], d_max=2, min_jump=10)["results"]
-    assert list(results[0]) == ["id", "path", "distance"]
-    assert results[0]["id"] == item["id"]
 
 
-def test_changed_body_removes_stale_search_before_preparation(memory):
-    runtime, factory = memory
-    item = indexed(runtime)
-    old_revision = item["revision"]
-    result = runtime.update(item["id"], "new original content", expected_revision=old_revision)
-    assert result["index_status"] == "pending_preparation"
-    assert runtime.table.count_rows() == 0
-    assert runtime.search("original material")["results"] == []
-    with pytest.raises(PCWError, match="Stale"):
-        runtime.submit_parts(item["id"], old_revision, ["original material"])
-    with pytest.raises(PCWError, match="changed since"):
-        runtime.update(item["id"], "overwrite", expected_revision=old_revision)
-    with pytest.raises(PCWError, match="original"):
-        runtime.submit_parts(item["id"], result["revision"], ["summary"])
-    runtime.submit_parts(item["id"], result["revision"], ["new original content"])
-    assert runtime.status()["pending_count"] == 0
 
 
-@pytest.mark.parametrize("parts", [["second", "first"], ["first"], ["first second", "second"], ["first", "added", "second"]])
-def test_parts_cannot_reorder_omit_overlap_or_invent(memory, parts):
-    runtime, _ = memory
-    item = named(runtime, "one.md", "first second")
-    with pytest.raises(PCWError):
-        runtime.submit_parts(item["id"], item["revision"], parts)
-    assert runtime.table.count_rows() == 0
 
 
-def test_external_body_edit_during_embedding_is_rejected(memory):
-    runtime, factory = memory
-    item = named(runtime, "one.md", "first")
-    path = runtime.root / item["path"]
-    factory.on_embed = lambda: path.write_text(path.read_text().replace("first", "second"))
-    with pytest.raises(PCWError, match="while embedding"):
-        runtime.submit_parts(item["id"], item["revision"], ["first"])
-    assert runtime.table.count_rows() == 0
-    assert runtime.read(item["id"])["content"] == "second"
 
 
 def test_links_move_and_repeat_save_do_not_reembed(memory):
@@ -209,12 +161,12 @@ def test_merge_rewrites_before_delete_and_unions_links(memory):
     calls = len(factory.calls)
     result = runtime.merge([{"id": target["id"], "content": "main agent final content"}], {old["id"]: target["id"]})
     assert result["status"] == "ok"
-    assert len(factory.calls) == calls
+    assert len(factory.calls) == calls + 1
     assert runtime.read(target["id"])["links"] == [neighbor["id"]]
     assert runtime.read(incoming["id"])["links"] == [target["id"]]
     assert old["id"] in runtime.read(incoming["id"])["content"]
     assert not (runtime.root / old["path"]).exists()
-    assert {row["material_id"] for row in runtime._rows()} == {neighbor["id"], incoming["id"]}
+    assert {row["material_id"] for row in runtime._rows()} == {target["id"], neighbor["id"], incoming["id"]}
     assert result["applied"].index(f"links:{incoming['id']}") < result["applied"].index(f"deleted:{old['id']}")
 
 
@@ -366,8 +318,8 @@ def test_multiple_runtime_instances_see_writes_and_profile_switch(memory):
         assert other_factory.calls[-1][0] == "new-model"
         assert old_other_provider.closed
         runtime.update(a["id"], "changed")
-        assert other.search("original material")["results"] == []
-        assert other.status()["pending_count"] == 1
+        assert other.search("changed")["results"][0]["id"] == a["id"]
+        assert other.status()["pending_count"] == 0
     finally:
         other.close()
 
@@ -401,8 +353,9 @@ def test_float32_overflow_or_zero_underflow_is_rejected(memory, number):
     item = named(runtime, "huge.md", "source")
     provider = runtime._get_provider()
     with patch.object(provider, "embed", return_value=[[number] * 1024]):
-        with pytest.raises(PCWError, match="float32"):
-            runtime.submit_parts(item["id"], item["revision"], ["source"])
+        result = runtime.update(item["id"], "new source")
+        assert result["index_status"] == "pending_preparation"
+        assert "float32" in result["index_error"]
     assert runtime.table.count_rows() == 0
 
 
@@ -439,127 +392,17 @@ def test_switch_blocks_other_runtime_write_until_activation(memory):
     other.close()
 
 
-def test_save_subagent_result_is_exact_idempotent_and_requires_executor_session(memory):
-    runtime, factory = memory
-    result = "\n---\ninner: frontmatter stays in the result\n---\n\n| key | value |\n|---|---|\n| x | 1 |\n\n```py\nprint('exact')\n```\n  \n"
-    with pytest.raises(PCWError, match="executor_session_id"):
-        raw_result(runtime, "returned.md", result, "")
-    saved = raw_result(runtime, "returned.md", result, "executor-session-17")
-    assert saved["status"] == "saved"
-    assert saved["id"] == "returned.md"
-    assert saved["saved_at"].endswith("Z")
-    assert saved["executor_session_id"] == "executor-session-17"
-    read = runtime.read("returned.md")
-    assert read["content"] == result
-    assert read["saved_at"] == saved["saved_at"]
-    duplicate = raw_result(runtime, "returned.md", result, "executor-session-17")
-    assert duplicate["status"] == "already_saved"
-    assert duplicate["saved_at"] == saved["saved_at"]
-    with pytest.raises(PCWError, match="already occupied"):
-        raw_result(runtime, "returned.md", result + "different", "executor-session-17")
-    with pytest.raises(PCWError, match="actual executor"):
-        raw_result(runtime, "returned.md", result, "other-executor-session")
-    assert not factory.calls
 
 
-def test_save_subagent_result_cas_revises_only_same_executor_raw_result(memory):
-    runtime, factory = memory
-    first_body = "# First raw return\n\n| state | first |\n| --- | --- |\n"
-    saved = raw_result(runtime, "worker-return.md", first_body, "worker-session-17")
-    runtime.submit_parts(saved["id"], saved["revision"], [first_body])
-    moved = runtime.rename(saved["id"], "nested/worker-return.md")
-    assert moved["path"] == "knowledge/nested/worker-return.md"
-    related = named(runtime, "related.md", "Navigation target")
-    runtime.links(saved["id"], add=[related["id"]])
-    before = runtime.read(saved["id"])
-    assert before["index_status"] == "indexed"
-
-    second_body = "# Second raw return\n\n| state | updated |\n| --- | --- |\n"
-    with pytest.raises(PCWError, match="already occupied"):
-        raw_result(runtime, saved["id"], second_body, "worker-session-17")
-    with pytest.raises(PCWError, match="actual executor"):
-        raw_result(runtime, saved["id"], second_body, "other-session",
-                                     expected_previous_revision=before["revision"])
-    with pytest.raises(PCWError, match="changed since it was read"):
-        raw_result(runtime, saved["id"], second_body, "worker-session-17",
-                                     expected_previous_revision="stale-revision")
-
-    updated = raw_result(runtime, saved["id"], second_body, "worker-session-17",
-                                            expected_previous_revision=before["revision"])
-    assert updated["status"] == "updated"
-    assert updated["saved_at"] != before["saved_at"]
-    assert updated["links"] == [related["id"]]
-    assert updated["index_status"] == "pending_preparation"
-    assert runtime.read(saved["id"])["content"] == second_body
-    assert not [row for row in runtime._rows() if row["material_id"] == saved["id"]]
-    assert len(factory.calls) == 1
-
-    # Exact retries remain idempotent even when they still carry the revision
-    # read before the successful CAS replacement.
-    retry = raw_result(runtime, saved["id"], second_body, "worker-session-17",
-                                         expected_previous_revision=before["revision"])
-    assert retry["status"] == "already_saved"
-    assert retry["saved_at"] == updated["saved_at"]
-
-    ordinary = named(runtime, "ordinary.md", "ordinary knowledge")
-    with pytest.raises(PCWError, match="not a saved raw subagent result"):
-        raw_result(runtime, ordinary["id"], "new raw", "worker-session-17",
-                                     expected_previous_revision=ordinary["revision"])
 
 
-def test_save_subagent_result_cas_write_error_keeps_previous_body_and_index(memory):
-    runtime, _ = memory
-    original = raw_result(runtime, "worker-return.md", "first body", "worker-session-17")
-    runtime.submit_parts(original["id"], original["revision"], ["first body"])
-    before = runtime.read(original["id"])
-    rows_before = runtime._rows()
-
-    with patch.object(runtime, "_save", side_effect=OSError("injected raw-save failure")):
-        with pytest.raises(OSError, match="injected raw-save failure"):
-            raw_result(runtime, original["id"], "second body", "worker-session-17",
-                                         expected_previous_revision=before["revision"])
-
-    assert runtime.read(original["id"]) == before
-    assert runtime._rows() == rows_before
 
 
-def test_saved_result_lookup_survives_nested_path_rename(memory):
-    runtime, _ = memory
-    raw_result(runtime, "returned.md", "worker output", "executor-session-17", purpose="check")
-    renamed = runtime.rename("returned.md", "nested/returned.md")
-    assert renamed["id"] == "returned.md"
-    workflow = AgentWorkflow(runtime)
-    aid = runtime._test_assignments["returned.md"]
-    runtime.read("returned.md", assignment_id=aid)
-
-    process = workflow.action_requirements("process_result", {
-        "result": {"assignment_id": aid, "material_name": "returned.md", "executor_session_id": "executor-session-17"},
-        "assessment": {"status": "accepted", "reason": "Exact saved body observed"},
-    })
-    transition = workflow.action_requirements("transition", {
-        "checks_due": {"status": "assigned", "checks": [{
-            "assignment_id": aid, "material_name": "returned.md", "executor_session_id": "executor-session-17",
-        }]},
-    })
-    finish = workflow.action_requirements("finish", {
-        "acceptance_checks": {"status": "assigned", "scope": "whole task", "checks": [{
-            "assignment_id": aid, "material_name": "returned.md", "executor_session_id": "executor-session-17",
-        }]},
-    })
-    assert process["ready"] and transition["ready"]
-    assert not finish["ready"]
-    assert any(m["action"] == "prepare" for m in finish["missing"])
-
-    wrong_session = workflow.action_requirements("process_result", {
-        "result": {"material_name": "returned.md", "executor_session_id": "other-session"},
-    })
-    assert not wrong_session["ready"]
 
 
 def test_same_filename_id_move_retries_only_index_path_after_failure(memory):
     runtime, factory = memory
-    saved = raw_result(runtime, "returned.md", "worker output", "executor-session-17")
-    runtime.submit_parts(saved["id"], saved["revision"], ["worker output"])
+    saved = named(runtime, "returned.md", "worker output")
     before_rows = runtime._rows()
     calls = len(factory.calls)
 
@@ -614,9 +457,11 @@ def test_explicit_legacy_id_migration_preserves_body_links_and_existing_index(me
     dimensions = runtime.active["config"]["profile"]["dimensions"]
     runtime.table.add([
         {"material_id": "old-a", "part_index": 0, "text": a_body, "vector": [0.1] * dimensions,
-         "path": "knowledge/a.md", "revision": hashlib.sha256(a_body.encode()).hexdigest()},
+         "path": "knowledge/a.md", "revision": hashlib.sha256(a_body.encode()).hexdigest(),
+         "chunking_id": runtime._chunking_id(), "part_count": 1, "char_start": 0, "char_end": len(a_body), "token_start": 0, "token_end": len(a_body)},
         {"material_id": "old-b", "part_index": 0, "text": b_body, "vector": [0.2] * dimensions,
-         "path": "knowledge/b.md", "revision": hashlib.sha256(b_body.encode()).hexdigest()},
+         "path": "knowledge/b.md", "revision": hashlib.sha256(b_body.encode()).hexdigest(),
+         "chunking_id": runtime._chunking_id(), "part_count": 1, "char_start": 0, "char_end": len(b_body), "token_start": 0, "token_end": len(b_body)},
     ])
     migrated = runtime.migrate_legacy_ids()
     assert migrated["status"] == "ok"
@@ -723,8 +568,8 @@ def test_list_is_paged_and_status_bounds_context(memory):
     for index in range(55):
         named(runtime, f"{index:03}.md", f"material {index}")
     status = runtime.status()
-    assert status["pending_count"] == 55
-    assert len(status["pending_preparation"]) == 50
+    assert status["materials"] == 55
+    assert status["pending_count"] == 0
     page = runtime.list(limit=20)
     assert len(page["materials"]) == 20
     assert page["next_offset"] == 20
@@ -745,12 +590,11 @@ def test_checkpoint_is_exact_and_restore_invalidates_changed_rows(memory):
     assert "knowledge/b.md" in runtime._git("diff", "--cached", "--name-only").stdout
     assert ".pcw-runtime" not in runtime._git("status", "--porcelain").stdout
     updated = runtime.update(a["id"], "version two")
-    runtime.submit_parts(a["id"], updated["revision"], ["version two"])
     restored = runtime.restore(result["commit"], ["knowledge/a.md"])
     assert restored["status"] == "ok"
-    assert restored["pending_preparation"] == [a["id"]]
+    assert restored["pending_preparation"] == []
     assert runtime.read(a["id"])["content"] == "version one"
-    assert {row["material_id"] for row in runtime._rows()} == {b["id"]}
+    assert {row["material_id"] for row in runtime._rows()} == {a["id"], b["id"]}
     with pytest.raises(PCWError, match="scope"):
         runtime.checkpoint([".pcw-runtime/active.json"], "forbidden")
 
@@ -811,3 +655,27 @@ def test_process_provider_pool_shares_model_across_workspaces_and_releases_safel
     finally:
         a.close()
         b.close()
+
+
+def test_batch_links_validate_all_targets_and_retry_without_reembedding(memory):
+    runtime, factory = memory
+    a, b, c = [runtime.create(content) for content in ["A", "B", "C"]]
+    with pytest.raises(PCWError, match="Unknown material"):
+        runtime.links_many([{"source_id": a["id"], "add": [b["id"]]},
+                            {"source_id": b["id"], "add": ["missing.md"]}])
+    assert runtime.read(a["id"])["links"] == []
+    changes = [{"source_id": a["id"], "add": [b["id"], c["id"]]},
+               {"source_id": b["id"], "add": [c["id"]]}]
+    assert runtime.links_many(changes)["status"] == "ok"
+    assert runtime.links_many(changes)["status"] == "ok"
+    assert runtime.read(a["id"])["links"] == [b["id"], c["id"]]
+    assert len(factory.instances) == 1
+
+def test_batch_read_preserves_missing_knowledge_recovery_guard_without_loading_model(memory):
+    runtime, factory = memory
+    saved = runtime.create("Saved fact")
+    shutil.rmtree(runtime.knowledge)
+    with pytest.raises(RecoveryRequired):
+        runtime.read_many([saved["id"]])
+    assert not runtime.knowledge.exists()
+    assert len(factory.instances) == 1
