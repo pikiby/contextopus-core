@@ -1,5 +1,7 @@
 # PCW 0.8.0: memory-only implementation assessment
 
+> Privacy: personal paths and trace/material identifiers are anonymized; reported measurements are unchanged.
+
 Date: 2026-09-17. Governing specification: [context-workspace-design.md](context-workspace-design.md).
 
 ## Implemented behavior
@@ -24,7 +26,11 @@ The suite was run outside the restricted Linux sandbox because LanceDB's connect
 
 ## Installed-host verification
 
-Pending installation and the opt-in Codex integration check. The check compares the installed package with the source, loads the skill and exact tool inventory through Codex app-server, and exercises memory writes, Current and real-Qwen search in temporary workspaces. This section will record its actual result before the release tag is created.
+Installed through the existing Git marketplace using `codex plugin marketplace upgrade persistent-context-workspace` and `codex plugin add persistent-context-workspace@persistent-context-workspace`. The installer reported version **0.8.0** at `/home/example/.codex/plugins/cache/persistent-context-workspace/persistent-context-workspace/0.8.0`.
+
+All **3 opt-in Codex host checks passed in 17.47 seconds** with `PCW_TEST_CODEX=1 PCW_TEST_QWEN=1`. A fresh real Codex app-server loaded the exact 23-tool inventory and enabled PCW skill. Tests exercised create/read/update, Current, automatic real-Qwen indexing, search and links in temporary workspaces. The installed manifests, launcher, runtime and skill files were byte-compared with the source before the checks. No plugin-root environment variable was injected into the host.
+
+The old long-lived conversation is not automatically reconnected by this installation; a new Codex thread loads the revised tool surface and skill. Existing user workspaces were not opened for this test.
 
 ## Limits
 
