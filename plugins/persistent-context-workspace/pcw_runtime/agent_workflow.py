@@ -43,7 +43,7 @@ class ToolsMapProfile(TypedDict):
 
 
 class SavedResultCoordinate(TypedDict):
-    material_name: str
+    material_name: NotRequired[str]
     executor_session_id: str
     assignment_id: str
 
@@ -267,14 +267,23 @@ class AgentWorkflow:
                       "tools_map_status": self._map_status(state)}
             if task is not None:
                 result["assignment_count"] = len(task["assignments"])
-                result["checks_plan"] = task.get("checks_plan", [])
+                result["checks_plan"] = task.get("checks_plan", []) if task["status"] != "complete" else []
                 result["assignments"] = [{**{key: entry.get(key) for key in (
                     "id", "status", "executor_session_id", "check_id", "continuation_of")},
                     "purpose": entry["assignment"].get("purpose", "work"),
                     "results": self.ledger.result_records(entry),
                     "assessment": entry.get("assessment"), "return_conflict": entry.get("return_conflict"),
-                    "service_error": entry.get("service_error")}
-                    for entry in task["assignments"].values() if entry["status"] != "cancelled"]
+                    "service_error": entry.get("service_error"), "identity_conflict": entry.get("identity_conflict"),
+                    "result_store_pending": entry.get("result_store_pending", False),
+                    "control_return": ({k: entry["control_return"][k] for k in ("status", "missing", "reason")}
+                                       if entry.get("control_return") else None)}
+                    for entry in task["assignments"].values()
+                    if task["status"] != "complete" and entry["status"] != "cancelled" and (
+                        not entry.get("processed_at") or entry.get("identity_conflict") or entry.get("identity_repair")
+                        or entry.get("return_conflict") or entry.get("result_store_pending")
+                        or (entry.get("needs_attention_since") and not entry.get("resolved_by"))
+                        or (entry.get("service_error") and not entry.get("service_resolved_by")))]
+                result["history_action"] = "task_status"
                 result["discrepancies"] = [{"assignment_id": ident,
                     "reason": entry.get("discrepancy_reason"), "affected_materials": entry.get("affected_materials", {})}
                     for ident, entry in task["assignments"].items()
@@ -285,6 +294,7 @@ class AgentWorkflow:
                 durable = self.runtime.durable_state()
                 result.update(current=self.runtime.current_get(), material_count=len(durable["paths"]),
                               pending_count=len(durable["pending"]), unregistered_count=len(durable["unregistered"]),
+                              pending_material_ids=sorted(durable["pending"])[:100],
                               needs_correction_count=sum(bool(self.ledger.invalidations(item.id, item.revision))
                                                          for item in self.runtime.materials.values()))
             except Exception as exc:
@@ -302,8 +312,14 @@ class AgentWorkflow:
 
     @staticmethod
     def _compact(result):
+        names = {"prepare_assignment": "assignment_prepare", "process_result": "result_assess",
+                 "save_subagent_result": "result_store", "read_saved_result": "read_many",
+                 "publish_tools_map": "tools_map_publish", "assign_factual_check": "assignment_prepare",
+                 "declare_checks": "task_checks_set"}
         response = {key: result[key] for key in ("action", "ready", "missing", "next_action")}
-        response["missing"] = [{**item, "reason": item["reason"].replace("pcw_action_requirements", "pcw_assignment_prepare")}
+        response["next_action"] = names.get(response["next_action"], response["next_action"])
+        response["missing"] = [{**item, "action": names.get(item.get("action"), item.get("action")),
+                                "reason": item["reason"].replace("pcw_action_requirements", "pcw_assignment_prepare")}
                                for item in result["missing"]]
         handoff = result.get("handoff")
         if handoff is not None:
@@ -355,12 +371,17 @@ class AgentWorkflow:
     def service_error(self, assignment_id: str, executor_session_id: str, error: str):
         return self.ledger.service_error(assignment_id, executor_session_id, error)
 
-    def assignment_bind(self, assignment_id: str, executor_session_id: str):
+    def return_record(self, assignment_id: str, executor_session_id: str,
+                      status: Literal["incomplete", "error", "complete"], content: str, reason: str,
+                      missing: list[str]):
+        return self.ledger.record_return(assignment_id, executor_session_id, status, content, reason, missing)
+
+    def assignment_bind(self, assignment_id: str, executor_session_id: str, evidence: dict | None = None):
         with self._guard():
             state = self._load()
             _, entry = self.ledger.entry(self.ledger.load(), assignment_id)
             revision = (state.get("environment") or {}).get("environment_revision")
-            handoff = self.ledger.bind(assignment_id, executor_session_id)
+            handoff = self.ledger.bind(assignment_id, executor_session_id, evidence)
             if self._map_status(state) != "current" or entry["environment_revision"] != revision:
                 reason = "Environment changed after preparation; refresh the map and prepare the assignment again"
                 self.ledger.delivery_blocker(assignment_id, reason)
@@ -547,6 +568,19 @@ class AgentWorkflow:
     def _saved_result(self, coordinate: object, label: str) -> tuple[dict[str, object] | None, list[dict[str, str]]]:
         if not isinstance(coordinate, dict):
             return None, [{"field": label, "reason": "A saved result coordinate is required.", "action": "save_subagent_result"}]
+        if coordinate.get("assignment_id") and not coordinate.get("material_name"):
+            try:
+                _, entry = self.ledger.entry(self.ledger.load(), coordinate["assignment_id"])
+                supplied = coordinate.get("executor_session_id")
+                if entry.get("control_return") and isinstance(supplied, str) and supplied and supplied != entry.get("executor_session_id"):
+                    self.ledger.identity_mismatch(coordinate["assignment_id"], supplied)
+                if (entry.get("control_return", {}).get("status") == "complete"
+                        and entry.get("executor_session_id") == coordinate.get("executor_session_id")
+                        and not entry.get("identity_conflict") and not entry.get("identity_repair")):
+                    return {"assignment_id": entry["id"], "executor_session_id": entry["executor_session_id"],
+                            "result_storage": "control", "returned_at": entry["returned_at"]}, []
+            except ValueError:
+                pass
         name = coordinate.get("material_name")
         if not isinstance(name, str) or not _NAME.fullmatch(name) or name.startswith(".") or ".." in name.split("/"):
             return None, [{"field": f"{label}.material_name", "reason": "A safe Markdown material name is required.", "action": "save_subagent_result"}]
@@ -586,6 +620,13 @@ class AgentWorkflow:
             missing.append({"field": f"{label}.executor_session_id", "reason": "The expected executor session ID is required to verify this saved result.", "action": "read_saved_result"})
         elif supplied_session != actual_session:
             missing.append({"field": f"{label}.executor_session_id", "reason": "The declared executor session does not match the saved result.", "action": "read_saved_result"})
+            if coordinate.get("assignment_id"):
+                try:
+                    _, entry = self.ledger.entry(self.ledger.load(), coordinate["assignment_id"])
+                    if name in {r["material_id"] for r in self.ledger.result_records(entry)}:
+                        self.ledger.identity_mismatch(coordinate["assignment_id"], supplied_session)
+                except ValueError:
+                    pass
         if missing:
             return None, missing
         return {"material_name": name, "executor_session_id": actual_session, "saved_at": saved_at}, []
@@ -749,7 +790,7 @@ class AgentWorkflow:
                     _, entry = self.ledger.entry(self.ledger.load(), check["assignment_id"])
                     if entry["assignment"].get("purpose") != "check":
                         raise ValueError("This result is not a factual-check assignment")
-                    if (check.get("material_name") not in {r["material_id"] for r in self.ledger.result_records(entry)}
+                    if ((not entry.get("control_return") and check.get("material_name") not in {r["material_id"] for r in self.ledger.result_records(entry)})
                             or check.get("executor_session_id") != entry.get("executor_session_id")):
                         raise ValueError("Check coordinates must match the registered factual-check assignment")
                     if not entry.get("processed_at") or entry.get("assessment", {}).get("status") != "accepted":

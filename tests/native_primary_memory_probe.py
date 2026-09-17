@@ -73,7 +73,7 @@ async def run(args):
                 elif args.phase in ('accept', 'clarify'):
                     blocks = json.loads(Path(args.result_path).read_text())
                     assert isinstance(blocks, list) and len(blocks) == 2
-                    await call('assignment_bind', assignment_id=state['author'], executor_session_id=args.session)
+                    await call('assignment_bind', assignment_id=state['author'], executor_session_id=args.session, evidence={'source': 'native_launch', 'reference': args.identity_reference, 'executor_session_id': args.session})
                     saved = await call('save_result_blocks', assignment_id=state['author'], executor_session_id=args.session, blocks=blocks)
                     assert saved['complete'], saved
                     state['materials'] = [item['id'] for item in saved['materials']]
@@ -122,7 +122,7 @@ async def run(args):
                     output = prepared['handoff']
                 else:
                     boundaries = json.loads(Path(args.result_path).read_text())
-                    await call('assignment_bind', assignment_id=state['splitter'], executor_session_id=args.session)
+                    await call('assignment_bind', assignment_id=state['splitter'], executor_session_id=args.session, evidence={'source': 'native_launch', 'reference': args.identity_reference, 'executor_session_id': args.session})
                     await call('submit_boundaries_many', assignment_id=state['splitter'], executor_session_id=args.session, boundaries=boundaries)
                     await call('current_set', step='Description saved and indexed', blocker='')
                     status = await call('status')
@@ -147,8 +147,11 @@ if __name__ == '__main__':
     parser.add_argument('--model')
     parser.add_argument('--effort')
     parser.add_argument('--session')
+    parser.add_argument('--identity-reference', help='Actual native launch response or metadata coordinate, never a shell environment variable')
     parser.add_argument('--result-path')
     args = parser.parse_args()
+    if args.phase != 'start' and not args.identity_reference:
+        parser.error('record actual --identity-reference from native launch metadata')
     if args.phase == 'start' and (not args.model or not args.effort):
         parser.error('start requires actual native --model and --effort')
     if args.phase != 'start' and (not args.session or not args.result_path):

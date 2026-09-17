@@ -114,8 +114,10 @@ class PluginContractTests(unittest.TestCase):
             ["prepare_assignment", "process_result", "transition", "finish"],
             re.findall(r"^## ([a-z_]+)$", document, re.MULTILINE),
         )
-        self.assertIn("pcw_save_result_blocks", document)
-        self.assertIn("pcw_read", document)
+        self.assertIn("pcw_result_store", document)
+        self.assertIn("pcw_return_record", document)
+        self.assertIn("disk read-back", document)
+        self.assertIn("pcw_result_assess", document)
 
     def test_documented_tools_exist_in_runtime(self):
         documented = set()
@@ -272,14 +274,19 @@ class LauncherTests(unittest.TestCase):
                         "selection_reason": "Test capability"})
                     self.assertTrue(prepared["ready"], prepared)
                     aid = prepared["handoff"]["assignment_id"]
-                    handoff = call("assignment_bind", assignment_id=aid, executor_session_id="fixture-executor")
+                    handoff = call("assignment_bind", assignment_id=aid, executor_session_id="fixture-executor",
+                                   evidence={"source": "native_launch", "reference": "synthetic protocol fixture, no native model",
+                                             "executor_session_id": "fixture-executor"})
                     self.assertEqual(aid, handoff["assignment_id"])
                     self.assertNotIn("assignment", handoff)
                     item = call("create", content="Protocol fixture content")
                     self.assertRegex(item["id"], r"^[a-f0-9]{32}\.md$")
-                    raw = call("save_result_blocks", assignment_id=aid, blocks=["Actual test receipt\n"], executor_session_id="fixture-executor")["materials"][0]
-                    read = call("read", material_id=raw["id"], assignment_id=aid)
-                    self.assertEqual("Actual test receipt\n", read["content"])
+                    stored = call("result_store", assignment_id=aid, blocks=["Actual fixture fact\n"], executor_session_id="fixture-executor",
+                                  links=[{"block": 1, "to_materials": [item["id"]]}])
+                    self.assertTrue(stored["complete"] and stored["read_back_verified"])
+                    raw = stored["materials"][0]
+                    self.assertEqual("Actual fixture fact\n", raw["content"])
+                    self.assertEqual([item["id"]], raw["links"])
                     processed = call("result_assess", assignment_id=aid, assessment={"status": "accepted", "reason": "Read actual protocol output"})
                     self.assertTrue(processed["ready"], processed)
                     finished = call("finish", acceptance_checks={
@@ -295,7 +302,7 @@ class LauncherTests(unittest.TestCase):
                     unavailable = call("finish", acceptance_checks={"status": "none_assigned", "scope": "Protocol fixture", "reason": "No checks"})
                     self.assertFalse(unavailable["ready"])
                     self.assertEqual("recovered", call("recover_workspace")["status"])
-                    self.assertEqual("Actual test receipt\n", call("read", material_id=raw["id"])["content"])
+                    self.assertEqual("Actual fixture fact\n", call("read", material_id=raw["id"])["content"])
                 finally:
                     if process.stdin:
                         process.stdin.close()

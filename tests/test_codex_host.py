@@ -331,7 +331,9 @@ class CodexHostTests(unittest.TestCase):
             "profile": "prepared-host-work", "selection_reason": "Bounded API fixture"})
         self.assertTrue(prepared_assignment["ready"], prepared_assignment)
         assignment_id = prepared_assignment["handoff"]["assignment_id"]
-        self.tool("assignment_bind", assignment_id=assignment_id, executor_session_id="codex-native-child-host-test")
+        self.tool("assignment_bind", assignment_id=assignment_id, executor_session_id="codex-native-child-host-test",
+                  evidence={"source": "native_launch", "reference": "synthetic host protocol fixture, no native child",
+                            "executor_session_id": "codex-native-child-host-test"})
         raw = "# Worker findings\n\n| fact | value |\n| --- | --- |\n| token | `host-sentinel` |\n"
         def save_blocks(body, revisions=None):
             result = self.tool("save_result_blocks", assignment_id=assignment_id, blocks=[body],

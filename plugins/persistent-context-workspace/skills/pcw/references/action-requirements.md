@@ -39,13 +39,17 @@ Assignment example; shared `work_root` and `workspace` arguments are omitted:
 
 Immediately divide each substantive work/check return into large, independently meaningful knowledge materials. The primary makes these topic decisions, preserves actual facts, conditions, details, tables, code and uncertainty, and links related materials. Do not split mechanically by headings or size. No additional unmodified monolithic return is required.
 
-Call `pcw_save_result_blocks` with the assignment ID, actual executor session ID and `blocks` as an array of Markdown bodies. MCP generates all filename-IDs and UTC save metadata and records the blocks under that return. Read every saved block with `pcw_read_many`, supplying the assignment ID. Add useful links through `pcw_links_many`. Then call `pcw_result_assess` with the assignment ID and explicit assessment.
+For incomplete/error returns, call `pcw_return_record` with actual content, reason and missing requirements, then prepare a continuation. No knowledge file or false acceptance is needed. Completed operational verification without new reusable facts also uses control storage and explicit assessment. Resolve an incomplete return by naming it in the accepted continuation's `assessment.resolves`.
+
+For substantive knowledge, call `pcw_result_store` with the assignment ID, actual executor identity, topic `blocks` and explicit `links`. MCP generates IDs, saves bodies and links, verifies disk read-back and returns observed bodies plus `split_sources`. Inspect this single response and call `pcw_result_assess`. Do not repeat read/link/prepare for the same state. Store useful new facts, without a monolithic artifact copy or operational status embedded in knowledge.
 
 An identical retry is idempotent. Different content conflicts rather than silently replacing a saved return. An explicit correction of the same registered blocks uses their `expected_previous_revisions`; repartitioning existing knowledge is consolidation, not a retry. A different assignment never overwrites a prior return. Missing actual executor identity or failed save/read remains a concrete blocker.
 
 Declare `accepted` or `needs_attention` with a reason. For `needs_attention`, `assessment.affected_material_ids` identifies incorrect active knowledge; omission selects all saved blocks of this return. The assessment captures their body state. An accepted clarification/check names earlier assignment IDs in `assessment.resolves`; every captured body must have been corrected or replaced before resolution. A link-only change leaves the wrong body unchanged. Saving, reading and a worker success claim do not establish factual acceptance.
 
 Technical receipts and helper boundaries stay in control state. The later boundary helper does not decide the topic materials and does not produce another knowledge report.
+
+Obtain executor identity from native launch/metadata evidence, never inherited shell variables. Repair a proven wrong binding through `pcw_assignment_rebind`; identity conflicts remain blocking even when later calls reuse the old ID. See [Native assignments](native-assignments.md).
 
 ```json
 {"assignment_id": "registered-assignment", "assessment": {

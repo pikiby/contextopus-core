@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.7.1 defines one `$pcw` skill and a persistent local MCP server. This plan records the adopted design and acceptance boundaries; it is not a claim that live-host validation has passed.
+Version 0.7.2 defines one `$pcw` skill and a persistent local MCP server. This plan records the adopted design and acceptance boundaries; it is not a claim that live-host validation has passed.
 
 ## Responsibilities and workflow
 
@@ -18,9 +18,17 @@ One `pcw_startup` read restores task, Current, memory status and saved environme
 
 Immediately after a substantive return, the primary divides its text into large, independently meaningful knowledge materials and links related topics. Preserve actual facts, conditions, implementation details, uncertainty, code and tables. Do not split mechanically by headings or fixed sizes and do not require an extra unmodified monolithic return.
 
-`pcw_save_result_blocks` generates IDs and records each block's assignment, actual executor session and UTC save time. Read all blocks with `pcw_read_many`, link with `pcw_links_many` and assess explicitly. Exact retries are idempotent; conflicting payloads need explicit revision-checked correction. Later consolidation does not require preserving source attribution or provenance metadata in resulting knowledge.
+`pcw_result_store` generates IDs, saves topic bodies and explicit links, and verifies their actual disk read-back in one call. Inspect the returned bodies, assess explicitly and reuse `split_sources` for the boundary helper. Exact retries are idempotent; conflicting payloads need explicit revision-checked correction. Lower-level save/read/link operations remain available. Later consolidation does not require preserving source attribution or provenance metadata in resulting knowledge.
 
-Only then does a cheap suitable semantic helper choose embedding boundaries within the saved topic materials. `pcw_prepare_many` supplies literal numbered text; the helper returns arrays without tools. `pcw_submit_boundaries_many` checks coverage and revisions and uses the existing provider/indexing path. Helper boundaries and technical receipts remain service state. Search still addresses whole topic files and their links; this is not a change to snippet-search architecture.
+Only then does a cheap suitable semantic helper choose embedding boundaries within the saved topic materials. Assignment preparation supplies literal numbered text from the saved revisions; `pcw_prepare_many` is needed only when current bodies/revisions are not available. The helper returns arrays without tools. `pcw_submit_boundaries_many` checks coverage and revisions and uses the existing provider/indexing path. Helper boundaries and technical receipts remain service state. Search still addresses whole topic files and their links; this is not a change to snippet-search architecture.
+
+## Operational returns and native identity
+
+`pcw_return_record` retains incomplete/error returns and completed operational evidence in control, without a knowledge material. Missing deliverables permit a continuation without false acceptance. A completed control return requires explicit assessment; an accepted clarification resolves earlier incomplete work. The primary saves only useful new knowledge, divided by topic and linked, and consolidates genuine duplication. Full artifact copies and unfinished task reminders are not mandatory memory.
+
+Startup returns outstanding work and reusable profiles, not completed assignment history. Explicit task_status retains the latter. Current writes verify disk read-back internally. Workers check required deliverables before returning and verify preservation against the actual pre-task artifact. Native notifications or bounded waits replace short polling loops.
+
+Executor identity comes from native launch/metadata evidence, never inherited shell variables. An explicit rebind corrects exact assignments and saved provenance with history and resumable failure state; known conflicts block finish. PCW records the primary's evidence, it does not authenticate host metadata. Direct prepared-message forwarding is a host capability. A text-only launcher cannot avoid transferring text; PCW must not become a launcher or invent unsupported reference parameters.
 
 ## Corrections and factual completion
 
@@ -35,3 +43,5 @@ The primary schedules intermediate/final factual checks for task complexity and 
 Verify block content/metadata/accounting, idempotency/conflicts, explicit read/assessment, correction of active knowledge, compact APIs, batch operations, helper boundaries, task recovery, check binding and checkpoint authority in temporary state. Check MCP schema/stdio separately. Bounded native runs can demonstrate handoff and return behavior; instruction compliance does not prove OS isolation.
 
 Existing search/provider mechanics and the [search assessment](docs/search-assessment.md) remain unchanged. Historical reports about worker memory writes or monolithic returns describe earlier designs. Existing user knowledge is not migrated or cleaned by this update. Release, installation and publication remain separate from local implementation work.
+
+Measure complete real tasks separately: elapsed time, native model response counts/tokens, tool counts/durations, approval/transport delays when observable, and verified factual outcomes. A shorter receipt, fewer protocol calls or passing fixture is not proof of lower autonomous native latency.

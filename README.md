@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.7.1 provides one explicit `$pcw` skill, readable Markdown knowledge, a compact Current, and local semantic search. The primary agent remains the user-facing decision maker. The primary alone reads and changes PCW memory, Current, links and authorized memory history. Native subagents investigate or change explicitly authorized real sources and return findings; the semantic helper returns only embedding boundaries inside topic materials already divided by the primary. The current prohibition on worker access to PCW is implemented in the assignment, not by a technical sandbox. PCW is an MCP memory interface: it does not run a Controller, dispatch agents, or intercept their completion.
+Version 0.7.2 provides one explicit `$pcw` skill, readable Markdown knowledge, a compact Current, and local semantic search. The primary agent remains the user-facing decision maker. The primary alone reads and changes PCW memory, Current, links and authorized memory history. Native subagents investigate or change explicitly authorized real sources and return findings; the semantic helper returns only embedding boundaries inside topic materials already divided by the primary. The current prohibition on worker access to PCW is implemented in the assignment, not by a technical sandbox. PCW is an MCP memory interface: it does not run a Controller, dispatch agents, or intercept their completion.
 
 ## Update the Codex plugin
 
@@ -13,9 +13,9 @@ codex plugin add persistent-context-workspace@persistent-context-workspace
 
 The first command refreshes the marketplace checkout; the second installs the plugin version from that checkout. Start a new Codex thread after installation to load the updated skill and MCP tools.
 
-See [0.7.1 release notes](CHANGELOG.md). Existing UUID-addressed knowledge requires an explicitly requested migration through `pcw_migrate_legacy_ids`; installing the plugin does not migrate it automatically.
+See [release notes](CHANGELOG.md). Existing UUID-addressed knowledge requires an explicitly requested migration through `pcw_migrate_legacy_ids`; installing the plugin does not migrate it automatically.
 
-The [0.7.1 verification report](docs/compact-memory-assessment.md) covers topic storage, compact operations, regression checks, the native-agent cycle and the measured response-size reduction.
+The [0.7.2 verification report](docs/return-cycle-assessment.md) distinguishes protocol checks from end-to-end native latency. The earlier [0.7.1 report](docs/compact-memory-assessment.md) remains historical evidence.
 
 ## Use PCW
 
@@ -37,7 +37,11 @@ The primary itself discovers current native model/reasoning capabilities and pub
 
 On a substantive work/check return, the primary immediately divides its text into large, independently meaningful topic materials. It preserves actual facts, conditions, implementation detail, tables, code and uncertainty, and links related materials. It does not mechanically split by heading or fixed size, and no additional giant unmodified return file is required.
 
-`pcw_save_result_blocks` saves these bodies together under the registered assignment and actual bound executor session. MCP generates each filename-ID and UTC save metadata. The primary reads every saved block with `pcw_read_many`, adds useful links with `pcw_links_many`, and explicitly assesses through `pcw_result_assess`. Every continuation has a fresh complete assignment and separate return accounting, even if it reuses the worker session.
+`pcw_result_store` saves those bodies and explicit links, verifies disk read-back and returns observed content and `split_sources` in one call. MCP generates each filename-ID and UTC save metadata. The primary inspects that response, assesses through `pcw_result_assess` and uses the returned revisions for the boundary helper. It does not repeat reads/links/preparation for unchanged state. Lower-level operations remain available for recovery.
+
+`pcw_return_record` stores incomplete/error responses and completed operational evidence in control, without knowledge files. Incomplete work permits a continuation but cannot be accepted as complete; accepted evidence must explicitly resolve it. New knowledge contains reusable topic facts, not missing-content reminders or duplicate full artifacts. Completed assignment history is omitted from startup and remains available through `pcw_task_status`. `pcw_current_set` verifies its own disk read-back.
+
+Bind executor identity from native launch/metadata evidence, never inherited shell variables. `pcw_assignment_rebind` repairs an evidenced mistaken binding and result metadata while preserving history; unresolved conflicts or interrupted repairs block completion. Evidence is recorded, not authenticated by the host. Prepared-message forwarding requires actual host support: text-only launchers still need the prepared text transferred. PCW does not add a dispatcher to bypass that limitation.
 
 Identical saves are idempotent; conflicting changes require explicit revision-checked correction. Known incorrect active knowledge must be updated or replaced. A linked clarification and a closed discrepancy record do not correct the old body. Uncorrected invalidated knowledge is excluded from active search and direct reads warn about it. See [Memory operations](plugins/persistent-context-workspace/skills/pcw/references/memory-operations.md).
 

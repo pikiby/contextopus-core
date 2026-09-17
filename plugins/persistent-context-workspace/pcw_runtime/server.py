@@ -5,7 +5,7 @@ import atexit
 import inspect
 from pathlib import Path
 import threading
-from typing import get_type_hints
+from typing import Literal, get_type_hints
 
 from mcp.server.fastmcp import FastMCP
 
@@ -50,6 +50,9 @@ def close_runtimes():
 atexit.register(close_runtimes)
 
 _DESCRIPTIONS = {
+    "return_record": "Primary records an incomplete/error return or completed operational evidence in control only. No knowledge file. Incomplete returns allow a continuation and block completion until resolved; completed evidence still requires primary assessment.",
+    "result_store": "Primary saves separate substantive topic blocks, adds explicit links and verifies disk read-back in one call. Link sets use 1-based block, to_blocks, to_materials. Returns observed bodies and split_sources; assess separately, then prepare a semantic helper without another read/prepare call.",
+    "assignment_rebind": "Primary corrects an evidenced mistaken executor binding for explicit assignments and their result metadata. Requires old identity, native launch/metadata evidence and reason; preserves history, blocks finish during partial repair. Does not launch or control workers.",
     "startup": "Read task, Current, memory counts and tools-map freshness in one compact response. Use task_status or map getters only when full recovery details are needed.",
     "rules_get": "Read workflow rules on demand at startup or context recovery. Read-only: never registers, assesses or completes work.",
     "assignment_prepare": "Validate and register a complete standalone assignment. Return only its ID and handoff. Optional check_id binds a planned check; split sources stay primary-only. Launch only when ready.",
@@ -146,7 +149,8 @@ def pcw_tools_map_get(work_root: str, workspace: str) -> dict:
 def pcw_tools_map_publish(work_root: str, workspace: str, expected_environment_revision: str,
                           profiles: list[ToolsMapProfile]) -> dict:
     """Publish primary-agent profiles only if their expected environment is still current."""
-    return workflow(work_root, workspace).tools_map_publish(expected_environment_revision, profiles)
+    result = workflow(work_root, workspace).tools_map_publish(expected_environment_revision, profiles)
+    return {key: value for key, value in result.items() if key != "tools_map"}
 
 
 def pcw_action_requirements(work_root: str, workspace: str, action: ActionName,
@@ -223,8 +227,15 @@ def pcw_service_error(work_root: str, workspace: str, assignment_id: str, execut
     return workflow(work_root, workspace).service_error(assignment_id, executor_session_id, error)
 
 
-def pcw_assignment_bind(work_root: str, workspace: str, assignment_id: str, executor_session_id: str) -> dict:
-    return workflow(work_root, workspace).assignment_bind(assignment_id, executor_session_id)
+def pcw_assignment_bind(work_root: str, workspace: str, assignment_id: str, executor_session_id: str,
+                        evidence: dict) -> dict:
+    return workflow(work_root, workspace).assignment_bind(assignment_id, executor_session_id, evidence)
+
+
+def pcw_return_record(work_root: str, workspace: str, assignment_id: str, executor_session_id: str,
+                      status: Literal["incomplete", "error", "complete"], content: str, reason: str,
+                      missing: list[str]) -> dict:
+    return workflow(work_root, workspace).return_record(assignment_id, executor_session_id, status, content, reason, missing)
 
 
 def pcw_assignment_cancel(work_root: str, workspace: str, assignment_id: str, reason: str) -> dict:
@@ -234,5 +245,5 @@ def pcw_assignment_cancel(work_root: str, workspace: str, assignment_id: str, re
 for _tool_name in ("pcw_environment_get", "pcw_environment_check", "pcw_tools_map_get",
                    "pcw_tools_map_publish", "pcw_startup", "pcw_rules_get", "pcw_assignment_prepare",
                    "pcw_result_assess", "pcw_transition", "pcw_finish", "pcw_task_begin", "pcw_task_status",
-                   "pcw_assignment_bind", "pcw_assignment_cancel", "pcw_task_update", "pcw_task_checks_set", "pcw_service_error"):
+                   "pcw_assignment_bind", "pcw_assignment_cancel", "pcw_task_update", "pcw_task_checks_set", "pcw_service_error", "pcw_return_record"):
     mcp.tool(name=_tool_name, description=_DESCRIPTIONS[_tool_name.removeprefix("pcw_")])(globals()[_tool_name])

@@ -598,6 +598,16 @@ class PCWRuntime:
             return {"status": "already_saved" if all(item["status"] == "already_saved" for item in saved) else "saved",
                     "assignment_id": assignment_id, "materials": saved, "complete": True}
 
+    def result_store(self, assignment_id: str, executor_session_id: str, blocks: list[str],
+                     links: list[dict] | None = None, expected_previous_revisions: list[str] | None = None):
+        from .result_operations import store_result
+        return store_result(self, assignment_id, executor_session_id, blocks, [] if links is None else links, expected_previous_revisions)
+
+    def assignment_rebind(self, assignment_ids: list[str], expected_executor_session_id: str,
+                          executor_session_id: str, evidence: dict, reason: str):
+        from .result_operations import rebind
+        return rebind(self, assignment_ids, expected_executor_session_id, executor_session_id, evidence, reason)
+
     def save_subagent_result(self, assignment_id: str, result: str, executor_session_id: str,
                              expected_previous_revision: str | None = None):
         """Persist one returned subagent result without changing its Markdown body."""
@@ -1036,6 +1046,8 @@ class PCWRuntime:
         with self._guard():
             ledger = TaskLedger(self)
             _, entry = ledger.entry(ledger.load(), assignment_id)
+            if entry.get("identity_conflict") or entry.get("identity_repair"):
+                raise PCWError("Resolve executor identity before submitting boundaries")
             if entry.get("return_id") is not None or entry["assignment"].get("purpose") != "semantic_split":
                 raise PCWError("This is not a semantic_split assignment")
             if not entry.get("launched_at") or entry.get("executor_session_id") != executor_session_id:
@@ -1074,6 +1086,8 @@ class PCWRuntime:
             ledger = TaskLedger(self)
             _, entry = ledger.entry(ledger.load(), assignment_id)
             sources = entry["assignment"].get("split_sources")
+            if entry.get("identity_conflict") or entry.get("identity_repair"):
+                raise PCWError("Resolve executor identity before submitting boundaries")
             if (entry["assignment"].get("purpose") != "semantic_split" or
                     entry.get("return_id") is not None or not sources):
                 raise PCWError("A semantic_split assignment with numbered split_sources is required")
@@ -1348,7 +1362,10 @@ class PCWRuntime:
                 if value is not None:
                     current[key] = value
             self._write(self.root / "current.md", self._render_current(current))
-            return current
+            observed = self.current_get()
+            if observed != current:
+                raise PCWError("Current read-back differs from the requested fields")
+            return observed
 
     def _git_paths(self, paths: list[str]):
         if not paths:

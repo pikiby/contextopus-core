@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.2
+
+- Add control-only incomplete/error and operational returns; continuations no longer require technical knowledge files or premature acceptance.
+- Add result_store: topic bodies, explicit links and verified disk read-back in one operation, with revisions ready for semantic boundary preparation.
+- Require native launch/metadata evidence at MCP binding; retain conflicts and support explicit resumable correction of assignments and result provenance.
+- Omit completed assignment history from startup, compact map publication receipts, verify Current writes internally and return current recovery operation names.
+- Require full requested deliverables in worker returns; document topic consolidation, native notification waits and the text-only launcher's transfer limitation.
+- Add whole-cycle trace measurement and regression coverage. See [verification and limitations](docs/return-cycle-assessment.md).
+
+Upgrade the marketplace, reinstall and start a new thread. `pcw_assignment_bind` now requires `evidence` with source, reference and matching executor_session_id. Existing knowledge and history are not migrated or cleaned on upgrade. The published 0.7.1 release remains unchanged.
+
 ## 0.7.1
 
 - Save primary-selected coherent topic blocks as distinct generated-ID materials before within-file embedding segmentation; no duplicate full-return file.

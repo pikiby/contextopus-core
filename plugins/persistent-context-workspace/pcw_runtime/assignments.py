@@ -154,6 +154,8 @@ class TaskLedger:
         prior = None
         if continuation_of:
             _, prior = self.entry(data, continuation_of)
+            if prior.get("identity_conflict") or prior.get("identity_repair") or prior.get("result_store_pending"):
+                raise ValueError("Resolve the previous identity/storage failure before preparing a continuation")
             if not prior.get("executor_session_id") or not prior.get("processed_at"):
                 raise ValueError("Read and process the previous executor return before a continuation")
         key = digest([assignment, environment_revision, continuation_of] + ([check_id] if check_id is not None else []))
@@ -168,7 +170,7 @@ class TaskLedger:
         entry = {"id": ident, "key": key, "assignment": assignment,
                  "environment_revision": environment_revision, "prepared_at": now(),
                  "return_id": None if assignment.get("purpose") == "semantic_split" else self.runtime._allocate_material_id(),
-                 "executor_session_id": prior["executor_session_id"] if prior else None,
+                 "executor_session_id": None,
                  "continuation_of": continuation_of, "status": "prepared"}
         if check_id is not None:
             entry["check_id"] = check_id
@@ -191,23 +193,50 @@ class TaskLedger:
             "through filesystem tools, shell, scripts or other tools. Do not manage shared memory "
             "or Current. Return your findings to the primary; do not save a memory report yourself. "
             "Only explicitly listed source objects and actions are authorized.\n\n")
+        if entry["assignment"].get("purpose") != "semantic_split":
+            prohibition += ("Before returning, compare your response with every requested deliverable. "
+                            "Include requested full content and concrete checks immediately. "
+                            "If something is missing, state the missing item; do not claim completion. "
+                            "Do not obtain executor identity from shell environment variables.\n\n")
         return {"assignment_id": entry["id"], "return_id": entry["return_id"],
                 "assignment": entry["assignment"], "assignment_revision": digest(entry["assignment"]),
                 "executor_session_id": entry["executor_session_id"],
                 "context_policy": "isolated_assignment_only",
                 "launch_message": prohibition + json.dumps(packet, ensure_ascii=False, sort_keys=True, indent=2)}
 
-    def bind(self, assignment_id: str, executor_session_id: str):
+    @staticmethod
+    def identity_evidence(executor_session_id, evidence):
+        if (not isinstance(evidence, dict) or set(evidence) != {"source", "reference", "executor_session_id"}
+                or evidence.get("source") not in {"native_launch", "native_metadata"}
+                or evidence.get("executor_session_id") != executor_session_id
+                or not isinstance(evidence.get("reference"), str) or not evidence["reference"].strip()):
+            raise ValueError("Identity evidence needs source=native_launch/native_metadata, reference and matching executor_session_id; shell environment is not executor evidence")
+        return dict(evidence)
+
+    def bind(self, assignment_id: str, executor_session_id: str, evidence=None):
         if not isinstance(executor_session_id, str) or not executor_session_id.strip():
             raise ValueError("Actual executor_session_id is required")
         with self.control.guard():
+            if evidence is not None:
+                evidence = self.identity_evidence(executor_session_id, evidence)
             data = self.load()
-            _, entry = self.entry(data, assignment_id)
+            task, entry = self.entry(data, assignment_id)
             if entry["status"] == "cancelled":
                 raise ValueError("Assignment was cancelled")
+            # Older ledgers copied the parent's worker ID into an unlaunched
+            # continuation. That is a suggestion, not delivery to an executor.
+            if entry.get("continuation_of") and not entry.get("launched_at"):
+                entry["executor_session_id"] = None
             if entry.get("executor_session_id") not in (None, executor_session_id):
+                entry["identity_conflict"] = {"observed_executor": executor_session_id, "observed_at": now(), "evidence": evidence}
+                task["status"] = "active"
+                self.store(data)
                 raise ValueError("Assignment belongs to another executor session")
+            if entry.get("identity_conflict") or entry.get("identity_repair"):
+                raise ValueError("Resolve the recorded identity conflict with pcw_assignment_rebind")
             entry["executor_session_id"] = executor_session_id
+            if evidence is not None:
+                entry["identity_evidence"] = evidence
             entry.setdefault("launched_at", now())
             entry["delivered_revision"] = digest(entry["assignment"])
             entry.setdefault("delivered_at", now())
@@ -229,6 +258,13 @@ class TaskLedger:
             self.store(data)
             return {"status": "cancelled", "assignment_id": assignment_id}
 
+    def identity_mismatch(self, assignment_id, executor_session_id):
+        data = self.load()
+        task, entry = self.entry(data, assignment_id)
+        entry["identity_conflict"] = {"observed_executor": executor_session_id, "observed_at": now()}
+        task["status"] = "active"
+        self.store(data)
+
     def delivery_blocker(self, assignment_id, reason):
         data = self.load()
         _, entry = self.entry(data, assignment_id)
@@ -240,6 +276,10 @@ class TaskLedger:
     def result_target(self, assignment_id, executor_session_id):
         data = self.load()
         _, entry = self.entry(data, assignment_id)
+        if entry.get("identity_conflict") or entry.get("identity_repair"):
+            raise ValueError("Resolve executor identity before saving a return")
+        if entry.get("control_return"):
+            raise ValueError("This return is stored in control; use a continuation for substantive knowledge")
         if entry.get("executor_session_id") != executor_session_id or not entry.get("launched_at"):
             raise ValueError("Bind the actual executor to this assignment before saving its return")
         if entry.get("delivered_revision") != digest(entry["assignment"]):
@@ -251,6 +291,8 @@ class TaskLedger:
     @staticmethod
     def result_records(entry):
         """Uniform saved-return receipts, including persisted pre-batch ledgers."""
+        if entry.get("control_return"):
+            return []
         if "result_blocks" in entry:
             return entry["result_blocks"]
         if entry.get("return_id") is None:
@@ -428,7 +470,14 @@ class TaskLedger:
         task, entry = self.entry(data, assignment_id)
         if task["status"] == "complete":
             raise ValueError("A completed task cannot accept new assessments")
-        if not entry.get("saved_revision") or entry.get("read_revision") != entry["saved_revision"]:
+        control = entry.get("control_return")
+        if entry.get("result_store_pending"):
+            raise ValueError("Complete result_store links and verified disk read-back before assessment")
+        if entry.get("identity_conflict") or entry.get("identity_repair"):
+            raise ValueError("Resolve executor identity before assessment")
+        if control and control["status"] != "complete":
+            raise ValueError("An incomplete/error return cannot be accepted; obtain a continuation")
+        if not control and (not entry.get("saved_revision") or entry.get("read_revision") != entry["saved_revision"]):
             raise ValueError("Save and read every actual return block before processing this assignment")
         if entry.get("return_conflict"):
             raise ValueError("Resolve the conflicting actual return before accepting a different saved body")
@@ -465,7 +514,7 @@ class TaskLedger:
         affected = None
         if assessment["status"] == "needs_attention":
             affected_ids = assessment.get("affected_material_ids", [r["material_id"] for r in self.result_records(entry)])
-            if (not isinstance(affected_ids, list) or not affected_ids or any(not isinstance(i, str) for i in affected_ids)
+            if (not isinstance(affected_ids, list) or (not affected_ids and not control) or any(not isinstance(i, str) for i in affected_ids)
                     or len(set(affected_ids)) != len(affected_ids)):
                 raise ValueError("affected_material_ids must list unique existing knowledge materials")
             affected = {}
@@ -486,6 +535,39 @@ class TaskLedger:
             task["assignments"][ident]["resolved_by"] = assignment_id
             task["assignments"][ident]["resolution_evidence"] = resolution_evidence[ident]
         self.store(data)
+
+    def record_return(self, assignment_id, executor_session_id, status, content, reason, missing):
+        """Retain operational evidence without creating a searchable knowledge file."""
+        if status not in {"incomplete", "error", "complete"}:
+            raise ValueError("status must be incomplete, error or complete")
+        if any(not isinstance(value, str) or not value.strip() for value in (content, reason)):
+            raise ValueError("Supply the actual return and why it belongs in control")
+        if (not isinstance(missing, list) or any(not isinstance(v, str) or not v.strip() for v in missing)
+                or (status != "complete" and not missing) or (status == "complete" and missing)):
+            raise ValueError("List outstanding requirements for incomplete/error returns; complete returns have no missing items")
+        with self.control.guard():
+            data = self.load()
+            task, entry = self.entry(data, assignment_id)
+            if (task["status"] == "complete" or not entry.get("launched_at")
+                    or entry.get("executor_session_id") != executor_session_id
+                    or entry.get("return_id") is None or entry.get("saved_revision") or entry.get("result_blocks")):
+                raise ValueError("Control return requires a bound work/check assignment without saved knowledge")
+            if entry.get("identity_conflict") or entry.get("identity_repair"):
+                raise ValueError("Resolve executor identity before recording a return")
+            value = dict(status=status, content=content, reason=reason, missing=missing)
+            previous = entry.get("control_return")
+            if previous is not None and previous != value:
+                raise ValueError("Control return is immutable; prepare a continuation")
+            entry["control_return"] = value
+            entry.setdefault("returned_at", now())
+            if status != "complete":
+                entry.update(processed_at=entry["returned_at"], status="needs_attention",
+                             needs_attention_since=entry["returned_at"], discrepancy_reason=reason)
+            elif not entry.get("processed_at"):
+                entry["status"] = "returned"
+            self.store(data)
+            return {"assignment_id": assignment_id, "status": status, "result_storage": "control", "missing": missing,
+                    "next_action": "result_assess" if status == "complete" else "assignment_prepare"}
 
     def note_service(self, assignment_id, result, observed):
         data = self.load()
@@ -526,12 +608,25 @@ class TaskLedger:
             add("checks_due", "A previously declared factual check is still due.", "declare_checks")
         for check in task.get("checks_plan", []):
             entry = task["assignments"].get(check.get("assignment_id"), {})
+            if entry.get("resolved_by"):
+                entry = task["assignments"].get(entry["resolved_by"], entry)
             if not entry.get("processed_at") or entry.get("assessment", {}).get("status") != "accepted":
                 add("checks_plan." + check["id"], "Planned factual check needs an accepted observed result.", "assign_factual_check")
         for ident, entry in task["assignments"].items():
             if entry["status"] == "cancelled":
                 continue
             field = "assignments." + ident
+            if entry.get("result_store_pending"):
+                add(field + ".storage", "Result bodies, links and verified read-back are not complete.", "result_store")
+            if entry.get("identity_conflict") or entry.get("identity_repair"):
+                add(field + ".identity", "Executor identity conflict remains unresolved.", "assignment_rebind")
+            if entry.get("control_return"):
+                if not entry.get("resolved_by") and entry.get("assessment", {}).get("status") != "accepted":
+                    add(field, "Control return needs acceptance or an accepted resolving continuation.",
+                        "assignment_prepare" if entry["control_return"]["status"] != "complete" else "result_assess")
+                if entry.get("needs_attention_since") and not entry.get("resolved_by"):
+                    add(field, "Operational return remains incomplete or disputed.", "assignment_prepare")
+                continue
             if entry.get("return_id") is None:
                 if not entry.get("processed_at"):
                     add(field, "Semantic boundaries have not been successfully applied by the primary.", "submit_boundaries")
