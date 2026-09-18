@@ -1,6 +1,7 @@
-"""Opt-in integration through Codex itself; no model turns or manual root env.
+"""Opt-in integration through Codex itself, including one real model turn.
 
 PCW_TEST_CODEX=1 requires a locally installed matching PCW candidate.
+It also runs a normal question through the configured model (inference costs apply).
 PCW_TEST_QWEN=1 additionally exercises the already provisioned local model.
 Only temporary knowledge is changed. No plugin/config installation is done here.
 
@@ -23,6 +24,7 @@ import threading
 import time
 import tomllib
 import unittest
+import uuid
 
 
 PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "persistent-context-workspace"
@@ -294,6 +296,82 @@ class CodexHostTests(unittest.TestCase):
         self.assertEqual(1, len(matching), skills)
         self.assertTrue(matching[0]["enabled"])
         self.assertTrue(matching[0]["path"].endswith("/skills/pcw/SKILL.md"))
+
+    def test_agent_saves_discovered_fact_before_answering(self):
+        # Seed only a source pointer. Neither the prompt nor initial knowledge
+        # contains the answer, and the harness never saves the answer for the model.
+        fact = "PCW-" + uuid.uuid4().hex
+        source = Path(self.work) / "project-info.md"
+        source.write_text("# Проект\n\nКод поставки: " + fact + "\n", encoding="utf-8")
+        seed = self.tool("create", content=(
+            "# Код поставки проекта\n\nКод поставки указан в project-info.md. "
+            "Значение ещё не проверено.\n"
+        ))
+        self.assertEqual("indexed", seed["index_status"], seed)
+        knowledge = Path(self.work) / ".pcw" / self._testMethodName / "knowledge"
+        initial = list(knowledge.glob("*.md"))
+        self.assertTrue(initial, "The fixture must contain searchable initial knowledge")
+        self.assertTrue(all(fact not in path.read_text(encoding="utf-8") for path in initial))
+
+        thread = self.host.call("thread/start", {
+            "cwd": self.work, "ephemeral": True, "approvalPolicy": "on-request",
+            "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
+        })
+        thread_id = thread["thread"]["id"]
+        turn = self.host.call("turn/start", {
+            "threadId": thread_id,
+            "input": [
+                {"type": "text", "text": (
+                    "$persistent-context-workspace:pcw Какой код поставки у проекта? "
+                    f"Рабочая папка: {self.work}. Workspace: {self._testMethodName}. "
+                    "Исходные файлы проекта не изменяй."
+                )},
+                {"type": "skill", "name": "persistent-context-workspace:pcw",
+                 "path": str(self.installed_root / "skills" / "pcw" / "SKILL.md")},
+            ],
+        })
+        turn_id = turn["turn"]["id"]
+        try:
+            completed = self.host.wait_notification(
+                lambda event: event.get("method") == "turn/completed"
+                and event.get("params", {}).get("threadId") == thread_id
+                and event["params"].get("turn", {}).get("id") == turn_id,
+                timeout=300,
+            )
+        except TimeoutError:
+            self.host.call("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
+            raise
+        self.assertEqual("completed", completed["params"]["turn"]["status"], completed)
+        items = [
+            event["params"]["item"] for event in self.host.notification_snapshot()
+            if event.get("method") == "item/completed"
+            and event.get("params", {}).get("threadId") == thread_id
+            and event["params"].get("turnId") == turn_id
+        ]
+        answers = [(index, item) for index, item in enumerate(items) if item.get("type") == "agentMessage"]
+        self.assertTrue(answers, "The model did not return an answer")
+        answer_index, answer = answers[-1]
+        self.assertIn(fact, answer["text"], "The answer must contain the fact read from the source")
+        calls = [
+            (index, item) for index, item in enumerate(items)
+            if item.get("type") == "mcpToolCall" and item.get("server") == "pcw"
+            and item.get("arguments", {}).get("workspace") == self._testMethodName
+            and item["arguments"].get("work_root") == self.work
+        ]
+        writes = [
+            (index, item) for index, item in calls
+            if item.get("tool") in {"pcw_create", "pcw_update"}
+            and item.get("status") == "completed" and not item.get("error")
+            and not (item.get("result") or {}).get("isError")
+            and fact in item["arguments"].get("content", "")
+        ]
+        self.assertTrue(writes, "The agent answered without saving the discovered fact through PCW; calls: "
+                        + repr([{key: item.get(key) for key in ("tool", "status", "error", "result")}
+                                for _, item in calls]))
+        self.assertTrue(any(index < answer_index for index, _ in writes),
+                        "The fact must be saved before the final answer")
+        self.assertTrue(any(fact in path.read_text(encoding="utf-8") for path in knowledge.glob("*.md")),
+                        "The discovered fact is absent from knowledge after the agent's answer")
 
 
     @unittest.skipUnless(os.environ.get("PCW_TEST_QWEN") == "1", "Set PCW_TEST_QWEN=1 after provisioning local Qwen")

@@ -17,6 +17,8 @@ Before external investigation, search accumulated knowledge with `pcw_search`, r
 
 Perform the authorized work and verify its actual result. As useful findings emerge, save them using `pcw_create` or `pcw_update`; do not postpone all memory updates until the end of a long task. Supply ordinary complete Markdown for each independently useful topic. Keep facts, conditions, sources, uncertainty, tables and code. Do not create a giant multi-topic report merely because findings arrived together, or save operational receipts and duplicate external artifacts as knowledge.
 
+Before the final answer, submit the task conclusion to PCW through `pcw_create` or `pcw_update`. This step is required even when there are no new facts. Update the existing material for an existing topic; do not create a duplicate. An unchanged body is not reembedded.
+
 The plugin generates filename-IDs, verifies disk writes, automatically splits token windows with overlap, embeds them and updates LanceDB. **Do not prepare fragment arrays, boundary positions, or a splitting subagent.** A successful receipt contains the saved revision and actual indexing status, not a repeated full document. Read again for meaning or uncertain results, not routinely after a verified write.
 
 Use exact-ID links for useful navigation. Correct known incorrect text, consolidate genuine duplication, and preserve useful conditions and differences. A linked correction does not fix an incorrect active body. See [Memory operations](references/memory-operations.md).

@@ -1,6 +1,6 @@
 # PCW implementation
 
-Version 0.8.1 implements the memory-only cycle in [the governing document](docs/context-workspace-design.md).
+Version 0.8.2 implements the memory-only cycle in [the governing document](docs/context-workspace-design.md).
 
 - Primary-owned knowledge, Current and exact navigation links.
 - Direct work with optional delegation, without environment discovery or an assignment controller.

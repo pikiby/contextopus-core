@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Primary-owned project memory with automatic token-window embedding and local search",
   "author": {
     "name": "pikiby",

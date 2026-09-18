@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2 — 2026-09-17
+
+- Require the primary to submit the task conclusion to PCW before the final answer, including when there are no new facts. Update an existing topic without creating a duplicate; unchanged text remains a no-op for embeddings.
+- Align the governing document, installed skill, README and MCP instructions with this requirement.
+- Add a real model-turn regression to the opt-in Codex host tests: the agent must discover a new fact and save it through PCW before answering; the harness does not save the answer for it.
+
 ## 0.8.1 — 2026-09-17
 
 - Remove the exception that allowed conversation context to replace searching PCW and reading selected knowledge materials.
