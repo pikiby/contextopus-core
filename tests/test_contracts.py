@@ -238,34 +238,58 @@ class LauncherTests(unittest.TestCase):
                         self.assertTrue({"work_root", "workspace"} <= set(schema["required"]))
                     self.assertEqual([], list(Path(directory).iterdir()))
                     schemas = {tool["name"]: tool["inputSchema"] for tool in tools}
-                    self.assertNotIn("path", schemas["pcw_create"]["properties"])
+                    for removed in ("pcw_create", "pcw_update", "pcw_delete", "pcw_links", "pcw_merge", "pcw_restore"):
+                        self.assertNotIn(removed, schemas)
+                    self.assertIn("expected_revision", schemas["pcw_proposal_apply"]["required"])
+                    for name, schema in schemas.items():
+                        if name != "pcw_startup":
+                            self.assertIn("cycle_id", schema["required"])
                     self.assertNotIn("pcw_environment_check", schemas)
                     self.assertNotIn("pcw_assignment_prepare", schemas)
                     self.assertNotIn("pcw_submit_parts", schemas)
                     self.assertIn("chunking", schemas["pcw_switch_embeddings"]["properties"])
                     request_id = 2
+                    cycle_id = None
 
                     def call(name, **arguments):
                         nonlocal request_id
                         request_id += 1
                         send({"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {
-                            "name": "pcw_" + name, "arguments": {"work_root": directory, "workspace": "protocol", **arguments}}})
+                            "name": "pcw_" + name, "arguments": {"work_root": directory, "workspace": "protocol",
+                            **({"cycle_id": cycle_id} if cycle_id and name != "startup" else {}), **arguments}}})
                         response = receive(request_id)
                         self.assertFalse(response.get("isError"), response)
                         return json.loads(response["content"][0]["text"])
 
-                    self.assertEqual(0, call("startup")["materials"])
-                    item = call("create", content="Protocol fixture content")
+                    opened = call("startup", request_id="protocol-invocation")
+                    cycle_id = opened["cycle_id"]
+                    self.assertEqual(0, opened["materials"])
+                    pending = call("tmp_write", content="Protocol fixture content")
+                    self.assertEqual(0, call("status")["materials"])
+                    proposal = call("proposal_prepare", changes=[{"key": "fixture", "content": "Protocol fixture content"}])
+                    review = call("proposal_read", proposal_id=proposal["proposal_id"])
+                    self.assertIn("Protocol fixture content", review["review"])
+                    applied = call("proposal_apply", proposal_id=proposal["proposal_id"],
+                                   expected_revision=proposal["revision"], confirmation="Apply the displayed fixture")
+                    item = applied["materials"][0]
                     self.assertRegex(item["id"], r"^[a-f0-9]{32}\.md$")
                     self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
-                    other = call("create", content="Related fact", links=[item["id"]])
+                    second = call("proposal_prepare", changes=[{"key": "related", "content": "Related fact", "links": [item["id"]]}])
+                    other = call("proposal_apply", proposal_id=second["proposal_id"], expected_revision=second["revision"],
+                                 confirmation="Apply the displayed related fact")["materials"][0]
                     self.assertEqual([item["id"]], call("read", material_id=other["id"])["links"])
                     current = call("current_set", goal="Protocol memory", constraints="Temporary files", completion="Saved", step="Done", blocker="")
-                    self.assertEqual(current, call("current_get"))
+                    self.assertEqual("saved", current["status"])
+                    self.assertEqual("Protocol memory", call("current_get")["goal"])
+                    self.assertEqual("Protocol fixture content", call("tmp_read", material_id=pending["id"])["content"])
                     shutil.rmtree(Path(directory) / ".pcw/protocol/.pcw-runtime")
                     self.assertEqual("recovery_required", call("status")["status"])
                     self.assertEqual("recovered", call("recover_workspace")["status"])
                     self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
+                    # Embeddings may be pending in this strictly offline protocol test.
+                    closed = call("finish", confirmation="Cancel this test cycle and delete all tmp", cancel=True)
+                    self.assertEqual("cancelled", closed["status"])
+                    self.assertFalse((Path(directory) / ".pcw/protocol/tmp" / cycle_id).exists())
                 finally:
                     if process.stdin:
                         process.stdin.close()

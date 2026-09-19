@@ -1,15 +1,15 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "persistent-context-workspace",
-  "version": "0.8.2",
-  "description": "Primary-owned project memory with automatic token-window embedding and local search",
+  "version": "0.9.0",
+  "description": "Explicit project-memory cycles with temporary context and human-approved knowledge",
   "extensions": {
     "com.openai": {
       "skills": "./skills/",
       "interface": {
         "displayName": "Persistent Context Workspace",
         "shortDescription": "Persistent external context for long-running work.",
-        "longDescription": "Use one PCW skill to retrieve linked knowledge first, retain new facts and automatically index ordinary Markdown materials.",
+        "longDescription": "Read approved project knowledge first, retain work in temporary context and review permanent changes before applying them. Clear temporary context at cycle start and finish.",
         "developerName": "pikiby",
         "category": "Productivity",
         "capabilities": [

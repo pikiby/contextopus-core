@@ -1,12 +1,13 @@
 # PCW implementation
 
-Version 0.8.2 implements the memory-only cycle in [the governing document](docs/context-workspace-design.md).
+Version 0.9.0 implements [explicit cycles and approved knowledge](docs/context-workspace-design-v2.md).
 
-- Primary-owned knowledge, Current and exact navigation links.
-- Direct work with optional delegation, without environment discovery or an assignment controller.
-- Whole-text saves, automatic token windows with overlap and Qwen embeddings by default.
-- Configurable local/API embedding sources with compatible tokenizers.
-- Revision-checked indexing, pending retry, atomic profile switching and legacy index recovery.
-- Preserved compaction, path safety and explicitly authorized memory Git operations.
+- Start with explicit invocation, initial tmp cleanup, and permanent context search/read.
+- Keep work results and Current in cycle-local tmp; support a designated clean-context cycle agent.
+- Prepare exact reviewed knowledge changes, including consolidation and incoming link effects.
+- Apply only the approved revision; intermediate writes preserve tmp.
+- Close with full tmp cleanup, including no-change/rejected-update cycles; keep other cycles intact.
+- Preserve automatic token windows, replaceable embedding providers, filename IDs and knowledge-only checkpoints.
+- Keep approval provenance procedural and separate deterministic tool guarantees from real model behavior.
 
-Verification and limitations are recorded in `docs/context-memory-assessment.md`. Historical release assessments remain evidence for their stated versions, not proof of current behavior.
+The current test suite contains cycle regressions and an opt-in agent test. See [verification and limits](docs/explicit-cycle-assessment.md). Historical release assessments prove only their stated versions. This source change is not evidence of a published release or an updated installed host.

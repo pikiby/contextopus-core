@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0 — 2026-09-18
+
+- Replace immediate permanent writes with explicit cycles, temporary results and revision-bound proposals approved by the human.
+- Clear cycle tmp at startup and explicit closure; intermediate knowledge writes preserve work in progress.
+- Separate preparation, readable review, application and rejection; include incoming link changes and support create/update/move/delete/merge/split in one reviewed set.
+- Support restart-safe application, pending indexing, parallel cycle isolation and a clean-context agent performing the complete cycle.
+- Remove direct mutation MCP entrypoints and the mandatory permanent-write-before-every-answer rule. Preserve token-window embeddings, exact topic IDs and independently authorized memory checkpoints.
+
+
 ## 0.8.2 — 2026-09-17
 
 - Require the primary to submit the task conclusion to PCW before the final answer, including when there are no new facts. Update an existing topic without creating a duplicate; unchanged text remains a no-op for embeddings.

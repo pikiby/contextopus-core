@@ -1,7 +1,7 @@
-"""Opt-in integration through Codex itself, including one real model turn.
+"""Opt-in integration through Codex itself, including a two-turn human-approval scenario.
 
 PCW_TEST_CODEX=1 requires a locally installed matching PCW candidate.
-It also runs a normal question through the configured model (inference costs apply).
+It also runs a normal question and a separate approval through the configured model (inference costs apply).
 PCW_TEST_QWEN=1 additionally exercises the already provisioned local model.
 Only temporary knowledge is changed. No plugin/config installation is done here.
 
@@ -214,7 +214,13 @@ class CodexHostTests(unittest.TestCase):
         })
         cls.thread_id = thread["thread"]["id"]
 
+    def setUp(self):
+        opened = self.tool("startup", request_id="fixture-" + uuid.uuid4().hex)
+        self.cycle_id = opened["cycle_id"]
+
     def tool(self, name, **arguments):
+        if name != "startup" and hasattr(self, "cycle_id"):
+            arguments.setdefault("cycle_id", self.cycle_id)
         result = self.host.call("mcpServer/tool/call", {
             "threadId": self.thread_id, "server": "pcw", "tool": "pcw_" + name,
             "arguments": {"work_root": self.work, "workspace": self._testMethodName, **arguments},
@@ -223,6 +229,16 @@ class CodexHostTests(unittest.TestCase):
         if result.get("structuredContent") is not None:
             return result["structuredContent"]
         return json.loads(next(part["text"] for part in result["content"] if part["type"] == "text"))
+
+    def save_fixture(self, content, material_id=None, expected_revision=None, links=None):
+        change = {"material_id": material_id, "expected_revision": expected_revision} if material_id else {"key": "fixture"}
+        change["content"] = content
+        if links is not None:
+            change["links"] = links
+        proposal = self.tool("proposal_prepare", changes=[change])
+        result = self.tool("proposal_apply", proposal_id=proposal["proposal_id"],
+                           expected_revision=proposal["revision"], confirmation="Apply this test fixture")
+        return result["materials"][0]
 
     @classmethod
     def _candidate_files(cls):
@@ -278,9 +294,9 @@ class CodexHostTests(unittest.TestCase):
         # returned descriptors. Both are host inventory, not a static proxy.
         actual_tools = {tool if isinstance(tool, str) else tool["name"] for tool in server["tools"]}
         self.assertEqual(self._declared_tool_names(), actual_tools, server)
-        item = self.tool("create", content="Запись через настоящий Codex.")
+        item = self.save_fixture(content="Запись через настоящий Codex.")
         self.assertEqual("Запись через настоящий Codex.", self.tool("read", material_id=item["id"])["content"])
-        changed = self.tool("update", material_id=item["id"], content="Обновлено через Codex.", expected_revision=item["revision"])
+        changed = self.save_fixture(material_id=item["id"], content="Обновлено через Codex.", expected_revision=item["revision"])
         self.assertEqual("Обновлено через Codex.", self.tool("read", material_id=changed["id"])["content"])
         self.tool("current_set", goal="Проверить запуск PCW", constraints="Временные данные",
                   completion="Инструменты работают через Codex", step="Готово", blocker="")
@@ -297,13 +313,13 @@ class CodexHostTests(unittest.TestCase):
         self.assertTrue(matching[0]["enabled"])
         self.assertTrue(matching[0]["path"].endswith("/skills/pcw/SKILL.md"))
 
-    def test_agent_saves_discovered_fact_before_answering(self):
+    def test_agent_retains_tmp_and_waits_for_human_approval(self):
         # Seed only a source pointer. Neither the prompt nor initial knowledge
         # contains the answer, and the harness never saves the answer for the model.
         fact = "PCW-" + uuid.uuid4().hex
         source = Path(self.work) / "project-info.md"
         source.write_text("# Проект\n\nКод поставки: " + fact + "\n", encoding="utf-8")
-        seed = self.tool("create", content=(
+        seed = self.save_fixture(content=(
             "# Код поставки проекта\n\nКод поставки указан в project-info.md. "
             "Значение ещё не проверено.\n"
         ))
@@ -358,20 +374,54 @@ class CodexHostTests(unittest.TestCase):
             and item.get("arguments", {}).get("workspace") == self._testMethodName
             and item["arguments"].get("work_root") == self.work
         ]
-        writes = [
-            (index, item) for index, item in calls
-            if item.get("tool") in {"pcw_create", "pcw_update"}
-            and item.get("status") == "completed" and not item.get("error")
-            and not (item.get("result") or {}).get("isError")
-            and fact in item["arguments"].get("content", "")
-        ]
-        self.assertTrue(writes, "The agent answered without saving the discovered fact through PCW; calls: "
-                        + repr([{key: item.get(key) for key in ("tool", "status", "error", "result")}
-                                for _, item in calls]))
-        self.assertTrue(any(index < answer_index for index, _ in writes),
-                        "The fact must be saved before the final answer")
-        self.assertTrue(any(fact in path.read_text(encoding="utf-8") for path in knowledge.glob("*.md")),
-                        "The discovered fact is absent from knowledge after the agent's answer")
+        successful = [(index, item) for index, item in calls
+                      if item.get("status") == "completed" and not item.get("error")
+                      and not (item.get("result") or {}).get("isError")]
+        names = [item.get("tool") for _, item in successful]
+        self.assertIn("pcw_startup", names)
+        self.assertIn("pcw_search", names)
+        self.assertTrue({"pcw_read", "pcw_read_many"} & set(names))
+        self.assertLess(names.index("pcw_search"), min(names.index(name) for name in
+                        ("pcw_read", "pcw_read_many") if name in names))
+        writes = [(index, item) for index, item in successful if item.get("tool") == "pcw_tmp_write"
+                  and fact in item["arguments"].get("content", "")]
+        self.assertTrue(writes, "The agent did not retain the discovered result in temporary context")
+        self.assertTrue(any(index < answer_index for index, _ in writes))
+        self.assertIn("pcw_proposal_prepare", names)
+        self.assertNotIn("pcw_proposal_apply", names, "Knowledge changed before human approval")
+        self.assertNotIn("pcw_finish", names, "Cycle closed while waiting for the user")
+        self.assertTrue(all(fact not in path.read_text() for path in knowledge.glob("*.md")))
+        active_cycle = writes[-1][1]["arguments"]["cycle_id"]
+        temporary = knowledge.parent / "tmp" / active_cycle
+        self.assertTrue(any(fact in path.read_text() for path in (temporary / "materials").glob("*.md")))
+        before_approval = len(self.host.notification_snapshot())
+        approval = self.host.call("turn/start", {
+            "threadId": thread_id,
+            "input": [{"type": "text", "text": "Подтверждаю показанные изменения постоянной памяти. Примени их и заверши цикл с удалением tmp."}],
+        })
+        approval_id = approval["turn"]["id"]
+        try:
+            completed = self.host.wait_notification(
+                lambda event: event.get("method") == "turn/completed"
+                and event.get("params", {}).get("threadId") == thread_id
+                and event["params"].get("turn", {}).get("id") == approval_id,
+                timeout=300)
+        except TimeoutError:
+            self.host.call("turn/interrupt", {"threadId": thread_id, "turnId": approval_id})
+            raise
+        self.assertEqual("completed", completed["params"]["turn"]["status"])
+        later_calls = [event["params"]["item"] for event in self.host.notification_snapshot()[before_approval:]
+                       if event.get("method") == "item/completed"
+                       and event.get("params", {}).get("threadId") == thread_id
+                       and event["params"].get("turnId") == approval_id
+                       and event["params"].get("item", {}).get("type") == "mcpToolCall"]
+        applied = [item for item in later_calls if item.get("tool") == "pcw_proposal_apply"
+                   and item.get("status") == "completed" and not item.get("error")
+                   and not (item.get("result") or {}).get("isError")]
+        self.assertTrue(applied, "The agent failed to apply after explicit approval")
+        self.assertTrue(any(fact in path.read_text() for path in knowledge.glob("*.md")))
+        self.assertFalse(temporary.exists(), "The explicitly closed cycle left tmp behind")
+
 
 
     @unittest.skipUnless(os.environ.get("PCW_TEST_QWEN") == "1", "Set PCW_TEST_QWEN=1 after provisioning local Qwen")
@@ -379,12 +429,13 @@ class CodexHostTests(unittest.TestCase):
         status = self.tool("status")
         self.assertEqual("Qwen/Qwen3-Embedding-0.6B", status["active"]["config"]["profile"]["model"])
         text = "Резервные копии PostgreSQL сохраняются ежедневно в три часа ночи."
-        item = self.tool("create", content=text)
+        item = self.save_fixture(content=text)
         self.assertEqual("indexed", item["index_status"], item)
         found = self.tool("search", query="Когда делают резервные копии PostgreSQL?")
         self.assertEqual(item["id"], found["results"][0]["id"], found)
-        other = self.tool("create", content="Порядок восстановления данных.")
-        self.tool("links", source_id=other["id"], add=[item["id"]])
+        other = self.save_fixture(content="Порядок восстановления данных.")
+        self.save_fixture(content="Порядок восстановления данных.", material_id=other["id"],
+                          expected_revision=other["revision"], links=[item["id"]])
         self.assertIn(item["id"], self.tool("read", material_id=other["id"])["links"])
 
 

@@ -1,49 +1,52 @@
 # Persistent Context Workspace
 
-Version 0.8.2 is the primary agent's working memory: ordinary Markdown topic materials, exact links, compact Current and automatic token-window embeddings in LanceDB. The primary uses saved context first, performs work directly or delegates optionally, and retains useful new facts during work.
+Version 0.9.0 provides project knowledge through explicit cycles: permanent Markdown topics, temporary working context, human-reviewed changes and automatic token-window embeddings in LanceDB. It works over standard MCP without requiring a particular agent host or native session identifier.
 
-There is no environment discovery, model map, assignment registration, executor binding or splitting agent. See the [governing document](docs/context-workspace-design.md) and [release notes](CHANGELOG.md).
+The [governing document](docs/context-workspace-design-v2.md) defines the current cycle. The [previous design](docs/context-workspace-design.md) and older assessments remain historical references. See [release notes](CHANGELOG.md).
 
 ## Work cycle
 
-1. Invoke `$pcw` with a work root, workspace and natural-language task.
-2. `pcw_startup` returns Current and bounded memory status without loading model weights.
-3. Search accumulated knowledge, read relevant whole topic files and needed links before investigating external sources. Information in the conversation does not replace this search and reading. Retrieve only context needed for the current task.
-4. Perform and verify authorized work directly or optionally delegate it. Workers get standalone facts and allowed task sources, no PCW access or memory coordinates.
-5. Save useful facts and corrections through `pcw_create` / `pcw_update` as complete ordinary Markdown topic materials. Submit the task conclusion to PCW before the final answer, including when no new facts were found. Update an existing topic instead of creating a duplicate. The plugin generates filename-IDs and verifies disk writes.
-6. The plugin automatically tokenizes saved text, forms overlapping windows, computes embeddings and updates LanceDB. No boundary arrays or second transfer of the body.
-7. Check actual memory/index status and update Current when focus changes. Pending indexing uses `pcw_reconcile` after fixing the reported cause.
+1. The user explicitly invokes `$pcw` or requests PCW for a task. Mentions and previous invocations do not activate it.
+2. `pcw_startup` opens an independent cycle and clears its tmp. It returns a cycle ID, fresh Current and bounded knowledge status without loading weights. Reuse the request ID only for retries; a new invocation has a fresh ID. Explicitly restarting previous work names only that old cycle for cleanup.
+3. Search permanent knowledge and read relevant whole topics and links before external investigation. Conversation context does not replace PCW reading.
+4. Work directly or delegate as applicable. Save results, worker returns and working notes in tmp. A clean-context subagent may perform the full cycle with the same instructions while the main agent relays the user's messages.
+5. Search by the conclusion, read related topics, and prepare precise additions, corrections, compaction and links through `pcw_proposal_prepare`. It writes a reviewable proposal in tmp without changing knowledge.
+6. Present the actual changes and mechanical link effects. Questions and revisions continue the discussion. Only after explicit human approval, apply the exact proposal revision through `pcw_proposal_apply`. **Knowledge writes preserve tmp.**
+7. After agreement to close the cycle, `pcw_finish` deletes all cycle tmp. Prepared proposals must be applied or discarded; unfinished application/indexing blocks normal closure. Closing without memory changes needs no dummy write. Explicit user cancellation reports unfinished operations without rolling back knowledge.
 
-Knowledge remains authoritative when a tokenizer, embedding provider or index operation fails. A save returns the durable material ID and honest pending status, so retrying indexing does not create duplicate files. Topic organization, factual corrections, compaction and links remain primary judgments. Operational receipts do not become knowledge.
+The skill prohibits calls outside an explicit cycle. The MCP runtime requires an active cycle and binds writes to exact prepared revisions, but it cannot authenticate whether an agent-supplied confirmation came from a human. Host permissions may strengthen that boundary; no universal chat hook or sandbox isolation is claimed.
 
-## Storage and search
+## Storage and recovery
 
 ```text
 <work-root>/.pcw/<workspace>/
-  current.md
   knowledge/<generated-id>.md
-  .pcw-runtime/active.json
-  .pcw-runtime/lancedb/
+  tmp/<cycle-id>/
+    current.md
+    materials/<generated-id>.md
+    proposals/<proposal-id>.json
+    proposals/<proposal-id>.md   # readable review
+  .pcw-runtime/                 # derived index/configuration
   .git/                         # only after an authorized memory checkpoint
+<work-root>/.pcw/.control/<workspace>/
+  cycles.json                   # IDs, states, revisions; no retained draft bodies
 ```
 
-The small adjacent `.pcw/.control/<workspace>/` retains storage-loss detection and ID reservations. Old control records are preserved for compatibility, not resumed as a task controller. Current's five fields can be updated directly.
+Other active cycles are not cleared. A fresh cycle does not inherit old Current, temporary results or permissions. Startup and closure retries cannot erase later work. Temporary materials and proposals never enter permanent vector search or memory Git checkpoints.
 
-Search returns bounded unique topic-material IDs, paths and distances. Read selected full bodies and useful exact-ID links. Windows select materials; they do not replace the source files. Links-only changes and moves preserve vectors. Merge redirects incoming links before deleting replaced materials.
+Proposals preserve existing filename IDs and can create, update, move, delete, merge or split topics with exact links. New-topic keys allow links between newly created materials. Complete affected-file fingerprints detect concurrent body, path and link changes. Incoming links are rewritten before deletion. Multi-file writes report partial state rather than claiming rollback or all-or-nothing filesystem transactions; retrying the same operation does not duplicate materials.
 
-## Embeddings and token windows
+If indexing fails, saved knowledge and tmp remain. Repair the cause and retry the same proposal, or reconcile derived indexing before retrying apply. History restoration uses `pcw_history_read` followed by a reviewed proposal. Existing knowledge is preserved on upgrade; legacy root Current and older orchestration records are not resumed. Missing permanent storage is reported as a recovery problem, never silently recreated.
 
-Default: local `Qwen/Qwen3-Embedding-0.6B`, pinned revision, 1024 dimensions, CPU. The local model and its tokenizer are reused. Windows default to 512 tokens with 64-token overlap; these are configurable engineering values, not an empirical quality optimum. Unicode characters and literal source bytes are preserved; windows may cross Markdown paragraphs, tables and code.
+## Embeddings
 
-Alternative embedding sources: another `sentence-transformers` model, Ollama `/api/embed`, or an explicitly configured `/v1/embeddings` API. API keys are referenced through environment-variable names. Remote models require an explicitly compatible Hugging Face tokenizer or tiktoken encoding. No secret belongs in knowledge or Git, and no provider fallback occurs automatically.
+Default: local `Qwen/Qwen3-Embedding-0.6B`, pinned revision, 1024 dimensions, CPU. Overlapping token windows default to 512/64 tokens. Other sentence-transformers models, Ollama or explicitly configured embedding APIs are supported with compatible tokenizers. No boundary-generation agent is needed.
 
-`pcw_switch_embeddings` accepts complete provider/profile and search settings plus optional `chunking`. Model-space or chunking changes rebuild an inactive table, check source revisions, then activate it atomically. Errors retain the previous source and index. See [configuration](plugins/persistent-context-workspace/skills/pcw/references/embeddings.md).
+Only approved permanent text is indexed. Unchanged bodies, link edits and moves preserve embeddings. Provider or chunking changes rebuild an inactive table and activate it after source revision checks; failure retains the previous configuration. API credentials are referenced by environment-variable name, not stored in knowledge. See [embedding configuration](plugins/persistent-context-workspace/skills/pcw/references/embeddings.md).
 
-## Upgrade from 0.7.x
+## Upgrade
 
-This release intentionally removes the orchestration and manual segmentation MCP interfaces. Use a new host thread for the revised skill and tools. Existing knowledge, IDs, links and Current remain intact. Opening a legacy workspace replaces only the derived search table; `pcw_reconcile` automatically reindexes its saved materials. Legacy remote profiles need a compatible tokenizer configured first. Known incorrect old revisions remain excluded from search until corrected.
-
-Installing does not migrate YAML UUIDs or rewrite knowledge. Explicit `pcw_migrate_legacy_ids` remains available. Missing workspace storage is reported for recovery rather than silently treated as new empty memory.
+0.9.0 changes the MCP API: callers pass cycle_id, permanent mutations use proposal preparation/application, and Current belongs to cycle tmp. Old immediate-write tools are no longer exposed. Start a new host session for the changed skill/tool definitions.
 
 For the existing Git marketplace tracking this repository:
 
@@ -52,4 +55,8 @@ codex plugin marketplace upgrade persistent-context-workspace
 codex plugin add persistent-context-workspace@persistent-context-workspace
 ```
 
-Read [runtime setup](plugins/persistent-context-workspace/skills/pcw/references/setup.md) only for installation or observed dependency failures. Launching the plugin does not install packages, create a virtual environment, or download weights. A first authorized local embedding operation may need the selected model cache. Git checkpoints and external publication retain their own authorization requirements.
+These are installation commands, not actions performed by this source update. Portable hosts use the packaged plugin and `mcp.json`. Startup never installs Python dependencies or downloads model weights. Read [setup](plugins/persistent-context-workspace/skills/pcw/references/setup.md) for a concrete setup failure.
+
+## Verification
+
+The tests retain the existing storage/token-window regressions and add cycle isolation, proposal review/conflicts, partial failure/retry and full cleanup tests. The standard-MCP launcher test uses a temporary workspace. Opt-in real-agent host tests exercise reading and tmp retention before approval, followed by application after a separate human-message turn. Static and deterministic tests do not establish model compliance in every host.
