@@ -1,6 +1,6 @@
 # PCW implementation
 
-Version 0.9.0 implements [explicit cycles and approved knowledge](docs/context-workspace-design-v2.md).
+Version 0.9.1 implements [explicit cycles and approved knowledge](docs/context-workspace-design-v2.md), with in-chat proposal presentation in the conversation language.
 
 - Start with explicit invocation, initial tmp cleanup, and permanent context search/read.
 - Keep work results and Current in cycle-local tmp; support a designated clean-context cycle agent.

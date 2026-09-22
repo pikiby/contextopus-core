@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.9.0 provides project knowledge through explicit cycles: permanent Markdown topics, temporary working context, human-reviewed changes and automatic token-window embeddings in LanceDB. It works over standard MCP without requiring a particular agent host or native session identifier.
+Version 0.9.1 provides project knowledge through explicit cycles: permanent Markdown topics, temporary working context, human-reviewed changes and automatic token-window embeddings in LanceDB. It works over standard MCP without requiring a particular agent host or native session identifier.
 
 The [governing document](docs/context-workspace-design-v2.md) defines the current cycle. The [previous design](docs/context-workspace-design.md) and older assessments remain historical references. See [release notes](CHANGELOG.md).
 
@@ -11,8 +11,8 @@ The [governing document](docs/context-workspace-design-v2.md) defines the curren
 3. Search permanent knowledge and read relevant whole topics and links before external investigation. Conversation context does not replace PCW reading.
 4. Work directly or delegate as applicable. Save results, worker returns and working notes in tmp. A clean-context subagent may perform the full cycle with the same instructions while the main agent relays the user's messages.
 5. Search by the conclusion, read related topics, and prepare precise additions, corrections, compaction and links through `pcw_proposal_prepare`. It writes a reviewable proposal in tmp without changing knowledge.
-6. Present the actual changes and mechanical link effects. Questions and revisions continue the discussion. Only after explicit human approval, apply the exact proposal revision through `pcw_proposal_apply`. **Knowledge writes preserve tmp.**
-7. After agreement to close the cycle, `pcw_finish` deletes all cycle tmp. Prepared proposals must be applied or discarded; unfinished application/indexing blocks normal closure. Closing without memory changes needs no dummy write. Explicit user cancellation reports unfinished operations without rolling back knowledge.
+6. Present the actual changes in the chat: topic names, full new text or changed before/after passages from `review_changes`, deletions and link effects. A file link or topic list does not replace this presentation. Use the user's current conversation language for progress, explanations and approval questions, regardless of the language of knowledge or instructions; keep literal quotations exact and explain them in that language. Questions and revisions continue the discussion. Only after explicit human approval, apply the exact proposal revision through `pcw_proposal_apply`. **Knowledge writes preserve tmp.**
+7. State that closure deletes all this cycle's temporary notes, returns and proposals, and obtain agreement before calling `pcw_finish`. Approval of a write alone does not authorize cleanup. Prepared proposals must be applied or discarded; unfinished application/indexing blocks normal closure. Closing without memory changes needs no dummy write. Explicit user cancellation reports unfinished operations without rolling back knowledge.
 
 The skill prohibits calls outside an explicit cycle. The MCP runtime requires an active cycle and binds writes to exact prepared revisions, but it cannot authenticate whether an agent-supplied confirmation came from a human. Host permissions may strengthen that boundary; no universal chat hook or sandbox isolation is claimed.
 

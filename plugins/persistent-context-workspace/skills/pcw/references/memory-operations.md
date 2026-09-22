@@ -26,7 +26,9 @@ After vector search by the conclusion and reading suitable existing topics, call
 - Incoming link removal/redirection is computed before approval and included in the review. The apply checks complete file fingerprints, including links and paths, so concurrent navigation changes also conflict.
 - To revise an unapplied proposal, supply its `proposal_id`. The returned revision changes; earlier approval cannot apply the revised contents.
 
-The response contains the proposal ID/revision, created-ID map, readable review path and structural/link effects. Present the exact resulting changes to the user. `pcw_proposal_read` returns the full review when needed; do not load it merely to repeat supplied text. One topic need not contain every fact from the task, and each fact need not become a separate topic.
+The response contains the proposal ID/revision, created-ID map, review path, structural effects and `review_changes`. Each review entry identifies its topic and paths, contains exact before/after body passages with nearby context, and names added/removed link targets. Creates/deletions contain the complete added/removed body; unchanged bodies are omitted. Automatic incoming-link changes are included. `pcw_proposal_read` also returns these entries when retrieving a saved proposal; no extra read is needed immediately after preparation.
+
+Present these changes in the chat, using the user's current conversation language for explanations, headings and questions. Keep quoted proposed wording exact and explain foreign-language quotations in that language. Use topic names and readable before/after passages, including conditions and evidence; do not paste JSON or substitute a UUID, file link or general summary for the contents. Large proposals may span several messages; ask for approval only after presenting their full scope. The review file supplements this presentation. One topic need not contain every fact from the task, and each fact need not become a separate topic.
 
 ## Approve and apply
 
@@ -38,7 +40,7 @@ Discard an exact rejected/unneeded unapplied proposal with `pcw_proposal_discard
 
 ## Close or restart
 
-`pcw_finish(cycle_id, confirmation)` requires the user's explicit agreement to close and delete all cycle tmp. Prepared proposals must be applied or discarded; unfinished applications/indexing block normal closure. No-change and rejected-update cycles close without a fake permanent write. `cancel:true` is for actual user cancellation: it deletes temporary context, reports incomplete operation IDs, and does not roll back already written knowledge.
+`pcw_finish(cycle_id, confirmation)` requires the user's explicit agreement to close and delete all cycle tmp. The user-facing question must say that all this cycle's temporary notes, returns and proposals will be deleted, in the conversation language. Approval of a write alone does not authorize closure. Prepared proposals must be applied or discarded; unfinished applications/indexing block normal closure. No-change and rejected-update cycles close without a fake permanent write. `cancel:true` is for actual user cancellation: it deletes temporary context, reports incomplete operation IDs, and does not roll back already written knowledge.
 
 For a new explicit invocation use a fresh `request_id` with `pcw_startup`. Only if restarting a specific old task, pass its `restart_cycle_id`: its returns, Current, proposals and permission state are removed. Never choose a different active cycle as the cleanup target. Startup/finish retries are idempotent and do not erase subsequent work. Cycle IDs are not native session IDs; a clean-context cycle agent can use the same cycle.
 

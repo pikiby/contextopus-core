@@ -14,10 +14,16 @@ mcp = FastMCP("persistent-context-workspace", instructions=(
     "quoted transcripts and past invocations do not activate it. Start a fresh cycle with pcw_startup, "
     "then search and read permanent knowledge first. Conversation context does not replace that reading. "
     "Keep work results and worker returns in temporary context. Prepare precise permanent-memory "
-    "changes, search/read existing knowledge to consolidate them, and present the exact proposal to "
-    "the user. Only after the user's explicit approval call pcw_proposal_apply with the presented "
+    "changes, search/read existing knowledge to consolidate them, and present the actual changes in chat: "
+    "topic names, full new text or before/after passages, deletions and link effects. A file link, UUID "
+    "or tool-call log is not presentation. Use the user's current conversation language for progress, "
+    "explanations and approval/closure questions unless the user requests another language; the language "
+    "of stored knowledge, instructions and examples does not determine replies. Keep literal quotations "
+    "exact and explain foreign-language quotations in the conversation language. "
+    "Only after the user's explicit approval call pcw_proposal_apply with the presented "
     "revision. A confirmation string supplied by an agent is not proof of human consent. "
-    "Knowledge writes preserve tmp. Initial startup and explicit pcw_finish clear the cycle's tmp. "
+    "Knowledge writes preserve tmp. Before requesting closure explicitly say it deletes all this cycle's "
+    "temporary notes, returns and proposals. Initial startup and explicit pcw_finish clear the cycle's tmp. "
     "Waiting for approval keeps the cycle open. Every new invocation starts without old permissions. "
     "The cycle may be performed directly or by a clean-context subagent with these same instructions; "
     "the main agent then relays the user's exact messages and approval. PCW does not control workers. "
@@ -55,11 +61,11 @@ _DESCRIPTIONS = {
     "tmp_write": "Save an ordinary Markdown work result, worker return or note as temporary context, never knowledge. New ID is generated; updates need material_id and expected_revision. No embeddings.",
     "tmp_read": "Read a selected temporary result in this active cycle. It is not approved permanent knowledge.",
     "tmp_list": "List bounded metadata for this cycle's temporary results without their bodies.",
-    "proposal_prepare": "After vector search by the conclusion and reading relevant knowledge, prepare final changes in tmp without changing knowledge. Creates use key/content/links (@key references a new topic); existing topics use material_id/expected_revision and content, links, path or delete:true. replacements maps deleted IDs to survivors. Returns exact revision, full-review path and automatic link effects. Present these to the human before applying; optional proposal_id revises an unapplied proposal.",
-    "proposal_read": "Read the exact prepared proposal and all mechanical link consequences for human review.",
+    "proposal_prepare": "After vector search by the conclusion and reading relevant knowledge, prepare final changes in tmp without changing knowledge. Creates use key/content/links (@key references a new topic); existing topics use material_id/expected_revision and content, links, path or delete:true. replacements maps deleted IDs to survivors. Returns exact revision and review_changes with topic names, exact body passages and link effects. Present their contents in chat before asking for approval, in the conversation language; a review-file link or topic list alone is insufficient. Optional proposal_id revises an unapplied proposal.",
+    "proposal_read": "Retrieve a prepared proposal, including review_changes for presentation in chat. Explain it in the conversation language; a link to the review file does not replace showing the changes.",
     "proposal_discard": "Discard an exact unapplied proposal without changing knowledge; temporary materials remain until closure.",
     "proposal_apply": "Only after explicit human approval of this exact revision: apply the prepared set and index it. Pass the current user's confirmation, never self-approval or a saved past permission. The tool binds revisions but cannot authenticate chat provenance. Saves preserve tmp; partial failures retry the same proposal without duplicate topics.",
-    "finish": "Only after explicit human confirmation of closure and deletion: clear all tmp for this cycle and close it. Unresolved proposals block normal closure. cancel requires actual user cancellation; it discards temporary state and reports unfinished operations without rolling back knowledge. No dummy write is needed. Retry is idempotent.",
+    "finish": "Only after explicit human confirmation of closure and deletion: clear all tmp for this cycle and close it. Before asking, state in the conversation language that all temporary notes, returns and proposals of this cycle will be deleted. Approval of a write alone does not authorize cleanup. Unresolved proposals block normal closure. cancel requires actual user cancellation; it discards temporary state and reports unfinished operations without rolling back knowledge. No dummy write is needed. Retry is idempotent.",
     "reconcile": "Retry derived indexing of already saved permanent text. It does not approve or rewrite knowledge. After repairing a proposal's pending indexing, retry proposal_apply to complete that operation.",
     "switch_embeddings": "With authority to change the provider/configuration, rebuild a compatible derived index. Failure retains the old source. No knowledge text changes.",
     "checkpoint": "With actual user authorization, checkpoint exact permanent knowledge paths in local memory Git. No tmp, Current, source-project commits or push.",

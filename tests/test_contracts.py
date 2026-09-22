@@ -267,8 +267,10 @@ class LauncherTests(unittest.TestCase):
                     pending = call("tmp_write", content="Protocol fixture content")
                     self.assertEqual(0, call("status")["materials"])
                     proposal = call("proposal_prepare", changes=[{"key": "fixture", "content": "Protocol fixture content"}])
+                    self.assertEqual("Protocol fixture content", proposal["review_changes"][0]["body_changes"][0]["after"])
                     review = call("proposal_read", proposal_id=proposal["proposal_id"])
                     self.assertIn("Protocol fixture content", review["review"])
+                    self.assertEqual(proposal["review_changes"], review["review_changes"])
                     applied = call("proposal_apply", proposal_id=proposal["proposal_id"],
                                    expected_revision=proposal["revision"], confirmation="Apply the displayed fixture")
                     item = applied["materials"][0]

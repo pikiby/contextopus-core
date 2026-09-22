@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Explicit project-memory cycles with temporary context and human-approved knowledge",
   "author": {
     "name": "pikiby",

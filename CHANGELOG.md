@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 — 2026-09-22
+
+- Require proposal contents in chat before approval: topic names, full new text or before/after passages, deletions and link effects. File links and topic lists alone do not constitute presentation.
+- Return exact `review_changes` from preparation and retrieval, including readable topic names and automatic link effects, without repeating unchanged bodies. Keep existing prepared-proposal files compatible.
+- Use the current conversation language for progress, explanations and approval questions regardless of the language of instructions or stored materials.
+- Explicitly explain deletion of all cycle temporary notes, returns and proposals when requesting closure; approval of a write alone does not authorize cleanup.
+- Add regression coverage for complete review content, bounded changes, navigation effects and MCP transport.
+
 ## 0.9.0 — 2026-09-18
 
 - Replace immediate permanent writes with explicit cycles, temporary results and revision-bound proposals approved by the human.

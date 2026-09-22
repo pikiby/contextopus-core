@@ -352,7 +352,9 @@ class CycleRuntime:
             effects = self._effects(plan)
             return {"proposal_id": ident, "revision": revision, "status": "prepared", "created_ids": aliases,
                     "review_path": plan_path.with_suffix(".md").relative_to(self.engine.root).as_posix(),
-                    "effects": effects[:50], "effects_count": len(effects)}
+                    "effects": effects[:50], "effects_count": len(effects),
+                    "review_changes": self._review_changes(plan),
+                    "next_action": "present_changes_in_chat_for_approval"}
 
     @staticmethod
     def _effects(plan):
@@ -366,6 +368,46 @@ class CycleRuntime:
                            "links_added": [x for x in new_links if x not in old_links],
                            "links_removed": [x for x in old_links if x not in new_links]})
         return result
+
+    def _review_changes(self, plan):
+        """Exact changed passages for chat presentation; never a generated summary.
+
+        Keep the on-disk review format stable so pending 0.9.0 proposals remain
+        verifiable. Labels are supplied by the agent in the conversation language.
+        """
+        def describe(ident, snapshot=None, previous=False):
+            if snapshot is None:
+                entry = plan["entries"].get(ident, {})
+                snapshot = entry.get("before" if previous else "after") or entry.get("before")
+            if snapshot:
+                body, path = _parse(snapshot["text"])[1], snapshot["path"]
+            else:
+                material = self.engine.materials.get(ident)
+                body, path = (material.content, material.path) if material else ("", "knowledge/" + ident)
+            lines = [line.strip() for line in body.splitlines() if line.strip()]
+            title = next((line[2:].strip() for line in lines if line.startswith("# ")),
+                         lines[0] if lines else ident)
+            return {"id": ident, "title": title, "path": path}
+
+        changes = []
+        for effect in self._effects(plan):
+            ident = effect["id"]
+            before, after = (plan["entries"][ident][key] for key in ("before", "after"))
+            old = _parse(before["text"])[1].splitlines(keepends=True) if before else []
+            new = _parse(after["text"])[1].splitlines(keepends=True) if after else []
+            passages = []
+            for tag, i, j, k, end in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+                if tag != "equal":
+                    passages.append({"before": "".join(old[i:j]), "after": "".join(new[k:end]),
+                                     "before_start_line": i + 1, "after_start_line": k + 1,
+                                     "context_before": "".join(old[max(0, i - 3):i]),
+                                     "context_after": "".join(old[j:j + 3])})
+            changes.append({**effect, "title": describe(ident, after or before)["title"],
+                            "old_title": describe(ident, before)["title"] if before else None,
+                            "body_changes": passages,
+                            "links_added": [describe(link) for link in effect["links_added"]],
+                            "links_removed": [describe(link, previous=True) for link in effect["links_removed"]]})
+        return changes
 
     @staticmethod
     def _review(plan):
@@ -388,7 +430,8 @@ class CycleRuntime:
             if entry is None:
                 raise PCWError("Unknown proposal")
             plan = self._load_plan(cycle_id, proposal_id, entry)
-            return {"proposal_id": proposal_id, **entry, "review": self._review(plan)}
+            return {"proposal_id": proposal_id, **entry, "review": self._review(plan),
+                    "review_changes": self._review_changes(plan)}
 
     def proposal_discard(self, cycle_id: str, proposal_id: str, expected_revision: str):
         with self._cycle(cycle_id) as (records, cycle):

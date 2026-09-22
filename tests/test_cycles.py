@@ -73,6 +73,81 @@ def test_preparation_and_revision_changes_do_not_write_knowledge(workspace):
     assert runtime.status(cycle)["materials"] == 1
 
 
+def test_preparation_returns_full_new_text_without_needing_review_file(workspace):
+    runtime, factory = workspace
+    cycle = start(runtime)
+    text = "# Документация\r\n\r\n| File | Language |\r\n| --- | --- |\r\n| README | English |\r\n\r\n```text\r\nKeep verbatim 🙂\r\n```\r\n"
+    proposal = prepare(runtime, cycle, text)
+    change, = proposal["review_changes"]
+    passage, = change["body_changes"]
+    assert change["title"] == "Документация"
+    assert change["action"] == "create"
+    assert passage["before"] == ""
+    assert passage["after"] == text
+    assert proposal["next_action"] == "present_changes_in_chat_for_approval"
+    assert runtime.proposal_read(cycle, proposal["proposal_id"])["review_changes"] == proposal["review_changes"]
+    assert runtime.status(cycle)["materials"] == 0
+    assert factory.calls == []
+
+
+def test_review_returns_only_changed_passages_with_local_context(workspace):
+    runtime, _ = workspace
+    cycle = start(runtime)
+    text = "# Service\n\n" + "".join(f"Unchanged section {i}\n" for i in range(500))
+    seed = prepare(runtime, cycle, text)
+    apply(runtime, cycle, seed)
+    material = runtime.read(cycle, seed["created_ids"]["topic"])
+    addition = "\n## Local configuration\n\nConfigured only; live state has not been checked.\n"
+    proposal = runtime.proposal_prepare(cycle, [{"material_id": material["id"],
+        "expected_revision": material["revision"], "content": text + addition}])
+    change, = proposal["review_changes"]
+    passage, = change["body_changes"]
+    assert change["title"] == "Service"
+    assert passage["before"] == ""
+    assert passage["after"] == addition
+    assert "Unchanged section 499" in passage["context_before"]
+    assert "Unchanged section 0" not in json.dumps(proposal["review_changes"])
+    assert sum(len(part["after"]) + len(part["context_before"]) for part in change["body_changes"]) < 250
+    assert runtime.read(cycle, material["id"])["content"] == text
+
+
+def test_review_names_deleted_moved_and_automatically_redirected_topics(workspace):
+    runtime, _ = workspace
+    cycle = start(runtime)
+    seed = runtime.proposal_prepare(cycle, [
+        {"key": "old", "content": "# Old details\n\nPrevious evidence."},
+        {"key": "kept", "content": "# Shared topic\n\nVerified evidence."},
+        {"key": "nav", "content": "# Navigation", "links": ["@old"]}])
+    apply(runtime, cycle, seed)
+    old, kept, nav = [runtime.read(cycle, seed["created_ids"][key]) for key in ("old", "kept", "nav")]
+    proposal = runtime.proposal_prepare(cycle, [
+        {"material_id": kept["id"], "expected_revision": kept["revision"],
+         "content": "# Combined topic\n\nVerified evidence. Previous evidence.", "path": "topics/" + kept["id"]},
+        {"material_id": old["id"], "expected_revision": old["revision"], "delete": True}
+    ], replacements={old["id"]: kept["id"]})
+    changes = {change["id"]: change for change in proposal["review_changes"]}
+    assert changes[old["id"]]["body_changes"][0]["before"] == old["content"]
+    assert changes[old["id"]]["body_changes"][0]["after"] == ""
+    assert changes[kept["id"]]["old_title"] == "Shared topic"
+    assert changes[kept["id"]]["title"] == "Combined topic"
+    assert changes[kept["id"]]["old_path"] == kept["path"]
+    assert changes[kept["id"]]["path"] == "knowledge/topics/" + kept["id"]
+    assert changes[nav["id"]]["body_changes"] == []
+    assert changes[nav["id"]]["links_added"][0]["title"] == "Combined topic"
+    assert changes[nav["id"]]["links_removed"][0]["title"] == "Old details"
+    assert runtime.read(cycle, nav["id"])["links"] == [old["id"]]
+
+
+def test_review_does_not_drop_topics_when_effect_receipt_is_bounded(workspace):
+    runtime, _ = workspace
+    cycle = start(runtime)
+    proposal = runtime.proposal_prepare(cycle, [
+        {"key": f"topic-{i}", "content": f"# Topic {i}\n\nFact {i}."} for i in range(51)])
+    assert len(proposal["effects"]) == 50
+    assert len(proposal["review_changes"]) == 51
+    assert {change["title"] for change in proposal["review_changes"]} == {f"Topic {i}" for i in range(51)}
+
+
 def test_apply_preserves_current_tmp_and_closure_removes_all_temporary_files(workspace):
     runtime, _ = workspace
     cycle = start(runtime, goal="A and B")
