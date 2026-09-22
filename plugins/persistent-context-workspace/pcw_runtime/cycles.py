@@ -518,8 +518,9 @@ class CycleRuntime:
                 return {"proposal_id": proposal_id, "status": "partial", "error": str(exc),
                         "tmp_preserved": True, "next_action": "proposal_apply"}
 
-    def finish(self, cycle_id: str, confirmation: str, cancel: bool = False):
-        _text(confirmation, "current user's explicit confirmation of closure and tmp deletion")
+    def finish(self, cycle_id: str, cancel: bool = False):
+        if type(cancel) is not bool:
+            raise PCWError("cancel must be a boolean")
         with self._cycle(cycle_id, ("starting", "active", "closing", "closed", "cancelled")) as (records, cycle):
             if cycle["state"] in {"closed", "cancelled"}:
                 return {"cycle_id": cycle_id, "status": cycle["state"], "replayed": True}

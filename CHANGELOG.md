@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.2 — 2026-09-22
+
+- Remove the separate approval requirement for closing a completed PCW cycle. The agent calls `pcw_finish` and clears tmp as part of completion, without another permission question.
+- Remove the `confirmation` argument from `pcw_finish`; preserve explicit approval for permanent knowledge changes.
+- Align the governing document, skill, MCP instructions and tests. Pending knowledge approval and unfinished writes/indexing still keep the cycle open; cleanup remains isolated and retry-safe.
+
 ## 0.9.1 — 2026-09-22
 
 - Require proposal contents in chat before approval: topic names, full new text or before/after passages, deletions and link effects. File links and topic lists alone do not constitute presentation.

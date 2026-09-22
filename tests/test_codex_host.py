@@ -397,7 +397,7 @@ class CodexHostTests(unittest.TestCase):
         before_approval = len(self.host.notification_snapshot())
         approval = self.host.call("turn/start", {
             "threadId": thread_id,
-            "input": [{"type": "text", "text": "Подтверждаю показанные изменения постоянной памяти. Примени их и заверши цикл с удалением tmp."}],
+            "input": [{"type": "text", "text": "Подтверждаю показанные изменения постоянной памяти. Примени их."}],
         })
         approval_id = approval["turn"]["id"]
         try:
@@ -420,7 +420,7 @@ class CodexHostTests(unittest.TestCase):
                    and not (item.get("result") or {}).get("isError")]
         self.assertTrue(applied, "The agent failed to apply after explicit approval")
         self.assertTrue(any(fact in path.read_text() for path in knowledge.glob("*.md")))
-        self.assertFalse(temporary.exists(), "The explicitly closed cycle left tmp behind")
+        self.assertFalse(temporary.exists(), "The completed cycle left tmp behind or requested separate closure approval")
 
 
 

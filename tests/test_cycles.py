@@ -159,7 +159,7 @@ def test_apply_preserves_current_tmp_and_closure_removes_all_temporary_files(wor
     assert apply(runtime, cycle, proposal)["status"] == "applied"
     assert runtime.tmp_read(cycle, b["id"])["content"].startswith("Continue B")
     assert runtime.current_get(cycle)["goal"] == "A and B"
-    assert runtime.finish(cycle, "Finish and delete tmp")["status"] == "closed"
+    assert runtime.finish(cycle)["status"] == "closed"
     assert not runtime._tmp(cycle).exists()
     assert runtime.engine.read(proposal["created_ids"]["topic"])["content"] == "Verified fact"
     assert "Continue B" not in runtime.record_path.read_text()
@@ -174,9 +174,9 @@ def test_parallel_cycles_are_isolated_and_startup_retries_do_not_purge(workspace
     kept = runtime.tmp_write(a, "A in progress")
     assert runtime.startup("a")["replayed"]
     assert runtime.tmp_read(a, kept["id"])
-    runtime.finish(a, "Close A")
+    runtime.finish(a)
     assert runtime.tmp_read(b, item["id"])["content"] == "B in progress"
-    assert runtime.finish(a, "Retry close A")["replayed"]
+    assert runtime.finish(a)["replayed"]
     assert runtime.tmp_read(b, item["id"])
 
 
@@ -201,11 +201,13 @@ def test_no_changes_and_rejected_changes_close_without_dummy_save(workspace):
     runtime, factory = workspace
     a = start(runtime, "a")
     proposal = prepare(runtime, a)
-    assert runtime.finish(a, "Close")["status"] == "blocked"
+    with pytest.raises(PCWError, match="cancel must be a boolean"):
+        runtime.finish(a, "Old positional confirmation must not cancel pending work")
+    assert runtime.finish(a)["status"] == "blocked"
     runtime.proposal_discard(a, proposal["proposal_id"], proposal["revision"])
-    assert runtime.finish(a, "Reject and close")["status"] == "closed"
+    assert runtime.finish(a)["status"] == "closed"
     b = start(runtime, "b")
-    assert runtime.finish(b, "No changes, close")["tmp_cleared"]
+    assert runtime.finish(b)["tmp_cleared"]
     assert runtime.engine.status()["materials"] == 0
     assert factory.calls == []
 
@@ -272,14 +274,14 @@ def test_index_failure_preserves_text_and_tmp_and_resumes_without_duplicate(work
     with patch.object(runtime.engine, "_get_chunker", side_effect=RuntimeError("offline")):
         assert apply(runtime, cycle, proposal)["status"] == "index_pending"
     assert runtime._tmp(cycle).exists()
-    assert runtime.finish(cycle, "Close")["status"] == "blocked"
+    assert runtime.finish(cycle)["status"] == "blocked"
     root = runtime.engine.work_root
     runtime.close()
     restarted_process = CycleRuntime(root, "project", provider_factory=factory)
     try:
         assert apply(restarted_process, cycle, proposal)["status"] == "applied"
         assert restarted_process.status(cycle)["materials"] == 1
-        assert restarted_process.finish(cycle, "Finish after retry")["status"] == "closed"
+        assert restarted_process.finish(cycle)["status"] == "closed"
     finally: restarted_process.close()
 
 
@@ -310,10 +312,10 @@ def test_cleanup_failure_can_retry_without_touching_other_cycles(workspace):
     a = start(runtime, "a"); b = start(runtime, "b")
     tmp = runtime.tmp_write(a, "Temporary")
     with patch.object(runtime, "_purge", side_effect=OSError("cleanup failed")):
-        with pytest.raises(OSError): runtime.finish(a, "Close A")
+        with pytest.raises(OSError): runtime.finish(a)
     assert runtime._tmp(a).exists()
     assert runtime.status(b)["cycle_status"] == "active"
-    assert runtime.finish(a, "Retry cleanup")["status"] == "closed"
+    assert runtime.finish(a)["status"] == "closed"
 
 
 def test_start_cleanup_failure_is_not_active_and_retry_does_not_reuse_old_context(workspace):
@@ -390,7 +392,7 @@ def test_missing_storage_returns_cycle_for_recovery_or_explicit_cancellation(wor
     shutil.rmtree(runtime.engine.knowledge)
     missing = runtime.startup("c")
     assert runtime.recover_workspace(missing["cycle_id"])["status"] == "blocked"
-    assert runtime.finish(missing["cycle_id"], "Cancel failed startup", cancel=True)["status"] == "cancelled"
+    assert runtime.finish(missing["cycle_id"], cancel=True)["status"] == "cancelled"
 
 
 def test_symlinks_cannot_redirect_cleanup_and_tmp_cannot_be_checkpointed(workspace, tmp_path):
@@ -400,10 +402,10 @@ def test_symlinks_cannot_redirect_cleanup_and_tmp_cannot_be_checkpointed(workspa
     outside.mkdir(); (outside / "keep").write_text("keep")
     (runtime._tmp(cycle) / "link").symlink_to(outside, target_is_directory=True)
     with pytest.raises(PCWError, match="Symlinks"):
-        runtime.finish(cycle, "Close")
+        runtime.finish(cycle)
     assert (outside / "keep").read_text() == "keep"
     (runtime._tmp(cycle) / "link").unlink()
-    assert runtime.finish(cycle, "Retry close")["status"] == "closed"
+    assert runtime.finish(cycle)["status"] == "closed"
     other = start(runtime, "other")
     with pytest.raises(PCWError, match="knowledge"):
         runtime.checkpoint(other, ["tmp/x.md"], "Do not persist temporary context")

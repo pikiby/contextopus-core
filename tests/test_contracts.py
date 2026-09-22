@@ -241,6 +241,8 @@ class LauncherTests(unittest.TestCase):
                     for removed in ("pcw_create", "pcw_update", "pcw_delete", "pcw_links", "pcw_merge", "pcw_restore"):
                         self.assertNotIn(removed, schemas)
                     self.assertIn("expected_revision", schemas["pcw_proposal_apply"]["required"])
+                    self.assertIn("confirmation", schemas["pcw_proposal_apply"]["required"])
+                    self.assertNotIn("confirmation", schemas["pcw_finish"]["properties"])
                     for name, schema in schemas.items():
                         if name != "pcw_startup":
                             self.assertIn("cycle_id", schema["required"])
@@ -289,7 +291,7 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual("recovered", call("recover_workspace")["status"])
                     self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
                     # Embeddings may be pending in this strictly offline protocol test.
-                    closed = call("finish", confirmation="Cancel this test cycle and delete all tmp", cancel=True)
+                    closed = call("finish", cancel=True)
                     self.assertEqual("cancelled", closed["status"])
                     self.assertFalse((Path(directory) / ".pcw/protocol/tmp" / cycle_id).exists())
                 finally:
