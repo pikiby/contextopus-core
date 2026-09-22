@@ -243,6 +243,7 @@ class LauncherTests(unittest.TestCase):
                     self.assertIn("expected_revision", schemas["pcw_proposal_apply"]["required"])
                     self.assertIn("confirmation", schemas["pcw_proposal_apply"]["required"])
                     self.assertNotIn("confirmation", schemas["pcw_finish"]["properties"])
+                    self.assertIn("no_changes_reason", schemas["pcw_proposal_prepare"]["properties"])
                     for name, schema in schemas.items():
                         if name != "pcw_startup":
                             self.assertIn("cycle_id", schema["required"])
@@ -266,7 +267,11 @@ class LauncherTests(unittest.TestCase):
                     opened = call("startup", request_id="protocol-invocation")
                     cycle_id = opened["cycle_id"]
                     self.assertEqual(0, opened["materials"])
+                    self.assertEqual("blocked", call("finish")["status"])
+                    self.assertEqual("no_changes", call("proposal_prepare", changes=[],
+                                     no_changes_reason="No results yet; this fixture has no permanent changes.")["status"])
                     pending = call("tmp_write", content="Protocol fixture content")
+                    self.assertEqual("blocked", call("finish")["status"])
                     self.assertEqual(0, call("status")["materials"])
                     proposal = call("proposal_prepare", changes=[{"key": "fixture", "content": "Protocol fixture content"}])
                     self.assertEqual("Protocol fixture content", proposal["review_changes"][0]["body_changes"][0]["after"])

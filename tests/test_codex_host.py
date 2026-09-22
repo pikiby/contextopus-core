@@ -388,6 +388,10 @@ class CodexHostTests(unittest.TestCase):
         self.assertTrue(writes, "The agent did not retain the discovered result in temporary context")
         self.assertTrue(any(index < answer_index for index, _ in writes))
         self.assertIn("pcw_proposal_prepare", names)
+        prepared_at = next(index for index, item in successful if item.get("tool") == "pcw_proposal_prepare")
+        self.assertTrue(any(writes[0][0] < index < prepared_at and item.get("tool") == "pcw_search"
+                            for index, item in successful),
+                        "The agent must compare the new result with memory before preparing changes")
         self.assertNotIn("pcw_proposal_apply", names, "Knowledge changed before human approval")
         self.assertNotIn("pcw_finish", names, "Cycle closed while waiting for the user")
         self.assertTrue(all(fact not in path.read_text() for path in knowledge.glob("*.md")))

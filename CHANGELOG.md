@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3 — 2026-09-22
+
+- Make result review mandatory after work: search by the conclusion, compare with permanent knowledge, then prepare and present proposed changes for approval.
+- Block normal closure when preparation is missing or does not cover the current temporary materials. Preserve tmp while review, approval or application is incomplete; keep closure free of a separate permission request.
+- Support `pcw_proposal_prepare(changes=[], no_changes_reason=...)` for a reviewed no-change outcome without writing knowledge, indexing or requesting approval. New or changed temporary results require another review; Current updates do not.
+- Align the governing document, skill, MCP instructions and runtime checks; add regression coverage for skipped preparation, changed results, no-change outcomes and cancellation, and require result-driven search in the opt-in agent test.
+
 ## 0.9.2 — 2026-09-22
 
 - Remove the separate approval requirement for closing a completed PCW cycle. The agent calls `pcw_finish` and clears tmp as part of completion, without another permission question.

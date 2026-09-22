@@ -174,6 +174,7 @@ def test_parallel_cycles_are_isolated_and_startup_retries_do_not_purge(workspace
     kept = runtime.tmp_write(a, "A in progress")
     assert runtime.startup("a")["replayed"]
     assert runtime.tmp_read(a, kept["id"])
+    runtime.proposal_prepare(a, [], no_changes_reason="A contains only a temporary working note.")
     runtime.finish(a)
     assert runtime.tmp_read(b, item["id"])["content"] == "B in progress"
     assert runtime.finish(a)["replayed"]
@@ -207,9 +208,85 @@ def test_no_changes_and_rejected_changes_close_without_dummy_save(workspace):
     runtime.proposal_discard(a, proposal["proposal_id"], proposal["revision"])
     assert runtime.finish(a)["status"] == "closed"
     b = start(runtime, "b")
+    assert runtime.finish(b)["status"] == "blocked"
+    reviewed = runtime.proposal_prepare(b, [], no_changes_reason="No new results or corrections after comparison.")
+    assert reviewed["status"] == "no_changes"
+    assert reviewed["next_action"] == "report_no_changes"
+    assert reviewed["effects"] == reviewed["review_changes"] == []
+    assert runtime.status(b)["outstanding_proposal_count"] == 0
     assert runtime.finish(b)["tmp_cleared"]
     assert runtime.engine.status()["materials"] == 0
     assert factory.calls == []
+
+
+def test_finish_cannot_delete_results_without_preparation_and_decision(workspace):
+    runtime, _ = workspace
+    cycle = start(runtime)
+    result = runtime.tmp_write(cycle, "Verified reusable result")
+    blocked = runtime.finish(cycle)
+    assert blocked["status"] == "blocked"
+    assert blocked["next_action"] == "proposal_prepare"
+    assert runtime.tmp_read(cycle, result["id"])["content"] == "Verified reusable result"
+    proposal = prepare(runtime, cycle, "Verified reusable result")
+    assert runtime.finish(cycle)["status"] == "blocked"
+    assert runtime.engine.status()["materials"] == 0
+    assert apply(runtime, cycle, proposal)["status"] == "applied"
+    assert runtime.finish(cycle)["status"] == "closed"
+    assert not runtime._tmp(cycle).exists()
+    assert runtime.engine.read(proposal["created_ids"]["topic"])["content"] == "Verified reusable result"
+
+
+@pytest.mark.parametrize("update", [False, True])
+def test_new_or_changed_results_need_another_review(workspace, update):
+    runtime, _ = workspace
+    cycle = start(runtime)
+    result = runtime.tmp_write(cycle, "Initial working note")
+    runtime.proposal_prepare(cycle, [], no_changes_reason="The initial note adds no reusable knowledge.")
+    args = {"material_id": result["id"], "expected_revision": result["revision"]} if update else {}
+    runtime.tmp_write(cycle, "New verified finding", **args)
+    assert runtime.finish(cycle)["status"] == "blocked"
+    assert runtime._tmp(cycle).exists()
+    proposal = prepare(runtime, cycle, "New verified finding")
+    assert apply(runtime, cycle, proposal)["status"] == "applied"
+    assert runtime.finish(cycle)["status"] == "closed"
+
+
+def test_no_change_review_requires_reason_and_does_not_override_pending_approval(workspace):
+    runtime, factory = workspace
+    cycle = start(runtime)
+    for reason in (None, "", " "):
+        with pytest.raises(PCWError, match="no_changes_reason"):
+            runtime.proposal_prepare(cycle, [], no_changes_reason=reason)
+    with pytest.raises(PCWError, match="only valid"):
+        prepare(runtime, cycle, no_changes_reason="Conflicting claim")
+    proposal = prepare(runtime, cycle)
+    reviewed = runtime.proposal_prepare(cycle, [], no_changes_reason="No additional changes beyond the pending proposal.")
+    assert runtime.proposal_read(cycle, reviewed["proposal_id"])["no_changes_reason"] == reviewed["no_changes_reason"]
+    with pytest.raises(PCWError, match="Apply only"):
+        apply(runtime, cycle, reviewed)
+    assert runtime.finish(cycle)["status"] == "blocked"
+    runtime.proposal_discard(cycle, proposal["proposal_id"], proposal["revision"])
+    assert runtime.finish(cycle)["status"] == "closed"
+    assert factory.calls == []
+
+
+def test_current_and_identical_tmp_updates_do_not_invalidate_review(workspace):
+    runtime, _ = workspace
+    cycle = start(runtime)
+    result = runtime.tmp_write(cycle, "Working note")
+    runtime.proposal_prepare(cycle, [], no_changes_reason="This working note is not reusable project knowledge.")
+    runtime.current_set(cycle, step="Task and memory review complete")
+    runtime.tmp_write(cycle, "Working note", material_id=result["id"], expected_revision=result["revision"])
+    assert runtime.finish(cycle)["status"] == "closed"
+
+
+def test_cancellation_can_clear_unreviewed_results_without_writing_knowledge(workspace):
+    runtime, _ = workspace
+    cycle = start(runtime)
+    runtime.tmp_write(cycle, "Unfinished investigation cancelled by the user")
+    assert runtime.finish(cycle, cancel=True)["status"] == "cancelled"
+    assert not runtime._tmp(cycle).exists()
+    assert runtime.engine.status()["materials"] == 0
 
 
 def test_cross_links_merge_and_split_review_includes_incoming_changes(workspace):
@@ -311,6 +388,7 @@ def test_cleanup_failure_can_retry_without_touching_other_cycles(workspace):
     runtime, _ = workspace
     a = start(runtime, "a"); b = start(runtime, "b")
     tmp = runtime.tmp_write(a, "Temporary")
+    runtime.proposal_prepare(a, [], no_changes_reason="Only a temporary working note; no permanent changes.")
     with patch.object(runtime, "_purge", side_effect=OSError("cleanup failed")):
         with pytest.raises(OSError): runtime.finish(a)
     assert runtime._tmp(a).exists()
@@ -400,6 +478,7 @@ def test_symlinks_cannot_redirect_cleanup_and_tmp_cannot_be_checkpointed(workspa
     cycle = start(runtime)
     outside = tmp_path / "outside"
     outside.mkdir(); (outside / "keep").write_text("keep")
+    runtime.proposal_prepare(cycle, [], no_changes_reason="No task results to retain.")
     (runtime._tmp(cycle) / "link").symlink_to(outside, target_is_directory=True)
     with pytest.raises(PCWError, match="Symlinks"):
         runtime.finish(cycle)

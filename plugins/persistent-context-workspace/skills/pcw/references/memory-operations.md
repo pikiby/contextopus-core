@@ -10,7 +10,7 @@ Current lives in `tmp/<cycle-id>/current.md`. `pcw_current_get` reads its five f
 
 ## Prepare a permanent change
 
-After vector search by the conclusion and reading suitable existing topics, call `pcw_proposal_prepare(cycle_id, changes, replacements?, proposal_id?)`. It stores a plan and review in tmp; it does not write permanent materials. Each change describes one final topic:
+After completing the task or a substantive part, review the results through vector search by the conclusion and reading suitable existing topics. This review is mandatory even when no permanent write follows. Call `pcw_proposal_prepare(cycle_id, changes, replacements?, proposal_id?, no_changes_reason?)`. It stores a plan and review in tmp; it does not write permanent materials. Each change describes one final topic:
 
 ```json
 [
@@ -26,6 +26,8 @@ After vector search by the conclusion and reading suitable existing topics, call
 - Incoming link removal/redirection is computed before approval and included in the review. The apply checks complete file fingerprints, including links and paths, so concurrent navigation changes also conflict.
 - To revise an unapplied proposal, supply its `proposal_id`. The returned revision changes; earlier approval cannot apply the revised contents.
 
+If comparison establishes that nothing needs changing, pass `changes: []` with a nonempty `no_changes_reason` explaining that result. The tool records `status: no_changes` in tmp; explain the reason to the user. This requires no approval, apply call, knowledge write or embeddings. It is not a substitute for searching and comparing. Preparation binds the review to the current temporary material contents. New or changed temporary results require another review before closure; Current updates do not invalidate it.
+
 The response contains the proposal ID/revision, created-ID map, review path, structural effects and `review_changes`. Each review entry identifies its topic and paths, contains exact before/after body passages with nearby context, and names added/removed link targets. Creates/deletions contain the complete added/removed body; unchanged bodies are omitted. Automatic incoming-link changes are included. `pcw_proposal_read` also returns these entries when retrieving a saved proposal; no extra read is needed immediately after preparation.
 
 Present these changes in the chat, using the user's current conversation language for explanations, headings and questions. Keep quoted proposed wording exact and explain foreign-language quotations in that language. Use topic names and readable before/after passages, including conditions and evidence; do not paste JSON or substitute a UUID, file link or general summary for the contents. Large proposals may span several messages; ask for approval only after presenting their full scope. The review file supplements this presentation. One topic need not contain every fact from the task, and each fact need not become a separate topic.
@@ -40,7 +42,7 @@ Discard an exact rejected/unneeded unapplied proposal with `pcw_proposal_discard
 
 ## Close or restart
 
-`pcw_finish(cycle_id)` closes the cycle and deletes all its tmp when the task and memory discussion are complete. Call it without requesting separate permission; cleanup is part of the cycle. The tool has no `confirmation` parameter. Prepared proposals must be applied or discarded; unfinished applications/indexing and pending knowledge approval keep the cycle open. No-change and rejected-update cycles close without a fake permanent write. `cancel:true` is for actual user cancellation: it deletes temporary context, reports incomplete operation IDs, and does not roll back already written knowledge. Report the actual cleanup result in the conversation language.
+`pcw_finish(cycle_id)` closes the cycle and deletes all its tmp only after the current results have completed memory review and the task and memory discussion are complete. Call it without requesting separate permission; the tool has no `confirmation` parameter. Prepared proposals must be applied or discarded. Without a matching review, or with unfinished applications/indexing or pending knowledge approval, closure is blocked and tmp stays intact. A recorded no-change review and rejected updates need no fake permanent write. The check establishes that preparation covered the current tmp revision; it cannot judge the truth of the agent's explanation or authenticate human approval. An older proposal without a tmp revision needs a fresh review before normal closure. `cancel:true` is for actual user cancellation: it deletes temporary context, reports incomplete operation IDs, and does not roll back already written knowledge. Report the actual cleanup result in the conversation language.
 
 For a new explicit invocation use a fresh `request_id` with `pcw_startup`. Only if restarting a specific old task, pass its `restart_cycle_id`: its returns, Current, proposals and permission state are removed. Never choose a different active cycle as the cleanup target. Startup/finish retries are idempotent and do not erase subsequent work. Cycle IDs are not native session IDs; a clean-context cycle agent can use the same cycle.
 

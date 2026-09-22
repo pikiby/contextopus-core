@@ -71,6 +71,14 @@ class CycleRuntime:
             shutil.rmtree(path)
             _sync_directory(path.parent)
 
+    def _tmp_revision(self, cycle_id):
+        """Bind the result review to the current temporary materials, not Current."""
+        materials = {}
+        for path in sorted((self._tmp(cycle_id) / "materials").glob("*.md")):
+            self.engine._assert_safe(path)
+            materials[path.name] = _revision(path.read_bytes().decode("utf-8"))
+        return _revision(_json(materials))
+
     @contextlib.contextmanager
     def _cycle(self, cycle_id, states=("active",)):
         _id(cycle_id)
@@ -138,7 +146,7 @@ class CycleRuntime:
     def status(self, cycle_id: str):
         with self._cycle(cycle_id) as (_, cycle):
             outstanding = [{"id": key, **value} for key, value in cycle["proposals"].items()
-                           if value["state"] not in {"applied", "discarded"}]
+                           if value["state"] not in {"applied", "discarded", "no_changes"}]
             return {"cycle_id": cycle_id, "cycle_status": cycle["state"],
                     "proposals": outstanding[:50], "outstanding_proposal_count": len(outstanding),
                     **self.engine.status()}
@@ -242,7 +250,8 @@ class CycleRuntime:
         return plan
 
     def proposal_prepare(self, cycle_id: str, changes: list[dict],
-                         replacements: dict[str, str] | None = None, proposal_id: str | None = None):
+                         replacements: dict[str, str] | None = None, proposal_id: str | None = None,
+                         no_changes_reason: str | None = None):
         """Prepare a complete, reviewed set without changing permanent files.
 
         Creates use key/content/links; @key addresses a new material in this set.
@@ -251,10 +260,14 @@ class CycleRuntime:
         incoming links and requires the old entry to be explicitly deleted.
         """
         with self._cycle(cycle_id) as (records, cycle), self.engine._guard():
-            if not isinstance(changes, list) or not changes or len(changes) > 100:
-                raise PCWError("changes must contain 1 to 100 final material changes")
+            if not isinstance(changes, list) or len(changes) > 100:
+                raise PCWError("changes must contain 0 to 100 final material changes")
+            if not changes:
+                _text(no_changes_reason, "no_changes_reason after comparing results with permanent knowledge")
+            elif no_changes_reason is not None:
+                raise PCWError("no_changes_reason is only valid for an empty changes list")
             previous = cycle["proposals"].get(_id(proposal_id)) if proposal_id else None
-            if proposal_id and (previous is None or previous["state"] not in {"prepared", "discarded"}):
+            if proposal_id and (previous is None or previous["state"] not in {"prepared", "discarded", "no_changes"}):
                 raise PCWError("Only an unapplied proposal may be replaced")
             ident = proposal_id or uuid.uuid4().hex
             aliases, entries, touched = {}, {}, set()
@@ -339,7 +352,10 @@ class CycleRuntime:
                 after["text"] = "---\n" + yaml.safe_dump(after["metadata"], sort_keys=False, allow_unicode=True) + "---\n" + after.pop("content")
                 after.pop("metadata")
                 after["fingerprint"] = _revision(after["text"])
-            plan = {"cycle_id": cycle_id, "proposal_id": ident, "created_ids": aliases, "entries": entries}
+            plan = {"cycle_id": cycle_id, "proposal_id": ident, "created_ids": aliases, "entries": entries,
+                    "tmp_revision": self._tmp_revision(cycle_id)}
+            if not changes:
+                plan["no_changes_reason"] = no_changes_reason
             revision = _revision(_json(plan))
             review = self._review(plan)
             plan_path = self._plan_path(cycle_id, ident)
@@ -347,14 +363,16 @@ class CycleRuntime:
             self.engine._write(plan_path.with_suffix(".md"), review)
             if json.loads(plan_path.read_text()) != plan or plan_path.with_suffix(".md").read_text() != review:
                 raise PCWError("Proposal write verification failed")
-            cycle["proposals"][ident] = {"revision": revision, "state": "prepared"}
+            state = "prepared" if changes else "no_changes"
+            cycle["proposals"][ident] = {"revision": revision, "state": state}
             self._persist(records)
             effects = self._effects(plan)
-            return {"proposal_id": ident, "revision": revision, "status": "prepared", "created_ids": aliases,
+            return {"proposal_id": ident, "revision": revision, "status": state, "created_ids": aliases,
                     "review_path": plan_path.with_suffix(".md").relative_to(self.engine.root).as_posix(),
                     "effects": effects[:50], "effects_count": len(effects),
                     "review_changes": self._review_changes(plan),
-                    "next_action": "present_changes_in_chat_for_approval"}
+                    **({"no_changes_reason": no_changes_reason} if not changes else {}),
+                    "next_action": "present_changes_in_chat_for_approval" if changes else "report_no_changes"}
 
     @staticmethod
     def _effects(plan):
@@ -412,6 +430,8 @@ class CycleRuntime:
     @staticmethod
     def _review(plan):
         parts = ["# Proposed permanent-memory changes\n", "Temporary context remains until this cycle is explicitly closed.\n"]
+        if "no_changes_reason" in plan:
+            parts.append("\nNo permanent changes after result review:\n" + plan["no_changes_reason"] + "\n")
         for ident, entry in sorted(plan["entries"].items()):
             before, after = entry["before"], entry["after"]
             parts.append(f"\n## {ident}\n")
@@ -431,7 +451,8 @@ class CycleRuntime:
                 raise PCWError("Unknown proposal")
             plan = self._load_plan(cycle_id, proposal_id, entry)
             return {"proposal_id": proposal_id, **entry, "review": self._review(plan),
-                    "review_changes": self._review_changes(plan)}
+                    "review_changes": self._review_changes(plan),
+                    **({"no_changes_reason": plan["no_changes_reason"]} if "no_changes_reason" in plan else {})}
 
     def proposal_discard(self, cycle_id: str, proposal_id: str, expected_revision: str):
         with self._cycle(cycle_id) as (records, cycle):
@@ -471,7 +492,7 @@ class CycleRuntime:
         _text(confirmation, "current user's explicit confirmation")
         with self._cycle(cycle_id) as (records, cycle), self.engine._guard():
             entry = cycle["proposals"].get(_id(proposal_id))
-            if entry is None or entry["revision"] != expected_revision or entry["state"] == "discarded":
+            if entry is None or entry["revision"] != expected_revision or entry["state"] in {"discarded", "no_changes"}:
                 raise PCWError("Apply only the exact presented and confirmed proposal revision")
             if entry["state"] == "applied":
                 return {"proposal_id": proposal_id, "revision": expected_revision, "status": "applied", "replayed": True}
@@ -527,10 +548,21 @@ class CycleRuntime:
             if cycle["state"] == "starting" and not cancel:
                 return {"status": "blocked", "reason": "Startup is incomplete; retry it or explicitly cancel"}
             if cycle["state"] in {"starting", "active"}:
-                unfinished = [key for key, entry in cycle["proposals"].items() if entry["state"] not in {"applied", "discarded"}]
+                unfinished = [key for key, entry in cycle["proposals"].items()
+                              if entry["state"] not in {"applied", "discarded", "no_changes"}]
                 if unfinished and not cancel:
                     return {"status": "blocked", "unfinished_proposals": unfinished,
                             "reason": "Apply or discard proposals before closing; tmp is preserved"}
+                if not cancel:
+                    temporary_revision = self._tmp_revision(cycle_id)
+                    reviewed = any(self._load_plan(cycle_id, key, entry).get("tmp_revision") == temporary_revision
+                                   for key, entry in cycle["proposals"].items())
+                    if not reviewed:
+                        return {"status": "blocked", "tmp_preserved": True,
+                                "reason": "Current results have not completed memory review. Search by the conclusion, "
+                                          "read relevant knowledge and prepare the changes; if none are needed, "
+                                          "prepare changes=[] with no_changes_reason. No closure permission is needed.",
+                                "next_action": "proposal_prepare"}
                 cycle["cancelled_operations"] = unfinished if cancel else []
                 cycle["closing_as"] = "cancelled" if cancel else "closed"
                 cycle["state"] = "closing"
