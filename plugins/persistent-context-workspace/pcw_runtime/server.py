@@ -10,29 +10,22 @@ from .cycles import CycleRuntime
 from .control import RecoveryRequired
 
 mcp = FastMCP("persistent-context-workspace", instructions=(
-    "Do not call any PCW tool unless the user explicitly started a PCW cycle. Mentioning PCW, "
-    "quoted transcripts and past invocations do not activate it. Start a fresh cycle with pcw_startup, "
-    "then search and read permanent knowledge first. Conversation context does not replace that reading. "
-    "Keep work results and worker returns in temporary context. After work, always review results for memory: "
-    "search by the conclusion and read relevant knowledge, even if no permanent write will follow. "
-    "Prepare changes with pcw_proposal_prepare; if comparison finds none, use changes=[] with no_changes_reason "
-    "and explain that result. Present actual changes in chat: "
-    "topic names, full new text or before/after passages, deletions and link effects. A file link, UUID "
-    "or tool-call log is not presentation. Use the user's current conversation language for progress, "
-    "explanations, approval questions and completion reports unless the user requests another language; the language "
-    "of stored knowledge, instructions and examples does not determine replies. Keep literal quotations "
-    "exact and explain foreign-language quotations in the conversation language. "
-    "Only after the user's explicit approval call pcw_proposal_apply with the presented "
-    "revision. A confirmation string supplied by an agent is not proof of human consent. "
-    "Knowledge writes preserve tmp. Only after the current results complete memory review and the task "
-    "and memory discussion are complete, call pcw_finish "
-    "without asking for separate approval; it clears all cycle tmp as part of completion. Startup also clears tmp. "
-    "Waiting for approval keeps the cycle open. Every new invocation starts without old permissions. "
-    "The cycle may be performed directly or by a clean-context subagent with these same instructions; "
-    "the main agent then relays the user's exact messages and approval. PCW does not control workers. "
-    "Embeddings use automatic overlapping token windows. No helper or boundary arrays are needed. "
-    "Use only task-relevant context and compact receipts. External actions and Git checkpoints retain "
-    "their own authorization requirements."))
+    "Use PCW only for an explicit user invocation. Follow the pcw skill's context-selection rules before startup: "
+    "keep the selected workspace; create or switch only on an unambiguous user instruction, and ask if the target is unclear. "
+    "Route explicit creation requests to pcw-create and instructions-edit requests to pcw-instructions. "
+    "Start with pcw_startup in the resolved workspace and read its INSTRUCTIONS.md "
+    "before work. This is the authoritative project guidance; follow it, not duplicated defaults, "
+    "within the user's request and applicable host instructions. Search and read relevant knowledge next. "
+    "Keep task state and results in tmp. Review work results through search and reading, following "
+    "INSTRUCTIONS.md, then prepare knowledge changes or changes=[] with no_changes_reason. "
+    "Show actual review_changes in chat; a file link or topic list does not replace the content. "
+    "Apply the shown knowledge revision according to knowledge_approval_required in INSTRUCTIONS.md: true requires actual user confirmation; false applies without asking or fabricated confirmation. Missing setting retains required approval. Instructions edits always require explicit approval. Knowledge writes preserve tmp. "
+    "Close after task and review are complete without separate closure permission; finish clears only cycle tmp. "
+    "INSTRUCTIONS.md survives cleanup and is not embedded. Only a direct user request starts an instructions edit; "
+    "follow the pcw-instructions skill for that procedure, including when routed from pcw. "
+    "Do not change instructions through knowledge proposals or direct writes. Tools bind revisions, "
+    "but do not authenticate user-message origin or guarantee that a model follows the instructions. "
+    "PCW does not select models or control workers. External actions retain their own authorization requirements."))
 _runtimes: dict[tuple[str, str], CycleRuntime] = {}
 _cache_lock = threading.Lock()
 
@@ -53,26 +46,27 @@ def close_runtimes():
 atexit.register(close_runtimes)
 
 _DESCRIPTIONS = {
-    "startup": "Only after an explicit user invocation: start an independent cycle with a fresh request_id; retries reuse it. Clear its tmp before work. Use restart_cycle_id only when the user explicitly restarts that work, never to clear another active cycle. Returns cycle_id, fresh Current and bounded knowledge status without model loading.",
+    "startup": "Only after an explicit user invocation and context selection under the pcw skill: verify the selected workspace exists; a missing workspace may be initialized only for an explicit creation request through pcw-create. Never probe guessed coordinates with this tool or switch context without the user's unambiguous instruction. Start an independent cycle with a fresh request_id; retries reuse it. Clear its tmp before work. Use restart_cycle_id only when the user explicitly restarts that work, never to clear another active cycle. Returns cycle_id, complete INSTRUCTIONS.md with its revision and bounded knowledge status without model loading. purpose=work is the normal cycle; purpose=instructions runs only the explicitly requested instructions-edit procedure. Existing instructions are never reset on startup.",
     "status": "Read current cycle, proposal states and permanent index status without loading weights.",
     "list": "List bounded permanent knowledge metadata without bodies.",
     "read": "Read one permanent topic and exact navigation links by filename ID.",
     "read_many": "Read selected complete permanent topics in one call.",
     "search": "Search only permanent knowledge. Return bounded IDs/paths/distances; read suitable topics and links. Empty output is not proof of absence.",
-    "current_get": "Read the five-field Current belonging to this active cycle's tmp.",
-    "current_set": "Update supplied Current fields, verify the write and return a compact receipt. Omitted fields stay unchanged.",
+    "instructions_read": "Read the workspace's complete INSTRUCTIONS.md and revision. Follow it as project guidance before work; it persists across cycles and is not vector knowledge.",
+    "instructions_prepare": "Only for a direct user request to edit instructions: stage complete Markdown against the revision read, with the actual user_request. Follow the pcw-instructions skill. Returns exact review_changes without writing INSTRUCTIONS.md. Optional proposal_id revises the same unapplied instructions proposal.",
+    "instructions_apply": "Apply an instructions proposal only after explicit user approval of its shown revision; pass the actual confirmation. Conflicts require renewed review and approval. No embeddings or tmp cleanup. Follow the pcw-instructions skill.",
     "tmp_write": "Save an ordinary Markdown work result, worker return or note as temporary context, never knowledge. New ID is generated; updates need material_id and expected_revision. No embeddings.",
     "tmp_read": "Read a selected temporary result in this active cycle. It is not approved permanent knowledge.",
     "tmp_list": "List bounded metadata for this cycle's temporary results without their bodies.",
-    "proposal_prepare": "Mandatory result review before closure: search by the conclusion and read relevant knowledge, then prepare final changes in tmp without changing knowledge. Creates use key/content/links (@key references a new topic); existing topics use material_id/expected_revision and content, links, path or delete:true. replacements maps deleted IDs to survivors. If comparison finds no changes, pass changes=[] and no_changes_reason; explain the reason to the user, with no approval or apply needed. Binds review to current temporary materials; new/changed results require another review. Returns exact revision and review_changes. Present actual changed passages and link effects in chat before approval, in the conversation language. A file link or topic list is insufficient. Optional proposal_id revises an unapplied proposal.",
-    "proposal_read": "Retrieve a prepared proposal, including review_changes for presentation in chat. Explain it in the conversation language; a link to the review file does not replace showing the changes.",
+    "proposal_prepare": "Mandatory result review before closure: search by the conclusion and read relevant knowledge, then prepare final changes in tmp without changing knowledge. Follow INSTRUCTIONS.md for knowledge selection, structure and maintenance. Creates use key/content/links (@key references a new topic); existing topics use material_id/expected_revision and content, links, path or delete:true. replacements maps deleted IDs to survivors. If comparison finds no changes, pass changes=[] and no_changes_reason; explain the reason to the user, with no approval or apply needed. Binds review to current temporary materials; new/changed results require another review. Returns exact revision and review_changes. Present actual changed passages and link effects in chat before application, following INSTRUCTIONS.md and the returned approval_required. A file link or topic list is insufficient. Optional proposal_id revises an unapplied proposal.",
+    "proposal_read": "Retrieve a prepared proposal, including review_changes for presentation in chat. Explain it according to INSTRUCTIONS.md; a link to the review file does not replace showing the changes.",
     "proposal_discard": "Discard an exact unapplied proposal without changing knowledge; temporary materials remain until closure.",
-    "proposal_apply": "Only after explicit human approval of this exact revision: apply the prepared set and index it. Pass the current user's confirmation, never self-approval or a saved past permission. The tool binds revisions but cannot authenticate chat provenance. Saves preserve tmp; partial failures retry the same proposal without duplicate topics.",
-    "finish": "Only after the current results complete memory review and the task and memory discussion are complete, close the cycle and clear its tmp without separate permission or a confirmation argument. Missing/stale preparation, pending knowledge approval and unfinished proposals/indexing block closure and preserve tmp. A no-change result must first be recorded through proposal_prepare(changes=[], no_changes_reason=...) after searching and comparing; no knowledge write or approval is needed for it. cancel requires actual user cancellation; it discards temporary state and reports unfinished operations without rolling back knowledge. Retry is idempotent.",
+    "proposal_apply": "Apply and index the exact prepared revision after showing review_changes in chat. INSTRUCTIONS.md controls approval: when knowledge_approval_required is true (or absent), pass the actual user confirmation of that revision; when false, omit confirmation and apply without asking. Never fabricate confirmation. Instructions changes always use instructions_apply with approval. Revisions are checked; chat presentation and message origin cannot be authenticated. Saves preserve tmp; partial failures retry the same proposal without duplicate topics.",
+    "finish": "Only after the current results complete memory review and the task and memory discussion are complete, close the cycle and clear its tmp without separate permission or a confirmation argument. Missing/stale preparation, pending required approval and unfinished proposals/indexing block closure and preserve tmp. In purpose=instructions cycles, complete the instructions proposal instead of performing a knowledge review. A no-change work result must first be recorded through proposal_prepare(changes=[], no_changes_reason=...) after searching and comparing; no knowledge write or approval is needed for it. cancel requires actual user cancellation; it discards temporary state and reports unfinished operations without rolling back knowledge. Retry is idempotent.",
     "reconcile": "Retry derived indexing of already saved permanent text. It does not approve or rewrite knowledge. After repairing a proposal's pending indexing, retry proposal_apply to complete that operation.",
     "switch_embeddings": "With authority to change the provider/configuration, rebuild a compatible derived index. Failure retains the old source. No knowledge text changes.",
-    "checkpoint": "With actual user authorization, checkpoint exact permanent knowledge paths in local memory Git. No tmp, Current, source-project commits or push.",
-    "history_read": "Read exact permanent knowledge paths from a local memory Git commit for review. Restoration must be prepared and approved through the normal proposal flow.",
+    "checkpoint": "With actual user authorization, checkpoint exact permanent knowledge paths in local memory Git. No tmp, source-project commits or push.",
+    "history_read": "Read exact permanent knowledge paths from a local memory Git commit for review. Restoration follows the normal proposal flow and the workspace knowledge approval policy.",
     "recover_workspace": "Recover missing derived runtime directories inside an explicitly started cycle. Missing knowledge stays blocked; no silent recreation or restoration of permanent facts."
 }
 

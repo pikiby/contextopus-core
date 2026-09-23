@@ -1,0 +1,15 @@
+---
+name: pcw-create
+description: Create a new PCW context only on an explicit user request, directly or routed from pcw. Help the user choose its location and task in ordinary language.
+---
+
+# Create a PCW context
+
+Follow the main skill's [Context selection](../pcw/SKILL.md#context-selection) rules. An unavailable or empty context is not a creation request.
+
+1. Establish the explicit request to create a new context. Accept the user's task and location in any clear form; do not require parameter names, a command syntax or repetition of information already supplied. "For this task" is sufficient when that task is clear.
+2. Resolve the intended task and location before startup. If placement is unspecified, offer concrete options grounded in known paths: under the relevant project, in an existing shared context location if one is known, or a location the user supplies. Show each proposed full workspace path and wait for the user's selection. Do not invent an existing shared directory or silently select the working directory. If the task is unclear, offer plausible task scopes from the request or ask for the user's own description. Combine missing placement and task questions when useful.
+3. Translate the user's choice into `work_root` and a safe single-directory `workspace` name, showing the resulting absolute `<work_root>/.pcw/<workspace>` path and purpose. Verify the location read-only. If the chosen path already exists, ask whether to use it or choose another location; do not overwrite it or silently add a suffix. If the parent `work_root` needs creation, include that directory in the proposed placement before creating it. An already unambiguous creation request and destination need no additional permission question.
+4. Call `pcw_startup` for the selected new workspace with a fresh `request_id` and `purpose: "work"`. Retry only with that same ID and coordinates. Read the complete returned `INSTRUCTIONS.md` and inspect the returned memory status. Startup initializes the standard instructions; it does not customize them from the task description. A request to customize them follows [pcw-instructions](../pcw-instructions/SKILL.md), including its review and approval procedure. For an actual startup failure, read [Setup](../pcw/references/setup.md).
+5. If the user also authorized work on the task, continue the main skill's cycle at knowledge search, using the new workspace and returned `cycle_id`; do not start a second cycle. Otherwise complete only context creation: search the new knowledge, prepare `changes: []` with `no_changes_reason` explaining that only an empty context was requested, then call `pcw_finish`. Do not manufacture permanent facts or execute the described future task merely to populate the context.
+6. Report the actual full workspace path and its intended task. Keep those exact coordinates for continuation under the context-selection rules; if they later become unclear, ask rather than reconstructing a name. Creating this context does not move other contexts or change another session's selection.

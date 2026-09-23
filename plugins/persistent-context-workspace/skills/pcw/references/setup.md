@@ -1,6 +1,6 @@
 # Runtime setup and recovery
 
-Use this reference when the bundled `pcw` tools are unavailable or an embedding operation needs prerequisite checks. Only after an explicit user invocation, the cycle agent calls `pcw_startup` with a fresh request_id for the selected workspace; it starts the cycle, clears its tmp and returns cycle_id plus bounded state. Reuse request_id for a retry, never as authority for another invocation. A new conversation alone is not a reason to launch diagnostics first. This availability check does not prove that model weights are cached or embeddings work.
+Use this reference when the bundled `pcw` tools are unavailable or an embedding operation needs prerequisite checks. Resolve the workspace first under [Context selection](../SKILL.md#context-selection); setup is not permission to create or switch context, and startup is not a discovery probe. Only after an explicit user invocation, the cycle agent calls `pcw_startup` with a fresh request_id for the selected workspace; it starts the cycle, clears its tmp and returns cycle_id, full INSTRUCTIONS.md and bounded state. Reuse request_id for a retry, never as authority for another invocation. A new conversation alone is not a reason to launch diagnostics first. This availability check does not prove that model weights are cached or embeddings work.
 
 When diagnostics or repair are needed, the primary reuses existing authority and established observations and performs bounded PCW setup work itself. Ask only for authority that is actually missing. Setup does not discover agent models, reasoning capabilities or tool maps, and does not by itself assign a worker the full PCW cycle. A missing interpreter or distribution does not require broad source research or web diagnosis.
 
@@ -41,7 +41,7 @@ The primary repeats cheap checks after installation. It uses the deeper import c
 
 Use the local checks only when the selected provider is local. Preserve actionable import failures and their tracebacks. A dependency inventory marked ready is not equivalent to a successful deep import check.
 
-If consent is refused, execution is denied, or installation fails due to network, disk, package resolution, or permissions, report that concrete blocker and any partial installation effects. Do not repeatedly attempt the same denied action, switch providers, or claim memory/index/checkpoint success. Retain the user's task and the next required action in the conversation; an unavailable runtime cannot save a new Current or checkpoint through its tools.
+If consent is refused, execution is denied, or installation fails due to network, disk, package resolution, or permissions, report that concrete blocker and any partial installation effects. Do not repeatedly attempt the same denied action, switch providers, or claim memory/index/checkpoint success. Retain the user's task and the next required action in the conversation; an unavailable runtime cannot save temporary notes or a checkpoint through its tools.
 
 ## Local model and live connection
 

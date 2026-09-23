@@ -301,7 +301,7 @@ class PCWRuntime:
         with self._guard():
             result = self.status()
             result.pop("active")
-            return {"current": self.current_get(), **result}
+            return result
 
     @staticmethod
     def _schema(dimensions: int):
@@ -511,10 +511,10 @@ class PCWRuntime:
                     "active": self.active}
 
     def durable_state(self):
-        """Observable task boundary, including YAML-only and Current changes."""
+        """Observable durable boundary, including project instructions and metadata changes."""
         with self._guard():
             files = {}
-            for path in [self.root / "current.md", *self.knowledge.rglob("*.md")]:
+            for path in [self.root / "INSTRUCTIONS.md", *self.knowledge.rglob("*.md")]:
                 self._assert_safe(path)
                 if path.is_file():
                     files[path.relative_to(self.root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -1094,98 +1094,16 @@ class PCWRuntime:
                         "error": f"Pointer published; durability confirmation failed: {publication_warning}"}
             return {"status": "ok", "reembedded": new_table is not None, "active": active}
 
-    _CURRENT_FIELDS = ("goal", "constraints", "completion", "step", "blocker")
-    _CURRENT_HEADINGS = {
-        "goal": "Goal", "constraints": "Constraints", "completion": "Completion", "step": "Current step", "blocker": "Blocker",
-    }
-
-    @classmethod
-    def _render_current(cls, current: dict[str, str]) -> str:
-        sections = []
-        for field in cls._CURRENT_FIELDS:
-            value = current[field]
-            if not isinstance(value, str):
-                raise PCWError(f"Current {field} must be a text string")
-            # The length marker makes each readable section unambiguous even
-            # when a value contains another section heading or a fenced block.
-            sections.append(
-                f"# {cls._CURRENT_HEADINGS[field]}\n"
-                f"<!-- pcw-current-length: {len(value)} -->\n"
-                f"{value}")
-        return "\n\n".join(sections) + "\n"
-
-    @classmethod
-    def _parse_current_markdown(cls, text: str) -> dict[str, str] | None:
-        cursor = 0
-        values = {}
-        for index, field in enumerate(cls._CURRENT_FIELDS):
-            heading = f"# {cls._CURRENT_HEADINGS[field]}\n"
-            prefix = heading if index == 0 else "\n\n" + heading
-            if not text.startswith(prefix, cursor):
-                return None
-            start = cursor + len(prefix)
-            marker_end = text.find("\n", start)
-            marker = text[start:marker_end] if marker_end >= 0 else ""
-            match = re.fullmatch(r"<!-- pcw-current-length: ([0-9]+) -->", marker)
-            if match is None:
-                return None
-            value_start = marker_end + 1
-            value_end = value_start + int(match.group(1))
-            if value_end > len(text):
-                return None
-            values[field] = text[value_start:value_end]
-            cursor = value_end
-        if text[cursor:] != "\n":
-            return None
-        return values
-
-    def current_get(self):
-        with self._guard():
-            path = self.root / "current.md"
-            self._assert_safe(path)
-            if not path.exists():
-                return {field: "" for field in self._CURRENT_FIELDS}
-            text = path.read_bytes().decode("utf-8")
-            current = self._parse_current_markdown(text)
-            if current is not None:
-                return current
-            metadata, body = _parse(text)
-            # Known YAML-only Current is safe to translate on the next write.
-            # Other Markdown (including arbitrary YAML-fronted documents) must
-            # be returned verbatim until the caller explicitly replaces it.
-            if metadata.get("pcw_current") == 1 and not body and set(metadata).issubset({"pcw_current", *self._CURRENT_FIELDS}):
-                return {field: metadata.get(field, "") for field in self._CURRENT_FIELDS}
-            return {"legacy_content": text, "requires_explicit_replacement": True}
-
-    def current_set(self, goal: str | None = None, constraints: str | None = None,
-                    completion: str | None = None, step: str | None = None,
-                    blocker: str | None = None, replace_legacy: bool = False):
-        with self._guard():
-            current = self.current_get()
-            if "legacy_content" in current:
-                if not replace_legacy or any(value is None for value in (goal, constraints, completion)):
-                    raise PCWError("Legacy Current: read it and explicitly replace with goal, constraints, completion and replace_legacy=true")
-                current = {key: "" for key in self._CURRENT_FIELDS}
-            for key, value in {"goal": goal, "constraints": constraints, "completion": completion,
-                               "step": step, "blocker": blocker}.items():
-                if value is not None:
-                    current[key] = value
-            self._write(self.root / "current.md", self._render_current(current))
-            observed = self.current_get()
-            if observed != current:
-                raise PCWError("Current read-back differs from the requested fields")
-            return observed
-
     def _git_paths(self, paths: list[str]):
         if not paths:
             raise PCWError("Specify exact memory files for the Git operation")
         for relative in paths:
-            if relative == "current.md":
+            if relative == "INSTRUCTIONS.md":
                 self._assert_safe(self.root / relative)
             elif relative.startswith("knowledge/"):
                 self._knowledge_path(relative[len("knowledge/"):])
             else:
-                raise PCWError("Git scope allows only current.md and exact knowledge/*.md paths")
+                raise PCWError("Git scope allows only INSTRUCTIONS.md and exact knowledge/*.md paths")
         return list(dict.fromkeys(paths))
 
     def _git(self, *args, check=True):

@@ -221,37 +221,6 @@ def test_gap_filter_order_and_no_plateau():
     assert [x["id"] for x in select_candidates(rows, SearchConfig())] == ["0", "2"]
 
 
-def test_current_focus_survives_step_update_and_legacy_is_explicit(memory):
-    runtime, _ = memory
-    runtime.current_set(goal="Deliver result", constraints="Read-only", completion="Evidence ready", step="Inspect")
-    current = runtime.current_set(step="Interpret", blocker="missing input")
-    assert current == {"goal": "Deliver result", "constraints": "Read-only", "completion": "Evidence ready", "step": "Interpret", "blocker": "missing input"}
-    runtime.current_set(blocker="")
-    assert runtime.current_get()["blocker"] == ""
-    current_text = (runtime.root / "current.md").read_text()
-    assert "# Goal" in current_text and "# Current step" in current_text and "# Blocker" in current_text
-    exact = {
-        "goal": "line 1\n\n# Constraints\nlooks like a heading\n",
-        "constraints": "```py\n# Completion\nprint('kept')\n```\n",
-        "completion": "done\n\n",
-        "step": "# Blocker\ninside value",
-        "blocker": "trailing spaces  \n\n",
-    }
-    runtime.current_set(**exact)
-    assert runtime.current_get() == exact
-    (runtime.root / "current.md").write_text("---\npcw_current: 1\ngoal: Legacy goal\nconstraints: Legacy limits\ncompletion: Legacy done\nstep: Legacy step\nblocker: Legacy blocker\n---\n")
-    assert runtime.current_get()["goal"] == "Legacy goal"
-    runtime.current_set(step="Translated")
-    assert runtime.current_get() == {"goal": "Legacy goal", "constraints": "Legacy limits", "completion": "Legacy done", "step": "Translated", "blocker": "Legacy blocker"}
-    (runtime.root / "current.md").write_text("# Goal\n\nUnframed legacy Markdown\n\n# Constraints\n\nMust stay verbatim\n")
-    assert runtime.current_get()["requires_explicit_replacement"]
-    (runtime.root / "current.md").write_text("# Old current\nDo not erase")
-    assert runtime.current_get()["requires_explicit_replacement"]
-    with pytest.raises(PCWError, match="Legacy"):
-        runtime.current_set(step="new")
-    runtime.current_set(goal="Same", constraints="Same", completion="Done", replace_legacy=True)
-    assert runtime.current_get()["goal"] == "Same"
-
 
 def test_switch_success_reuses_stored_parts_and_removes_old_table(memory):
     runtime, factory = memory

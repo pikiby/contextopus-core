@@ -81,8 +81,14 @@ class PluginContractTests(unittest.TestCase):
         self.assertEqual("local", entries[0]["source"]["source"])
         self.assertEqual(PLUGIN.resolve(), (ROOT / entries[0]["source"]["path"]).resolve())
 
-    def test_only_one_explicit_skill_is_packaged(self):
-        self.assertEqual([SKILL / "SKILL.md"], sorted((PLUGIN / "skills").glob("*/SKILL.md")))
+    def test_explicit_skills_are_packaged(self):
+        expected = {PLUGIN / "skills" / name / "SKILL.md"
+                    for name in ("pcw", "pcw-instructions", "pcw-create")}
+        self.assertEqual(expected, set((PLUGIN / "skills").glob("*/SKILL.md")))
+        for entrypoint in expected:
+            ui = (entrypoint.parent / "agents" / "openai.yaml").read_text()
+            self.assertIn("allow_implicit_invocation: false", ui)
+            self.assertEqual(entrypoint.parent.name, frontmatter(entrypoint)["name"])
         metadata = frontmatter(SKILL / "SKILL.md")
         self.assertEqual("pcw", metadata["name"])
         self.assertTrue(metadata["description"].strip())
@@ -111,13 +117,13 @@ class PluginContractTests(unittest.TestCase):
 
     def test_documented_tools_exist_in_runtime(self):
         documented = set()
-        for path in SKILL.rglob("*.md"):
+        for path in (PLUGIN / "skills").rglob("*.md"):
             documented.update(re.findall(r"\bpcw_[a-z_]+\b", path.read_text()))
         self.assertTrue(documented)
         self.assertEqual(set(), documented - server_tools())
 
     def test_packaged_docs_have_no_legacy_entrypoints_or_scaffolds(self):
-        paths = [ROOT / "README.md", ROOT / "PLAN.md", *SKILL.rglob("*.md")]
+        paths = [ROOT / "README.md", ROOT / "PLAN.md", *(PLUGIN / "skills").rglob("*.md")]
         for path in paths:
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("$pcw-run", text, str(path))
@@ -238,12 +244,17 @@ class LauncherTests(unittest.TestCase):
                         self.assertTrue({"work_root", "workspace"} <= set(schema["required"]))
                     self.assertEqual([], list(Path(directory).iterdir()))
                     schemas = {tool["name"]: tool["inputSchema"] for tool in tools}
-                    for removed in ("pcw_create", "pcw_update", "pcw_delete", "pcw_links", "pcw_merge", "pcw_restore"):
+                    for removed in ("pcw_create", "pcw_update", "pcw_delete", "pcw_links", "pcw_merge", "pcw_restore", "pcw_current_get", "pcw_current_set"):
                         self.assertNotIn(removed, schemas)
                     self.assertIn("expected_revision", schemas["pcw_proposal_apply"]["required"])
-                    self.assertIn("confirmation", schemas["pcw_proposal_apply"]["required"])
+                    self.assertIn("confirmation", schemas["pcw_proposal_apply"]["properties"])
+                    self.assertNotIn("confirmation", schemas["pcw_proposal_apply"]["required"])
                     self.assertNotIn("confirmation", schemas["pcw_finish"]["properties"])
                     self.assertIn("no_changes_reason", schemas["pcw_proposal_prepare"]["properties"])
+                    self.assertEqual({"request_id", "purpose", "restart_cycle_id", "work_root", "workspace"},
+                                     set(schemas["pcw_startup"]["properties"]))
+                    self.assertIn("user_request", schemas["pcw_instructions_prepare"]["required"])
+                    self.assertIn("confirmation", schemas["pcw_instructions_apply"]["required"])
                     for name, schema in schemas.items():
                         if name != "pcw_startup":
                             self.assertIn("cycle_id", schema["required"])
@@ -287,9 +298,14 @@ class LauncherTests(unittest.TestCase):
                     other = call("proposal_apply", proposal_id=second["proposal_id"], expected_revision=second["revision"],
                                  confirmation="Apply the displayed related fact")["materials"][0]
                     self.assertEqual([item["id"]], call("read", material_id=other["id"])["links"])
-                    current = call("current_set", goal="Protocol memory", constraints="Temporary files", completion="Saved", step="Done", blocker="")
-                    self.assertEqual("saved", current["status"])
-                    self.assertEqual("Protocol memory", call("current_get")["goal"])
+                    instructions = call("instructions_read")
+                    self.assertEqual(opened["instructions"], instructions)
+                    edit = call("instructions_prepare", content="# Project rules\nTest-specific instructions.\n",
+                                expected_revision=instructions["revision"], user_request="Replace the fixture instructions")
+                    self.assertEqual(instructions, call("instructions_read"))
+                    self.assertEqual("applied", call("instructions_apply", proposal_id=edit["proposal_id"],
+                                     expected_revision=edit["revision"], confirmation="Apply the shown rules")["status"])
+                    self.assertEqual("# Project rules\nTest-specific instructions.\n", call("instructions_read")["content"])
                     self.assertEqual("Protocol fixture content", call("tmp_read", material_id=pending["id"])["content"])
                     shutil.rmtree(Path(directory) / ".pcw/protocol/.pcw-runtime")
                     self.assertEqual("recovery_required", call("status")["status"])
@@ -324,12 +340,14 @@ class MemoryFixtureTests(unittest.TestCase):
             self.assertNotIn("id", metadata)
             self.assertEqual(material_id, path.name)
 
-    def test_current_is_readable_five_section_markdown(self):
-        current = (FIXTURE / "current.md").read_text(encoding="utf-8")
-        self.assertFalse(current.startswith("---\n"))
-        sections = re.findall(r"^# (.+)$", current, re.MULTILINE)
-        self.assertEqual(["Goal", "Constraints", "Completion", "Current step", "Blocker"], sections)
-        self.assertIn("current-contract.md", current)
+    def test_instructions_template_is_packaged_as_one_resource(self):
+        package = tomllib.loads((PLUGIN / "pyproject.toml").read_text())
+        self.assertIn("default_instructions.md", package["tool"]["setuptools"]["package-data"]["pcw_runtime"])
+        default = PLUGIN / "pcw_runtime" / "default_instructions.md"
+        self.assertTrue(default.read_text().strip())
+        fixture = (FIXTURE / "INSTRUCTIONS.md").read_text()
+        self.assertIn("instructions-contract.md", fixture)
+        self.assertFalse((FIXTURE / "current.md").exists())
 
 
 if __name__ == "__main__":

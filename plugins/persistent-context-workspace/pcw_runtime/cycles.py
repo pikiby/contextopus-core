@@ -1,6 +1,7 @@
 """Explicit, host-independent PCW cycles over the existing knowledge engine.
 
-Human approval is an instruction boundary. This module binds application to an
+Human approval follows workspace policy for knowledge and is always required
+for instructions. This module binds application to an
 exact prepared revision; it cannot authenticate the origin of a chat message.
 Only cycle metadata survives cleanup. Drafts, returns and proposal bodies do not.
 """
@@ -9,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import difflib
+from importlib.resources import files
 import json
 import os
 from pathlib import Path
@@ -37,6 +39,33 @@ def _sync_directory(path):
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def _knowledge_approval_required(content):
+    """Read only the explicit setting, never infer permission from prose.
+
+    Older/custom instructions without the setting retain manual approval.
+    """
+    lines = content.splitlines()
+    if not lines or lines[0] != "---":
+        return True
+    try:
+        end = lines.index("---", 1)
+        node = yaml.compose("\n".join(lines[1:end]), Loader=yaml.SafeLoader)
+    except (ValueError, yaml.YAMLError) as exc:
+        raise PCWError("Invalid INSTRUCTIONS.md frontmatter") from exc
+    if node is None:
+        return True
+    if not isinstance(node, yaml.MappingNode):
+        raise PCWError("INSTRUCTIONS.md frontmatter must be a mapping")
+    values = [value for key, value in node.value
+              if isinstance(key, yaml.ScalarNode) and key.value == "knowledge_approval_required"]
+    if not values:
+        return True
+    if len(values) != 1 or not isinstance(values[0], yaml.ScalarNode) or (
+            values[0].tag != "tag:yaml.org,2002:bool" or values[0].value.lower() not in {"true", "false"}):
+        raise PCWError("knowledge_approval_required must be one boolean true or false")
+    return values[0].value.lower() == "true"
 
 
 class CycleRuntime:
@@ -72,7 +101,7 @@ class CycleRuntime:
             _sync_directory(path.parent)
 
     def _tmp_revision(self, cycle_id):
-        """Bind the result review to the current temporary materials, not Current."""
+        """Bind knowledge review to the temporary work results."""
         materials = {}
         for path in sorted((self._tmp(cycle_id) / "materials").glob("*.md")):
             self.engine._assert_safe(path)
@@ -92,13 +121,32 @@ class CycleRuntime:
                 raise PCWError("Unknown or inactive cycle; do not reuse authorization from an earlier cycle")
             yield records, cycle
 
-    def startup(self, request_id: str, goal: str = "", constraints: str = "",
-                completion: str = "", restart_cycle_id: str | None = None):
+    def _instructions(self, initialize=False):
+        path = self.engine.root / "INSTRUCTIONS.md"
+        self.engine._assert_safe(path)
+        marker = self.control.root / "instructions-initialized.json"
+        self.control.safe(marker)
+        if not path.exists():
+            if not initialize or marker.exists():
+                raise PCWError("INSTRUCTIONS.md is missing; restore the user's instructions, do not reset them to defaults")
+            content = files("pcw_runtime").joinpath("default_instructions.md").read_text(encoding="utf-8")
+            self.engine._write(path, content)
+        content = path.read_bytes().decode("utf-8")
+        if initialize and not marker.exists():
+            self.control.write(marker, _json({"initialized": True}))
+        return {"path": "INSTRUCTIONS.md", "content": content, "revision": _revision(content)}
+
+    @staticmethod
+    def _require_work(cycle):
+        if cycle.get("purpose", "work") != "work":
+            raise PCWError("This cycle is only for instructions; start a work cycle for knowledge operations")
+
+    def startup(self, request_id: str, purpose: str = "work", restart_cycle_id: str | None = None):
         """One fresh request_id per human invocation; retries reuse that ID."""
         _id(request_id)
-        current = dict(goal=goal, constraints=constraints, completion=completion, step="", blocker="")
-        rendered = self.engine._render_current(current)
-        signature = _revision(_json([current, restart_cycle_id]))
+        if purpose not in {"work", "instructions"}:
+            raise PCWError("purpose must be work or instructions")
+        signature = _revision(_json([purpose, restart_cycle_id]))
         with self.control.guard():
             records = self._records()
             cycle_id = records["starts"].get(request_id)
@@ -108,7 +156,8 @@ class CycleRuntime:
                     raise PCWError("request_id already identifies a different invocation")
                 if cycle["state"] != "starting":
                     return {"cycle_id": cycle_id, "status": cycle["state"], "replayed": True,
-                            "tmp_cleared": False}
+                            "tmp_cleared": False, "purpose": cycle.get("purpose", "work"),
+                            **({"instructions": self._instructions()} if cycle["state"] == "active" else {})}
             else:
                 if restart_cycle_id is not None:
                     old = records["cycles"].get(_id(restart_cycle_id))
@@ -117,7 +166,7 @@ class CycleRuntime:
                     old["state"] = "restarting"
                 cycle_id = uuid.uuid4().hex
                 cycle = {"state": "starting", "start_signature": signature, "proposals": {},
-                         "restart_cycle_id": restart_cycle_id}
+                         "restart_cycle_id": restart_cycle_id, "purpose": purpose}
                 records["starts"][request_id] = cycle_id
                 records["cycles"][cycle_id] = cycle
                 self._persist(records)
@@ -126,21 +175,23 @@ class CycleRuntime:
             except RecoveryRequired as exc:
                 return {**exc.details, "cycle_id": cycle_id}
             with self.engine._guard():
+                instructions = self._instructions(initialize=True)
                 if restart_cycle_id is not None:
                     self._purge(restart_cycle_id)
                     records["cycles"][restart_cycle_id] = {"state": "replaced", "proposals": {},
                         "start_signature": records["cycles"][restart_cycle_id]["start_signature"]}
                 self._purge(cycle_id)
-                self.engine._write(self._tmp(cycle_id) / "current.md", rendered)
+                self._tmp(cycle_id).mkdir(parents=True, exist_ok=True)
                 cycle["state"] = "active"
                 self._persist(records)
                 status = self.engine.status()
                 status.pop("active")
                 return {"cycle_id": cycle_id, "status": "active", "tmp_cleared": True,
-                        "current": current, **status}
+                        "purpose": purpose, "instructions": instructions, **status}
 
     def _call(self, cycle_id, method, **kwargs):
-        with self._cycle(cycle_id):
+        with self._cycle(cycle_id) as (_, cycle):
+            self._require_work(cycle)
             return getattr(self.engine, method)(**kwargs)
 
     def status(self, cycle_id: str):
@@ -165,35 +216,14 @@ class CycleRuntime:
         return self._call(cycle_id, "search", query=query, N=N, d_max=d_max,
                           min_jump=min_jump, multiplier=multiplier)
 
-    def current_get(self, cycle_id: str):
+    def instructions_read(self, cycle_id: str):
         with self._cycle(cycle_id):
-            path = self._tmp(cycle_id) / "current.md"
-            self.engine._assert_safe(path)
-            if not path.exists():
-                raise PCWError("Current disappeared from the active cycle")
-            value = self.engine._parse_current_markdown(path.read_bytes().decode("utf-8"))
-            if value is None:
-                raise PCWError("Invalid cycle Current")
-            return value
-
-    def current_set(self, cycle_id: str, goal: str | None = None, constraints: str | None = None,
-                    completion: str | None = None, step: str | None = None, blocker: str | None = None):
-        with self._cycle(cycle_id):
-            current = self.current_get(cycle_id)
-            for field, value in dict(goal=goal, constraints=constraints, completion=completion,
-                                     step=step, blocker=blocker).items():
-                if value is not None:
-                    current[field] = value
-            self.engine._write(self._tmp(cycle_id) / "current.md", self.engine._render_current(current))
-            if self.current_get(cycle_id) != current:
-                raise PCWError("Current verification failed")
-            return {"cycle_id": cycle_id, "status": "saved", "updated": [k for k, v in
-                    dict(goal=goal, constraints=constraints, completion=completion, step=step, blocker=blocker).items()
-                    if v is not None]}
+            return self._instructions()
 
     def tmp_write(self, cycle_id: str, content: str, material_id: str | None = None,
                   expected_revision: str | None = None):
-        with self._cycle(cycle_id):
+        with self._cycle(cycle_id) as (_, cycle):
+            self._require_work(cycle)
             if not isinstance(content, str):
                 raise PCWError("content must be ordinary Markdown text")
             ident = _id(material_id) if material_id else uuid.uuid4().hex + ".md"
@@ -249,6 +279,98 @@ class CycleRuntime:
             raise PCWError("Prepared review was changed; prepare and present it again")
         return plan
 
+    def _proposal_id(self, cycle_id, cycle, proposal_id, kind):
+        if proposal_id is None:
+            return uuid.uuid4().hex
+        previous = cycle["proposals"].get(_id(proposal_id))
+        if previous is None or previous["state"] not in {"prepared", "discarded", "no_changes"}:
+            raise PCWError("Only an unapplied proposal may be replaced")
+        plan = self._load_plan(cycle_id, proposal_id, previous)
+        if plan.get("kind", "knowledge") != kind:
+            raise PCWError("Cannot change a proposal's kind")
+        return proposal_id
+
+    def _save_plan(self, records, cycle, plan, state):
+        revision = _revision(_json(plan))
+        review = self._review(plan)
+        path = self._plan_path(plan["cycle_id"], plan["proposal_id"])
+        self.engine._write(path, _json(plan))
+        self.engine._write(path.with_suffix(".md"), review)
+        if json.loads(path.read_text()) != plan or path.with_suffix(".md").read_text() != review:
+            raise PCWError("Proposal write verification failed")
+        cycle["proposals"][plan["proposal_id"]] = {"revision": revision, "state": state}
+        self._persist(records)
+        effects = self._effects(plan)
+        return {"proposal_id": plan["proposal_id"], "revision": revision, "status": state,
+                "kind": plan.get("kind", "knowledge"), "created_ids": plan["created_ids"],
+                "review_path": path.with_suffix(".md").relative_to(self.engine.root).as_posix(),
+                "effects": effects[:50], "effects_count": len(effects),
+                "review_changes": self._review_changes(plan),
+                **({"no_changes_reason": plan["no_changes_reason"]} if state == "no_changes" else {}),
+                **self._review_policy(plan, state)}
+
+    @staticmethod
+    def _review_policy(plan, state):
+        required = plan.get("kind") == "instructions" or plan.get("knowledge_approval_required", True)
+        return {"approval_required": required,
+                "next_action": "report_no_changes" if state == "no_changes" else
+                    "present_changes_in_chat_for_approval" if required else "present_changes_in_chat_then_apply"}
+
+    def instructions_prepare(self, cycle_id: str, content: str, expected_revision: str,
+                             user_request: str, proposal_id: str | None = None):
+        """Only a direct user request starts an instructions edit; preparation is temporary."""
+        _text(user_request, "user's direct request to change instructions")
+        if not isinstance(content, str):
+            raise PCWError("content must be ordinary Markdown text")
+        _knowledge_approval_required(content)
+        with self._cycle(cycle_id) as (records, cycle):
+            current = self._instructions()
+            if current["revision"] != expected_revision:
+                raise PCWError("Instructions changed since they were read; read them again")
+            ident = self._proposal_id(cycle_id, cycle, proposal_id, "instructions")
+            before = {"path": current["path"], "text": current["content"], "fingerprint": current["revision"]}
+            after = {"path": current["path"], "text": content, "fingerprint": _revision(content)}
+            plan = {"cycle_id": cycle_id, "proposal_id": ident, "kind": "instructions",
+                    "user_request": user_request, "created_ids": {},
+                    "entries": {"INSTRUCTIONS.md": {"before": before, "after": after}}}
+            state = "prepared"
+            if content == current["content"]:
+                state = "no_changes"
+                plan["no_changes_reason"] = "The proposed instructions match the existing file."
+            return self._save_plan(records, cycle, plan, state)
+
+    def instructions_apply(self, cycle_id: str, proposal_id: str, expected_revision: str, confirmation: str):
+        _text(confirmation, "current user's explicit confirmation")
+        with self._cycle(cycle_id) as (records, cycle):
+            entry = cycle["proposals"].get(_id(proposal_id))
+            if entry is None or entry["revision"] != expected_revision or entry["state"] in {"discarded", "no_changes"}:
+                raise PCWError("Apply only the exact presented and confirmed proposal revision")
+            plan = self._load_plan(cycle_id, proposal_id, entry)
+            if plan.get("kind") != "instructions":
+                raise PCWError("Use proposal_apply for knowledge changes")
+            if entry["state"] == "applied":
+                return {"proposal_id": proposal_id, "status": "applied", "replayed": True}
+            change = plan["entries"]["INSTRUCTIONS.md"]
+            retry = entry["state"] != "prepared"
+            if not (retry and self._matches(change["after"])) and not self._matches(change["before"]):
+                raise PCWError("Instructions conflict: read, prepare and approve again")
+            entry["state"] = "applying"
+            self._persist(records)
+            try:
+                self.engine._write(self.engine.root / "INSTRUCTIONS.md", change["after"]["text"])
+                if not self._matches(change["after"]):
+                    raise PCWError("Instructions write verification failed")
+                entry["state"] = "applied"
+                self._persist(records)
+                return {"proposal_id": proposal_id, "revision": expected_revision, "status": "applied",
+                        "path": "INSTRUCTIONS.md", "instructions_revision": change["after"]["fingerprint"],
+                        "tmp_preserved": True}
+            except Exception as exc:
+                entry["state"] = "partial"
+                self._persist(records)
+                return {"proposal_id": proposal_id, "status": "partial", "error": str(exc),
+                        "tmp_preserved": True, "next_action": "instructions_apply"}
+
     def proposal_prepare(self, cycle_id: str, changes: list[dict],
                          replacements: dict[str, str] | None = None, proposal_id: str | None = None,
                          no_changes_reason: str | None = None):
@@ -260,16 +382,16 @@ class CycleRuntime:
         incoming links and requires the old entry to be explicitly deleted.
         """
         with self._cycle(cycle_id) as (records, cycle), self.engine._guard():
+            self._require_work(cycle)
+            instructions = self._instructions()
+            approval_required = _knowledge_approval_required(instructions["content"])
             if not isinstance(changes, list) or len(changes) > 100:
                 raise PCWError("changes must contain 0 to 100 final material changes")
             if not changes:
                 _text(no_changes_reason, "no_changes_reason after comparing results with permanent knowledge")
             elif no_changes_reason is not None:
                 raise PCWError("no_changes_reason is only valid for an empty changes list")
-            previous = cycle["proposals"].get(_id(proposal_id)) if proposal_id else None
-            if proposal_id and (previous is None or previous["state"] not in {"prepared", "discarded", "no_changes"}):
-                raise PCWError("Only an unapplied proposal may be replaced")
-            ident = proposal_id or uuid.uuid4().hex
+            ident = self._proposal_id(cycle_id, cycle, proposal_id, "knowledge")
             aliases, entries, touched = {}, {}, set()
             for change in changes:
                 if not isinstance(change, dict) or set(change) - {"key", "material_id", "expected_revision", "content", "links", "path", "delete"}:
@@ -353,34 +475,22 @@ class CycleRuntime:
                 after.pop("metadata")
                 after["fingerprint"] = _revision(after["text"])
             plan = {"cycle_id": cycle_id, "proposal_id": ident, "created_ids": aliases, "entries": entries,
-                    "tmp_revision": self._tmp_revision(cycle_id)}
+                    "tmp_revision": self._tmp_revision(cycle_id),
+                    "instructions_revision": instructions["revision"],
+                    "knowledge_approval_required": approval_required}
             if not changes:
                 plan["no_changes_reason"] = no_changes_reason
-            revision = _revision(_json(plan))
-            review = self._review(plan)
-            plan_path = self._plan_path(cycle_id, ident)
-            self.engine._write(plan_path, _json(plan))
-            self.engine._write(plan_path.with_suffix(".md"), review)
-            if json.loads(plan_path.read_text()) != plan or plan_path.with_suffix(".md").read_text() != review:
-                raise PCWError("Proposal write verification failed")
             state = "prepared" if changes else "no_changes"
-            cycle["proposals"][ident] = {"revision": revision, "state": state}
-            self._persist(records)
-            effects = self._effects(plan)
-            return {"proposal_id": ident, "revision": revision, "status": state, "created_ids": aliases,
-                    "review_path": plan_path.with_suffix(".md").relative_to(self.engine.root).as_posix(),
-                    "effects": effects[:50], "effects_count": len(effects),
-                    "review_changes": self._review_changes(plan),
-                    **({"no_changes_reason": no_changes_reason} if not changes else {}),
-                    "next_action": "present_changes_in_chat_for_approval" if changes else "report_no_changes"}
+            return self._save_plan(records, cycle, plan, state)
 
     @staticmethod
     def _effects(plan):
         result = []
         for ident, entry in sorted(plan["entries"].items()):
             before, after = entry["before"], entry["after"]
-            old_links = _parse(before["text"])[0].get("links", []) if before else []
-            new_links = _parse(after["text"])[0].get("links", []) if after else []
+            instructions = plan.get("kind") == "instructions"
+            old_links = _parse(before["text"])[0].get("links", []) if before and not instructions else []
+            new_links = _parse(after["text"])[0].get("links", []) if after and not instructions else []
             result.append({"id": ident, "action": "delete" if after is None else "create" if before is None else "update",
                            "old_path": before["path"] if before else None, "path": after["path"] if after else None,
                            "links_added": [x for x in new_links if x not in old_links],
@@ -393,16 +503,19 @@ class CycleRuntime:
         Keep the on-disk review format stable so pending 0.9.0 proposals remain
         verifiable. Labels are supplied by the agent in the conversation language.
         """
+        def body(snapshot):
+            return snapshot["text"] if plan.get("kind") == "instructions" else _parse(snapshot["text"])[1]
+
         def describe(ident, snapshot=None, previous=False):
             if snapshot is None:
                 entry = plan["entries"].get(ident, {})
                 snapshot = entry.get("before" if previous else "after") or entry.get("before")
             if snapshot:
-                body, path = _parse(snapshot["text"])[1], snapshot["path"]
+                text, path = body(snapshot), snapshot["path"]
             else:
                 material = self.engine.materials.get(ident)
-                body, path = (material.content, material.path) if material else ("", "knowledge/" + ident)
-            lines = [line.strip() for line in body.splitlines() if line.strip()]
+                text, path = (material.content, material.path) if material else ("", "knowledge/" + ident)
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
             title = next((line[2:].strip() for line in lines if line.startswith("# ")),
                          lines[0] if lines else ident)
             return {"id": ident, "title": title, "path": path}
@@ -411,8 +524,8 @@ class CycleRuntime:
         for effect in self._effects(plan):
             ident = effect["id"]
             before, after = (plan["entries"][ident][key] for key in ("before", "after"))
-            old = _parse(before["text"])[1].splitlines(keepends=True) if before else []
-            new = _parse(after["text"])[1].splitlines(keepends=True) if after else []
+            old = body(before).splitlines(keepends=True) if before else []
+            new = body(after).splitlines(keepends=True) if after else []
             passages = []
             for tag, i, j, k, end in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
                 if tag != "equal":
@@ -429,7 +542,8 @@ class CycleRuntime:
 
     @staticmethod
     def _review(plan):
-        parts = ["# Proposed permanent-memory changes\n", "Temporary context remains until this cycle is explicitly closed.\n"]
+        heading = "# Proposed instructions changes\n" if plan.get("kind") == "instructions" else "# Proposed permanent-memory changes\n"
+        parts = [heading, "Temporary context remains until this cycle is explicitly closed.\n"]
         if "no_changes_reason" in plan:
             parts.append("\nNo permanent changes after result review:\n" + plan["no_changes_reason"] + "\n")
         for ident, entry in sorted(plan["entries"].items()):
@@ -452,6 +566,7 @@ class CycleRuntime:
             plan = self._load_plan(cycle_id, proposal_id, entry)
             return {"proposal_id": proposal_id, **entry, "review": self._review(plan),
                     "review_changes": self._review_changes(plan),
+                    **self._review_policy(plan, entry["state"]),
                     **({"no_changes_reason": plan["no_changes_reason"]} if "no_changes_reason" in plan else {})}
 
     def proposal_discard(self, cycle_id: str, proposal_id: str, expected_revision: str):
@@ -482,21 +597,30 @@ class CycleRuntime:
             elif not self._matches(before):
                 moved = {**before, "path": after["path"]} if after is not None else None
                 if not (retry and moved and not (self.engine.root / before["path"]).exists() and self._matches(moved)):
-                    raise PCWError("Proposal conflict: material or navigation changed; prepare and approve again")
+                    raise PCWError("Proposal conflict: material or navigation changed; prepare and present again")
             if after and before and after["path"] != before["path"]:
                 destination = self.engine.root / after["path"]
                 if destination.exists() and not (retry and self._matches({**before, "path": after["path"]})):
                     raise PCWError("Proposal conflict: move destination exists")
 
-    def proposal_apply(self, cycle_id: str, proposal_id: str, expected_revision: str, confirmation: str):
-        _text(confirmation, "current user's explicit confirmation")
+    def proposal_apply(self, cycle_id: str, proposal_id: str, expected_revision: str,
+                       confirmation: str | None = None):
         with self._cycle(cycle_id) as (records, cycle), self.engine._guard():
+            self._require_work(cycle)
             entry = cycle["proposals"].get(_id(proposal_id))
             if entry is None or entry["revision"] != expected_revision or entry["state"] in {"discarded", "no_changes"}:
-                raise PCWError("Apply only the exact presented and confirmed proposal revision")
+                raise PCWError("Apply only the exact presented proposal revision")
+            plan = self._load_plan(cycle_id, proposal_id, entry)
+            if plan.get("kind") == "instructions":
+                raise PCWError("Use instructions_apply for instructions changes")
             if entry["state"] == "applied":
                 return {"proposal_id": proposal_id, "revision": expected_revision, "status": "applied", "replayed": True}
-            plan = self._load_plan(cycle_id, proposal_id, entry)
+            # Finish an already-started authorized write before reviewing it under
+            # new rules; otherwise a mid-recovery edit could strand partial data.
+            if entry["state"] == "prepared" and plan.get("instructions_revision") != self._instructions()["revision"]:
+                raise PCWError("Instructions changed; read them and prepare the knowledge proposal again")
+            if plan.get("knowledge_approval_required", True):
+                _text(confirmation, "current user's explicit confirmation")
             self._preflight(plan, entry["state"] != "prepared")
             entry["state"] = "applying"
             self._persist(records)
@@ -555,9 +679,18 @@ class CycleRuntime:
                             "reason": "Apply or discard proposals before closing; tmp is preserved"}
                 if not cancel:
                     temporary_revision = self._tmp_revision(cycle_id)
-                    reviewed = any(self._load_plan(cycle_id, key, entry).get("tmp_revision") == temporary_revision
-                                   for key, entry in cycle["proposals"].items())
+                    plans = [self._load_plan(cycle_id, key, entry) for key, entry in cycle["proposals"].items()]
+                    instructions_only = cycle.get("purpose") == "instructions"
+                    instructions_revision = self._instructions()["revision"]
+                    reviewed = any(plan.get("kind") == "instructions" if instructions_only else
+                                   plan.get("kind", "knowledge") == "knowledge" and plan.get("tmp_revision") == temporary_revision
+                                   and plan.get("instructions_revision") == instructions_revision
+                                   for plan in plans)
                     if not reviewed:
+                        if instructions_only:
+                            return {"status": "blocked", "tmp_preserved": True,
+                                    "reason": "Complete the requested instructions review before closing",
+                                    "next_action": "instructions_prepare"}
                         return {"status": "blocked", "tmp_preserved": True,
                                 "reason": "Current results have not completed memory review. Search by the conclusion, "
                                           "read relevant knowledge and prepare the changes; if none are needed, "

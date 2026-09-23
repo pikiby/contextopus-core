@@ -36,9 +36,10 @@ def test_no_tools_without_cycle_and_startup_never_loads_old_current(workspace):
         runtime.status("invented")
     assert not runtime.engine.root.exists()
     legacy = runtime.engine.root / "current.md"
-    cycle = start(runtime, goal="New task")
+    cycle = start(runtime)
     legacy.write_text("Old instruction: write anything")
-    assert runtime.current_get(cycle)["goal"] == "New task"
+    assert "Old instruction" not in runtime.instructions_read(cycle)["content"]
+    assert legacy.read_text() == "Old instruction: write anything"
     assert factory.instances == []
     assert runtime.status(cycle)["materials"] == 0
 
@@ -60,6 +61,7 @@ def test_temporary_results_never_enter_search_or_knowledge(workspace):
 def test_preparation_and_revision_changes_do_not_write_knowledge(workspace):
     runtime, factory = workspace
     cycle = start(runtime)
+    (runtime.engine.root / "INSTRUCTIONS.md").write_text("---\nknowledge_approval_required: true\n---\n")
     old = prepare(runtime, cycle)
     new = prepare(runtime, cycle, "Corrected proposal", proposal_id=old["proposal_id"])
     assert runtime.status(cycle)["materials"] == 0
@@ -84,7 +86,8 @@ def test_preparation_returns_full_new_text_without_needing_review_file(workspace
     assert change["action"] == "create"
     assert passage["before"] == ""
     assert passage["after"] == text
-    assert proposal["next_action"] == "present_changes_in_chat_for_approval"
+    assert proposal["next_action"] == "present_changes_in_chat_then_apply"
+    assert proposal["approval_required"] is False
     assert runtime.proposal_read(cycle, proposal["proposal_id"])["review_changes"] == proposal["review_changes"]
     assert runtime.status(cycle)["materials"] == 0
     assert factory.calls == []
@@ -148,9 +151,9 @@ def test_review_does_not_drop_topics_when_effect_receipt_is_bounded(workspace):
     assert {change["title"] for change in proposal["review_changes"]} == {f"Topic {i}" for i in range(51)}
 
 
-def test_apply_preserves_current_tmp_and_closure_removes_all_temporary_files(workspace):
+def test_apply_preserves_instructions_and_tmp_then_closure_removes_only_tmp(workspace):
     runtime, _ = workspace
-    cycle = start(runtime, goal="A and B")
+    cycle = start(runtime)
     b = runtime.tmp_write(cycle, "Continue B from these observations")
     nested = runtime._tmp(cycle) / "nested" / "unused.txt"
     nested.parent.mkdir()
@@ -158,7 +161,7 @@ def test_apply_preserves_current_tmp_and_closure_removes_all_temporary_files(wor
     proposal = prepare(runtime, cycle)
     assert apply(runtime, cycle, proposal)["status"] == "applied"
     assert runtime.tmp_read(cycle, b["id"])["content"].startswith("Continue B")
-    assert runtime.current_get(cycle)["goal"] == "A and B"
+    assert (runtime.engine.root / "INSTRUCTIONS.md").is_file()
     assert runtime.finish(cycle)["status"] == "closed"
     assert not runtime._tmp(cycle).exists()
     assert runtime.engine.read(proposal["created_ids"]["topic"])["content"] == "Verified fact"
@@ -190,7 +193,7 @@ def test_restart_cleans_only_explicitly_restarted_work_and_drops_approval(worksp
     new = start(runtime, "restart-a", restart_cycle_id=a)
     assert not runtime._tmp(a).exists()
     assert runtime.tmp_list(new)["total"] == 0
-    assert runtime.current_get(new)["goal"] == ""
+    assert runtime.instructions_read(new)["content"]
     assert runtime.tmp_read(b, other["id"])
     with pytest.raises(PCWError):
         apply(runtime, new, proposal)
@@ -270,12 +273,11 @@ def test_no_change_review_requires_reason_and_does_not_override_pending_approval
     assert factory.calls == []
 
 
-def test_current_and_identical_tmp_updates_do_not_invalidate_review(workspace):
+def test_identical_tmp_updates_do_not_invalidate_review(workspace):
     runtime, _ = workspace
     cycle = start(runtime)
     result = runtime.tmp_write(cycle, "Working note")
     runtime.proposal_prepare(cycle, [], no_changes_reason="This working note is not reusable project knowledge.")
-    runtime.current_set(cycle, step="Task and memory review complete")
     runtime.tmp_write(cycle, "Working note", material_id=result["id"], expected_revision=result["revision"])
     assert runtime.finish(cycle)["status"] == "closed"
 
@@ -431,10 +433,9 @@ def test_changed_review_cannot_be_applied(workspace):
     assert runtime.status(cycle)["materials"] == 0
 
 
-def test_crlf_and_unicode_survive_tmp_updates_and_current(workspace):
+def test_crlf_and_unicode_survive_tmp_updates(workspace):
     runtime, _ = workspace
-    cycle = start(runtime, goal="Первая строка\r\nВторая строка")
-    assert runtime.current_get(cycle)["goal"] == "Первая строка\r\nВторая строка"
+    cycle = start(runtime)
     tmp = runtime.tmp_write(cycle, "# Заголовок\r\n\r\n🙂\r\n")
     changed = runtime.tmp_write(cycle, "Changed\r\n", tmp["id"], tmp["revision"])
     assert runtime.tmp_read(cycle, changed["id"])["content"] == "Changed\r\n"

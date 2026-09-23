@@ -1,7 +1,7 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.9.3",
-  "description": "Explicit project-memory cycles with temporary context and human-approved knowledge",
+  "version": "0.10.0",
+  "description": "Explicit project-memory cycles with temporary context and configurable knowledge approval",
   "author": {
     "name": "pikiby",
     "url": "https://github.com/pikiby"
@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "Persistent Context Workspace",
     "shortDescription": "Persistent external context for long-running work.",
-    "longDescription": "Read approved project knowledge first, retain work in temporary context and review permanent changes before applying them. Clear temporary context at cycle start and finish.",
+    "longDescription": "Read project knowledge first, retain work in temporary context and review permanent changes before applying them. Clear temporary context at cycle start and finish.",
     "developerName": "pikiby",
     "category": "Productivity",
     "capabilities": [

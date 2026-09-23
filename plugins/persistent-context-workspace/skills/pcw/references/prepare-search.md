@@ -1,6 +1,6 @@
 # Automatic indexing
 
-Applying an approved proposal automatically tokenizes new or changed Markdown topics, embeds overlapping windows and updates LanceDB. Tmp returns and prepared proposals are not indexed. The agent supplies each proposed body during preparation; approval applies that exact stored body without retransmission. No semantic helper, boundary arrays or splitting assignment exists.
+Applying a proposal under the workspace's approval policy automatically tokenizes new or changed Markdown topics, embeds overlapping windows and updates LanceDB. Tmp returns and prepared proposals are not indexed. The agent supplies each proposed body during preparation; application uses that exact stored body without retransmission. No semantic helper, boundary arrays or splitting assignment exists.
 
 Defaults are 512 tokens per window with 64-token overlap, using the selected model's tokenizer. These are engineering defaults, not a calibrated optimum. Windows advance by size minus overlap and preserve literal Unicode text; they may cross Markdown paragraphs, code or tables. Formatting and special tokens must fit the model's input limit.
 

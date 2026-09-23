@@ -298,22 +298,29 @@ class CodexHostTests(unittest.TestCase):
         self.assertEqual("Запись через настоящий Codex.", self.tool("read", material_id=item["id"])["content"])
         changed = self.save_fixture(material_id=item["id"], content="Обновлено через Codex.", expected_revision=item["revision"])
         self.assertEqual("Обновлено через Codex.", self.tool("read", material_id=changed["id"])["content"])
-        self.tool("current_set", goal="Проверить запуск PCW", constraints="Временные данные",
-                  completion="Инструменты работают через Codex", step="Готово", blocker="")
-        self.assertEqual("Готово", self.tool("current_get")["step"])
+        instructions = self.tool("instructions_read")
+        self.assertEqual("INSTRUCTIONS.md", instructions["path"])
+        self.assertTrue(instructions["content"].strip())
 
     def test_native_pcw_skill_is_discoverable_for_explicit_turn_input(self):
         skills = self.host.call("skills/list", {"cwds": [self.work], "forceReload": True})
-        matching = [
-            skill for entry in skills["data"] for skill in entry["skills"]
-            if skill["name"] == "persistent-context-workspace:pcw"
-            and skill["pluginId"] == PLUGIN_ID
-        ]
-        self.assertEqual(1, len(matching), skills)
-        self.assertTrue(matching[0]["enabled"])
-        self.assertTrue(matching[0]["path"].endswith("/skills/pcw/SKILL.md"))
+        for short_name in ("pcw", "pcw-instructions"):
+            matching = [skill for entry in skills["data"] for skill in entry["skills"]
+                        if skill["name"] == "persistent-context-workspace:" + short_name
+                        and skill["pluginId"] == PLUGIN_ID]
+            self.assertEqual(1, len(matching), skills)
+            self.assertTrue(matching[0]["enabled"])
+            self.assertTrue(matching[0]["path"].endswith("/skills/" + short_name + "/SKILL.md"))
+
 
     def test_agent_retains_tmp_and_waits_for_human_approval(self):
+        # This scenario explicitly selects manual approval instead of the default.
+        instructions = self.tool("instructions_read")
+        manual = instructions["content"].replace("knowledge_approval_required: false", "knowledge_approval_required: true")
+        rules = self.tool("instructions_prepare", content=manual,
+                          expected_revision=instructions["revision"], user_request="Require knowledge approval in this test")
+        self.tool("instructions_apply", proposal_id=rules["proposal_id"],
+                  expected_revision=rules["revision"], confirmation="Apply the manual-approval test instructions")
         # Seed only a source pointer. Neither the prompt nor initial knowledge
         # contains the answer, and the harness never saves the answer for the model.
         fact = "PCW-" + uuid.uuid4().hex

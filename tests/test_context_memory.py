@@ -151,7 +151,7 @@ def test_partial_row_write_is_not_accepted_as_indexed(memory):
 def test_existing_workspace_upgrade_does_not_change_files_or_resume_tasks(memory):
     runtime,factory=memory
     saved=runtime.create('Preserve my notes')
-    runtime.current_set(goal='Previous goal')
+    (runtime.root/'current.md').write_text('Legacy task state')
     body=(runtime.root/saved['path']).read_bytes()
     ledger={'active':'old', 'tasks':{'old':{'status':'active','request':{'goal':'blocked old goal'},'assignments':{}}}}
     (runtime.control.root/'task-ledger.json').write_text(json.dumps(ledger))
@@ -163,11 +163,11 @@ def test_existing_workspace_upgrade_does_not_change_files_or_resume_tasks(memory
     new=PCWRuntime(runtime.work_root,'project',provider_factory=factory)
     try:
         startup=new.startup()
-        assert startup['current']['goal']=='Previous goal'
+        assert 'current' not in startup
+        assert (new.root/'current.md').read_text()=='Legacy task state'
         assert startup['pending_count']==1 and len(factory.calls)==calls
         assert not {'task','environment','tools_map','assignments'} & startup.keys()
         assert (new.root/saved['path']).read_bytes()==body
-        assert new.current_set(goal='New goal')['goal']=='New goal'
         assert new.reconcile()['status']=='ok'
         assert json.loads((new.control.root/'task-ledger.json').read_text())==ledger
     finally:new.close()

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0 — 2026-09-23
+
+- Add pcw-create for user-requested context creation with placement and task selection. Route functional requests through pcw; require explicit creation/switching instructions and clarification of an unknown context before startup.
+- Configure knowledge approval through INSTRUCTIONS.md frontmatter (`knowledge_approval_required`), initially false. Always show changes; always require approval for instruction edits. Existing files without the setting retain required approval.
+
+- Replace fixed-field Current with persistent, free-form workspace INSTRUCTIONS.md, returned in full at startup.
+- Bootstrap new instructions from one packaged template; preserve user edits across cycles and keep project rules out of duplicate skill/MCP guidance.
+- Add the explicit pcw-instructions mini-skill and reviewed instructions read/prepare/apply tools. The main skill routes direct edit requests to this one procedure.
+- Keep task state in tmp; isolate instructions-only cycles from knowledge work. Detect stale approvals and changed rules without indexing instructions.
+
+
 ## 0.9.3 — 2026-09-22
 
 - Make result review mandatory after work: search by the conclusion, compare with permanent knowledge, then prepare and present proposed changes for approval.
