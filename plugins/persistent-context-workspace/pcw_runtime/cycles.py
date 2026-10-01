@@ -21,6 +21,12 @@ import yaml
 
 from .runtime import PCWRuntime, PCWError, _id, _revision, _parse
 from .control import RecoveryRequired
+from .policies import policies
+from .workspaces import WorkspaceMixin
+from .documents import DocumentsMixin
+from .history import HistoryMixin
+from .analytics import AnalyticsMixin
+from .audit import AuditMixin
 
 
 def _json(value):
@@ -46,33 +52,14 @@ def _knowledge_approval_required(content):
 
     Older/custom instructions without the setting retain manual approval.
     """
-    lines = content.splitlines()
-    if not lines or lines[0] != "---":
-        return True
-    try:
-        end = lines.index("---", 1)
-        node = yaml.compose("\n".join(lines[1:end]), Loader=yaml.SafeLoader)
-    except (ValueError, yaml.YAMLError) as exc:
-        raise PCWError("Invalid INSTRUCTIONS.md frontmatter") from exc
-    if node is None:
-        return True
-    if not isinstance(node, yaml.MappingNode):
-        raise PCWError("INSTRUCTIONS.md frontmatter must be a mapping")
-    values = [value for key, value in node.value
-              if isinstance(key, yaml.ScalarNode) and key.value == "knowledge_approval_required"]
-    if not values:
-        return True
-    if len(values) != 1 or not isinstance(values[0], yaml.ScalarNode) or (
-            values[0].tag != "tag:yaml.org,2002:bool" or values[0].value.lower() not in {"true", "false"}):
-        raise PCWError("knowledge_approval_required must be one boolean true or false")
-    return values[0].value.lower() == "true"
+    return policies(content)["knowledge_approval_required"]
 
 
-class CycleRuntime:
+class CycleRuntime(WorkspaceMixin, DocumentsMixin, HistoryMixin, AnalyticsMixin, AuditMixin):
     """MCP facade. Direct permanent mutations are deliberately not exposed."""
 
     def __init__(self, work_root, workspace, **kwargs):
-        self.engine = PCWRuntime(work_root, workspace, initialize=False, **kwargs)
+        self.engine = PCWRuntime(work_root, workspace, initialize=False, allow_create=False, **kwargs)
         self.control = self.engine.control
         self.record_path = self.control.root / "cycles.json"
 
@@ -136,17 +123,28 @@ class CycleRuntime:
             self.control.write(marker, _json({"initialized": True}))
         return {"path": "INSTRUCTIONS.md", "content": content, "revision": _revision(content)}
 
-    @staticmethod
-    def _require_work(cycle):
-        if cycle.get("purpose", "work") != "work":
+    def _require_work(self, cycle):
+        if cycle.get("purpose", "work") not in {"work", "rework"}:
             raise PCWError("This cycle is only for instructions; start a work cycle for knowledge operations")
+        if cycle.get("invocation") == "implicit" and not policies(self._instructions()["content"])["allow_implicit_updates"]:
+            raise PCWError("Implicit updates are disabled by current instructions")
 
-    def startup(self, request_id: str, purpose: str = "work", restart_cycle_id: str | None = None):
+    def startup(self, request_id: str, purpose: str = "work", restart_cycle_id: str | None = None,
+                invocation: str = "explicit", task_id: str | None = None):
         """One fresh request_id per human invocation; retries reuse that ID."""
         _id(request_id)
-        if purpose not in {"work", "instructions"}:
-            raise PCWError("purpose must be work or instructions")
-        signature = _revision(_json([purpose, restart_cycle_id]))
+        self._require_format(storage=False)
+        if purpose not in {"work", "instructions", "audit", "rework"}:
+            raise PCWError("purpose must be work, instructions, audit or rework")
+        if invocation not in {"explicit", "implicit"}:
+            raise PCWError("invocation must be explicit or implicit")
+        if invocation == "implicit" and (purpose != "work" or not policies(self._instructions()["content"])["allow_implicit_updates"]):
+            raise PCWError("This procedure requires an explicit user invocation")
+        if task_id is not None:
+            if purpose not in {"work", "rework"}:
+                raise PCWError("Only work and rework cycles bind a task")
+            self.current_read(task_id)
+        signature = _revision(_json([purpose, restart_cycle_id, invocation, task_id]))
         with self.control.guard():
             records = self._records()
             cycle_id = records["starts"].get(request_id)
@@ -166,7 +164,8 @@ class CycleRuntime:
                     old["state"] = "restarting"
                 cycle_id = uuid.uuid4().hex
                 cycle = {"state": "starting", "start_signature": signature, "proposals": {},
-                         "restart_cycle_id": restart_cycle_id, "purpose": purpose}
+                         "restart_cycle_id": restart_cycle_id, "purpose": purpose,
+                         "invocation": invocation, "task_id": task_id}
                 records["starts"][request_id] = cycle_id
                 records["cycles"][cycle_id] = cycle
                 self._persist(records)
@@ -174,8 +173,8 @@ class CycleRuntime:
                 self.engine._ensure_storage()
             except RecoveryRequired as exc:
                 return {**exc.details, "cycle_id": cycle_id}
-            with self.engine._guard():
-                instructions = self._instructions(initialize=True)
+            with self.engine.read_guard() if purpose == "audit" else self.engine._guard():
+                instructions = self._instructions()
                 if restart_cycle_id is not None:
                     self._purge(restart_cycle_id)
                     records["cycles"][restart_cycle_id] = {"state": "replaced", "proposals": {},
@@ -187,7 +186,8 @@ class CycleRuntime:
                 status = self.engine.status()
                 status.pop("active")
                 return {"cycle_id": cycle_id, "status": "active", "tmp_cleared": True,
-                        "purpose": purpose, "instructions": instructions, **status}
+                        "purpose": purpose, "task_id": task_id, "instructions": instructions,
+                        "project": self.project_read(), **status}
 
     def _call(self, cycle_id, method, **kwargs):
         with self._cycle(cycle_id) as (_, cycle):
@@ -202,22 +202,33 @@ class CycleRuntime:
                     "proposals": outstanding[:50], "outstanding_proposal_count": len(outstanding),
                     **self.engine.status()}
 
-    def list(self, cycle_id: str, offset: int = 0, limit: int = 50):
-        return self._call(cycle_id, "list", offset=offset, limit=limit)
+    def _read_call(self, cycle_id, method, **kwargs):
+        self._require_format()
+        with self._cycle(cycle_id) if cycle_id else contextlib.nullcontext():
+            with self.engine.read_guard():
+                return getattr(self.engine, method)(**kwargs)
 
-    def read(self, cycle_id: str, material_id: str):
-        return self._call(cycle_id, "read", material_id=material_id)
+    def list(self, cycle_id: str | None = None, offset: int = 0, limit: int = 50):
+        return self._read_call(cycle_id, "list", offset=offset, limit=limit)
 
-    def read_many(self, cycle_id: str, material_ids: list[str]):
-        return self._call(cycle_id, "read_many", material_ids=material_ids)
+    def read(self, cycle_id: str | None = None, material_id: str = "", from_id: str | None = None):
+        self._require_format()
+        with self.engine.read_guard():
+            if from_id is not None and material_id not in self.engine._material(from_id).links:
+                raise PCWError("from_id must have an existing link to the requested material")
+            return self._read_call(cycle_id, "read", material_id=material_id)
 
-    def search(self, cycle_id: str, query: str, N: int | None = None,
+    def read_many(self, cycle_id: str | None = None, material_ids: list[str] | None = None):
+        return self._read_call(cycle_id, "read_many", material_ids=material_ids)
+
+    def search(self, cycle_id: str | None = None, query: str = "", N: int | None = None,
                d_max: float | None = None, min_jump: float | None = None, multiplier: float | None = None):
-        return self._call(cycle_id, "search", query=query, N=N, d_max=d_max,
+        return self._read_call(cycle_id, "search", query=query, N=N, d_max=d_max,
                           min_jump=min_jump, multiplier=multiplier)
 
-    def instructions_read(self, cycle_id: str):
-        with self._cycle(cycle_id):
+    def instructions_read(self, cycle_id: str | None = None):
+        self._require_format()
+        with self._cycle(cycle_id) if cycle_id else self.control.guard():
             return self._instructions()
 
     def tmp_write(self, cycle_id: str, content: str, material_id: str | None = None,
@@ -324,6 +335,8 @@ class CycleRuntime:
             raise PCWError("content must be ordinary Markdown text")
         _knowledge_approval_required(content)
         with self._cycle(cycle_id) as (records, cycle):
+            if cycle.get("purpose") == "audit":
+                raise PCWError("Audit cannot change instructions")
             current = self._instructions()
             if current["revision"] != expected_revision:
                 raise PCWError("Instructions changed since they were read; read them again")
@@ -342,6 +355,8 @@ class CycleRuntime:
     def instructions_apply(self, cycle_id: str, proposal_id: str, expected_revision: str, confirmation: str):
         _text(confirmation, "current user's explicit confirmation")
         with self._cycle(cycle_id) as (records, cycle):
+            if cycle.get("purpose") == "audit":
+                raise PCWError("Audit cannot apply instructions")
             entry = cycle["proposals"].get(_id(proposal_id))
             if entry is None or entry["revision"] != expected_revision or entry["state"] in {"discarded", "no_changes"}:
                 raise PCWError("Apply only the exact presented and confirmed proposal revision")
@@ -360,11 +375,12 @@ class CycleRuntime:
                 self.engine._write(self.engine.root / "INSTRUCTIONS.md", change["after"]["text"])
                 if not self._matches(change["after"]):
                     raise PCWError("Instructions write verification failed")
+                history = self._history_record(proposal_id, force=policies(change["before"]["text"])["git_history_enabled"])
                 entry["state"] = "applied"
                 self._persist(records)
                 return {"proposal_id": proposal_id, "revision": expected_revision, "status": "applied",
                         "path": "INSTRUCTIONS.md", "instructions_revision": change["after"]["fingerprint"],
-                        "tmp_preserved": True}
+                        "tmp_preserved": True, "history": history}
             except Exception as exc:
                 entry["state"] = "partial"
                 self._persist(records)
@@ -394,7 +410,7 @@ class CycleRuntime:
             ident = self._proposal_id(cycle_id, cycle, proposal_id, "knowledge")
             aliases, entries, touched = {}, {}, set()
             for change in changes:
-                if not isinstance(change, dict) or set(change) - {"key", "material_id", "expected_revision", "content", "links", "path", "delete"}:
+                if not isinstance(change, dict) or set(change) - {"key", "material_id", "expected_revision", "content", "description", "links", "path", "delete"}:
                     raise PCWError("Unknown change fields")
                 existing = change.get("material_id")
                 if existing is not None:
@@ -429,6 +445,10 @@ class CycleRuntime:
                     raise PCWError("Supply ordinary Markdown content for a new material")
                 if "links" in change:
                     metadata["links"] = change["links"]
+                if "description" in change:
+                    if not isinstance(change["description"], str):
+                        raise PCWError("description must be text")
+                    metadata["description"] = change["description"]
                 if "path" in change:
                     destination = self.engine._knowledge_path(change["path"])
                     if destination.name != target_id:
@@ -437,6 +457,19 @@ class CycleRuntime:
                     if path != before["path"] and destination.exists():
                         raise PCWError("Move destination already exists")
                 entries[target_id] = {"before": before, "after": {"path": path, "content": content, "metadata": metadata}}
+
+            limit = policies(instructions["content"])["material_max_tokens"]
+            if limit is not None:
+                exceeded = []
+                for target_id, entry in entries.items():
+                    if entry["after"] is not None:
+                        count = self.engine._get_chunker().count(entry["after"]["content"])
+                        if count > limit:
+                            exceeded.append({"id": target_id, "key": next((key for key, value in aliases.items() if value == target_id), None),
+                                             "tokens": count, "limit": limit})
+                if exceeded:
+                    return {"status": "needs_split", "materials": exceeded, "next_action": "revise_semantic_materials",
+                            "knowledge_changed": False}
 
             def resolve(value):
                 if not isinstance(value, str):
@@ -488,7 +521,7 @@ class CycleRuntime:
         result = []
         for ident, entry in sorted(plan["entries"].items()):
             before, after = entry["before"], entry["after"]
-            instructions = plan.get("kind") == "instructions"
+            instructions = plan.get("kind") in {"instructions", "project"}
             old_links = _parse(before["text"])[0].get("links", []) if before and not instructions else []
             new_links = _parse(after["text"])[0].get("links", []) if after and not instructions else []
             result.append({"id": ident, "action": "delete" if after is None else "create" if before is None else "update",
@@ -504,7 +537,7 @@ class CycleRuntime:
         verifiable. Labels are supplied by the agent in the conversation language.
         """
         def body(snapshot):
-            return snapshot["text"] if plan.get("kind") == "instructions" else _parse(snapshot["text"])[1]
+            return snapshot["text"] if plan.get("kind") in {"instructions", "project"} else _parse(snapshot["text"])[1]
 
         def describe(ident, snapshot=None, previous=False):
             if snapshot is None:
@@ -538,6 +571,11 @@ class CycleRuntime:
                             "body_changes": passages,
                             "links_added": [describe(link) for link in effect["links_added"]],
                             "links_removed": [describe(link, previous=True) for link in effect["links_removed"]]})
+            if plan.get("kind", "knowledge") == "knowledge":
+                old_description = _parse(before["text"])[0].get("description", "") if before else ""
+                new_description = _parse(after["text"])[0].get("description", "") if after else ""
+                if old_description != new_description:
+                    changes[-1]["description_change"] = {"before": old_description, "after": new_description}
         return changes
 
     @staticmethod
@@ -559,7 +597,7 @@ class CycleRuntime:
         return "\n".join(parts)
 
     def proposal_read(self, cycle_id: str, proposal_id: str):
-        with self._cycle(cycle_id) as (_, cycle):
+        with self._cycle(cycle_id) as (_, cycle), self.engine.read_guard():
             entry = cycle["proposals"].get(_id(proposal_id))
             if entry is None:
                 raise PCWError("Unknown proposal")
@@ -611,8 +649,8 @@ class CycleRuntime:
             if entry is None or entry["revision"] != expected_revision or entry["state"] in {"discarded", "no_changes"}:
                 raise PCWError("Apply only the exact presented proposal revision")
             plan = self._load_plan(cycle_id, proposal_id, entry)
-            if plan.get("kind") == "instructions":
-                raise PCWError("Use instructions_apply for instructions changes")
+            if plan.get("kind") in {"instructions", "project"}:
+                raise PCWError("Use instructions_apply or project_apply for document changes")
             if entry["state"] == "applied":
                 return {"proposal_id": proposal_id, "revision": expected_revision, "status": "applied", "replayed": True}
             # Finish an already-started authorized write before reviewing it under
@@ -653,10 +691,11 @@ class CycleRuntime:
                 self.engine._reconcile()
                 materials = [self.engine._index_receipt(self.engine._material(ident))
                              for ident, change in plan["entries"].items() if change["after"] is not None]
+                history = self._history_record(proposal_id)
                 entry["state"] = "index_pending" if any(m["index_status"] != "indexed" for m in materials) else "applied"
                 self._persist(records)
                 return {"proposal_id": proposal_id, "revision": expected_revision, "status": entry["state"],
-                        "materials": materials, "tmp_preserved": True}
+                        "materials": materials, "tmp_preserved": True, "history": history}
             except Exception as exc:
                 entry["state"] = "partial"
                 self._persist(records)
@@ -677,7 +716,7 @@ class CycleRuntime:
                 if unfinished and not cancel:
                     return {"status": "blocked", "unfinished_proposals": unfinished,
                             "reason": "Apply or discard proposals before closing; tmp is preserved"}
-                if not cancel:
+                if not cancel and cycle.get("purpose") != "audit":
                     temporary_revision = self._tmp_revision(cycle_id)
                     plans = [self._load_plan(cycle_id, key, entry) for key, entry in cycle["proposals"].items()]
                     instructions_only = cycle.get("purpose") == "instructions"
@@ -722,18 +761,6 @@ class CycleRuntime:
         if not paths or any(not path.startswith("knowledge/") for path in paths):
             raise PCWError("Only exact permanent knowledge paths may enter memory Git history")
         return self._call(cycle_id, "checkpoint", paths=paths, message=message)
-
-    def history_read(self, cycle_id: str, commit: str, paths: list[str]):
-        """Read historical text for a proposal, never restore it directly."""
-        with self._cycle(cycle_id), self.engine._guard():
-            if not paths or any(not path.startswith("knowledge/") for path in paths):
-                raise PCWError("Specify exact permanent knowledge paths")
-            self.engine._git_paths(paths)
-            self.engine._own_git()
-            _id(commit)
-            revision = self.engine._git("rev-parse", "--verify", commit + "^{commit}").stdout.strip()
-            return {"commit": revision, "materials": [{"path": path, "text": self.engine._git("show", revision + ":" + path).stdout}
-                                                     for path in paths]}
 
     def recover_workspace(self, cycle_id: str):
         with self._cycle(cycle_id, ("active", "starting")):

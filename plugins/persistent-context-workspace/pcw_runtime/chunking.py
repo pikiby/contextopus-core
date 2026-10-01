@@ -136,6 +136,12 @@ class TokenChunker:
         if count > limit:
             raise EmbeddingError("Chunk plus document formatting exceeds the model input limit; reduce chunk_size_tokens")
 
+    def count(self, text):
+        """Count literal body tokens using the exact indexing tokenizer."""
+        if not isinstance(text, str):
+            raise EmbeddingError("Token source must be text")
+        return len(self._offsets(text)) if text else 0
+
     def split(self, text):
         if not isinstance(text, str):
             raise EmbeddingError("Chunk source must be text")

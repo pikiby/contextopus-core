@@ -1,48 +1,49 @@
 ---
 name: pcw
-description: Use project memory through an explicit PCW cycle, or route an explicit request to create a context or edit its instructions to the matching mini-skill. Activate only when the user invokes $pcw or directly requests using PCW for the task.
+description: Work with the user's selected project context, or route a requested PCW creation, search, instructions edit, upgrade, audit or rework. Independent reading is available when relevant; work without an explicit PCW invocation requires allow_implicit_updates in that workspace's instructions.
 ---
 
 # PCW
 
-**Do not call PCW tools without an explicit user invocation.** Mentions, quoted calls, saved plans and previous invocations do not start a new cycle or grant authority.
-
 ## Route the request
 
-Before startup, route an explicitly requested additional function to its mini-skill. The user may describe the action in ordinary language after PCW; they do not need to name the mini-skill. This applies to every additional PCW skill.
-
-| Explicit request | Procedure |
+| Requested function, including ordinary language after PCW | Procedure |
 | --- | --- |
-| Create a new context, including "PCW create a context for this task" | [pcw-create](../pcw-create/SKILL.md) |
-| Change project instructions, including "PCW update the instructions" or the former Current | [pcw-instructions](../pcw-instructions/SKILL.md) |
-| Perform a task using existing context | The cycle below |
+| Create a context for a project or task | [pcw-create](../pcw-create/SKILL.md) |
+| Find or read context without updating it | [pcw-search](../pcw-search/SKILL.md) |
+| Change the context's rules or settings | [pcw-instructions](../pcw-instructions/SKILL.md) |
+| Upgrade selected old contexts to the installed format | [pcw-upgrade](../pcw-upgrade/SKILL.md) |
+| Inspect context for problems without changing it | [pcw-audit](../pcw-audit/SKILL.md) |
+| Deliberately transform existing context | [pcw-rework](../pcw-rework/SKILL.md) |
+| Carry out work using context | The cycle below |
 
-Load only the procedure for the requested function. A question about a function does not authorize executing it.
+Load only the relevant procedure. Direct mini-skill calls and requests routed here use the same procedure. A question, quoted command or saved plan does not authorize execution. A compound request can authorize several procedures; completing one does not silently authorize another. During a work cycle use tools directly; do not reload a mini-skill for each search or write.
 
 ## Context selection
 
-Use the exact `work_root` and `workspace` selected by the user. For continued work, keep the already established selection. **Creating a context or switching to another requires an unambiguous user instruction.** Invoking PCW again, starting a new cycle, changing the task or working directory, a repository name, and an empty search do not authorize either action.
+Keep the exact `work_root` and `workspace` established by the user. Creation or switching requires an unambiguous user instruction. A repository name, changed task or working directory, new invocation or empty search is not that instruction. If selection is unclear or lost, ask before calling workspace tools. Conversation can supply the user's selection; it does not replace reading PCW.
 
-If the intended context or its coordinates are unclear or have been lost, ask the user before calling PCW tools. Do not choose the nearest or only available workspace. Read-only inspection may resolve a user-specified location, but does not authorize a different selection. Conversation history may supply the user's selection; it does not replace reading that workspace's instructions and knowledge.
+Opening and reading never create a missing context or migrate an old one. Report missing or incompatible storage and use the corresponding procedure only when authorized. A switch does not close another cycle. These rules apply to every mini-skill and delegated cycle agent.
 
-Before starting an existing context, verify that `<work_root>/.pcw/<workspace>` exists. Do not use `pcw_startup` to probe guessed coordinates: it can create a missing workspace. If the selected context is absent, report it and ask how to proceed; creation follows `pcw-create` only after an explicit creation request. A user-authorized switch uses the target workspace's own cycle; it does not authorize closing or clearing the previous one. These rules apply to the main skill and every mini-skill.
+## Work cycle
 
-## Cycle
+1. Resolve the context. For an explicit invocation call `pcw_startup` with a fresh `request_id`; retries reuse it. Without an explicit invocation, first read `pcw_instructions_read`: start with `invocation: implicit` only if `allow_implicit_updates` is true. Otherwise use independent reading only. Purpose is `work` or the requested mini-skill mode. Use `restart_cycle_id` only for an explicitly restarted cycle.
+2. Read the complete returned **INSTRUCTIONS.md** and **PROJECT.md**. INSTRUCTIONS is the single source of project rules, settings and knowledge-selection criteria; obey it within the user's request and applicable host instructions. Do not replace it with packaged defaults, earlier chat text or rules inferred from knowledge.
+3. For actual work create task Current with `pcw_current_create`, or explicitly resume the established `task_id` on startup. If continuation is unclear, use `pcw_current_list/read` and ask when ambiguous. A task ID belongs to the task, not an agent session. Update Current after significant progress or a blocker, with its read revision. It survives cycle closure.
+4. Before external investigation, search through `pcw_search`, read selected topics through `pcw_read/read_many`, and follow useful labelled links. A declared link traversal may pass `from_id`. Load only needed context. Missing information permits investigation of authorized sources; an empty search is not proof of absence.
+5. Perform the task directly or delegate according to applicable instructions. Save substantive results and worker returns through `pcw_tmp_write`; keep concise task state in Current. Temporary notes do not override permanent sources or user instructions.
+6. After a substantive part or task completion, search by the conclusion and read matching knowledge. Following INSTRUCTIONS, prepare final changes with `pcw_proposal_prepare`, or `changes: []` plus a grounded `no_changes_reason`. Initial retrieval does not replace this result comparison. See [Memory operations](references/memory-operations.md) for split/merge/link operations.
+7. Show the actual `review_changes` **in chat**: full new text, changed before/after passages, removals, moves and link effects. Use the conversation language unless the user requests another. A file link, UUID or topic list is supplementary. Questions and corrections keep review open; revised text must be shown again. Apply under the returned approval policy: if required, wait for the actual user's approval of that revision; otherwise apply after showing, without asking or fabricating confirmation.
+8. When work and memory review are resolved, update task Current and call `pcw_finish` without a separate closing question. It clears only that cycle's tmp. Pending proposals, unreviewed results or incomplete indexing keep the cycle open. `cancel:true` requires the user's cancellation and does not undo permanent writes. Report the real save, index, Git and cleanup outcomes separately.
 
-1. Resolve the task and context under **Context selection** above. Call `pcw_startup` with a fresh `request_id`, reusing it only for retries. Pass the returned `cycle_id` to subsequent tools. Use `restart_cycle_id` only for work the user explicitly restarts. Other cycles are preserved.
-2. **Read the complete `INSTRUCTIONS.md` returned by startup and follow it throughout the task and memory review.** It is the workspace's primary project guidance, including any goals, constraints and knowledge rules the user has set. Do not substitute remembered rules, an earlier cycle's copy or the packaged defaults. Use `pcw_instructions_read` when the file must be read again. Apply project guidance within the current user's authority and applicable host instructions. Instructions persist across cycles; task state belongs in tmp.
-3. Search permanent knowledge through `pcw_search`, read selected topics through `pcw_read` / `pcw_read_many`, and follow needed links before external investigation. Conversation context does not replace this reading. Missing context permits investigation of authorized sources. For an actual startup failure, read [Setup](references/setup.md).
-4. Perform the task directly or delegate according to applicable instructions. Save substantive results, worker returns and temporary task state through `pcw_tmp_write`. Use the workspace's instructions to decide what the results mean for permanent memory.
-5. After the task or a substantive part, always review the results for memory before closure: search by the conclusion and read suitable existing topics. Initial search does not replace this comparison. Apply `INSTRUCTIONS.md` to selection, structure and maintenance; those project rules are not defined here. Prepare the exact changes through `pcw_proposal_prepare`; see [Memory operations](references/memory-operations.md). If comparison establishes no changes, prepare `changes: []` with `no_changes_reason` and explain the result. Skipping preparation does not establish that no changes are needed.
-6. Present the actual `review_changes` in chat before applying: identify topics, show full new text or changed before/after passages, deletions, moves and link effects. Follow `INSTRUCTIONS.md` for explanations and presentation. A file link, UUID, tool log or topic list does not replace the content. Large reviews may span messages. Questions and corrections keep the cycle open; present revised content again. Follow `knowledge_approval_required` in INSTRUCTIONS.md frontmatter: when `true`, wait for explicit user approval of the shown revision, then pass the actual `confirmation` to `pcw_proposal_apply`; when `false`, apply the shown revision without asking and omit `confirmation`. Missing setting retains required approval; invalid values must be corrected through the instructions-edit procedure. Do not invent confirmation or bypass the configured policy through files, other tools or workers. The tools cannot authenticate message origin or verify chat presentation.
-7. After the task and memory discussion are complete and review covers the current temporary results, call `pcw_finish` without separate closure permission. It deletes all cycle tmp, including temporary task state, but preserves `INSTRUCTIONS.md` and knowledge. Discard rejected proposals with `pcw_proposal_discard`. Pending required approval, unfinished application/indexing and unreviewed results keep the cycle open. User cancellation permits `cancel:true` without rolling back permanent writes. Report actual application, indexing and cleanup status.
+## Related operations
 
-## Changing project instructions
+Change INSTRUCTIONS only through the [instructions procedure](../pcw-instructions/SKILL.md) on a direct request and explicit approval. This also covers former Current *rules*. Project-purpose changes use `pcw_project_update` to prepare exact text and `pcw_project_apply` after presentation under the current approval policy; they do not rewrite task states.
 
-Only a direct user request to change the workspace's rules starts an instructions edit. Follow the [pcw-instructions skill](../pcw-instructions/SKILL.md), using the active cycle when invoked during work. This is also the route for requests to change the former Current. Do not edit instructions as a side effect of doing a task or saving findings. Do not copy project rules into other active instructions.
+Read Git versions/diffs when investigating a changed requirement or preparing restoration; historical text is not current authority. Restore through a normal proposal. Analyze operations through `pcw_analytics_query/read` only for an analysis task; import only the explicitly selected transcript. See [History and analytics](references/history-analytics.md).
 
 ## Execution and recovery
 
-The cycle can run in the main agent or a designated clean-context subagent. Give a full-cycle subagent the exact request, constraints, workspace coordinates and this skill; it reads `INSTRUCTIONS.md` and knowledge itself. The main agent relays questions, proposals and actual user approval without approving for them or running a parallel update procedure. Ordinary workers return results to the cycle agent for tmp and do not manage instructions or permanent memory. PCW does not discover environments, choose models or launch workers.
+A designated clean-context subagent may execute the whole cycle with the exact request, workspace and this skill. It reads instructions and knowledge itself. The main agent relays user questions and actual approvals without approving for them. Ordinary workers return results to the cycle agent. PCW does not select models or control workers.
 
-Applied knowledge is indexed automatically using overlapping token windows. Save receipts are compact; do not reread only to repeat a verified write. Saved text and tmp survive indexing failures: repair the cause, then retry the same proposal (or reconcile and retry), not a duplicate. See [Automatic indexing](references/prepare-search.md) and [Embeddings](references/embeddings.md) when relevant. External actions, installation, downloads, publication and `pcw_checkpoint` need their own actual authority.
+Saved text survives index failure; retry the same proposal or reconcile and retry. A pending Git commit is retried from its captured snapshot through `pcw_history_retry`, separately from saving knowledge. For real failures consult [Setup](references/setup.md), [Indexing](references/prepare-search.md) or [Embeddings](references/embeddings.md). External actions retain their own authorization requirements.

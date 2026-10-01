@@ -8,12 +8,14 @@ import pytest
 from test_runtime import Factory
 from pcw_runtime import PCWError
 from pcw_runtime.cycles import CycleRuntime
+from test_workspace_v3 import create
 
 
 @pytest.fixture
 def workspace(tmp_path):
     factory = Factory()
     runtime = CycleRuntime(tmp_path, "project", provider_factory=factory)
+    create(runtime)
     yield runtime, factory
     runtime.close()
 
@@ -30,11 +32,12 @@ def apply(runtime, cycle, proposal):
     return runtime.proposal_apply(cycle, proposal["proposal_id"], proposal["revision"], "Apply the shown changes")
 
 
-def test_no_tools_without_cycle_and_startup_never_loads_old_current(workspace):
+def test_mutations_need_cycle_and_startup_never_loads_old_current(workspace):
     runtime, factory = workspace
     with pytest.raises(PCWError, match="No PCW cycle"):
         runtime.status("invented")
-    assert not runtime.engine.root.exists()
+    assert not runtime.record_path.exists()
+    assert runtime.list()["total"] == 0
     legacy = runtime.engine.root / "current.md"
     cycle = start(runtime)
     legacy.write_text("Old instruction: write anything")

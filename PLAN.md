@@ -1,14 +1,16 @@
 # PCW implementation
 
-Version 0.10.0 implements the [INSTRUCTIONS.md design](docs/context-workspace-design-v2.md), configurable knowledge approval and explicit context selection.
+Version 0.11.0 implements the [v3 design](docs/context-workspace-design-v3.md).
 
-- Keep project guidance in persistent INSTRUCTIONS.md with a single bootstrap template.
-- Return its complete text at startup; the main skill must read and follow it before context retrieval and work.
-- Store task state and results as temporary Markdown without the old five-field Current contract.
-- Route direct instructions-edit requests to the dedicated pcw-instructions skill and read/prepare/apply tools.
-- Route explicit context-creation requests to pcw-create; resolve placement and task with the user. Require an unambiguous user instruction to create or switch context, and ask when selection is unclear.
-- Use INSTRUCTIONS.md to configure knowledge approval, initially disabled; always present changes and require approval for instructions edits. Preserve revision conflicts, temporary-data isolation, indexing and knowledge review.
-- Keep project policies out of duplicate skill/MCP instructions; the instruction-edit procedure has one skill definition.
-- Verify persistence, free Markdown, approval boundaries, conflicts, interrupted writes, cleanup and standard-MCP contracts.
+The complete ordered work is tracked in [the upgrade plan](docs/context-workspace-upgrade-plan.md). Its execution procedure is [the goal](docs/context-workspace-upgrade-goal.md); API details are in [the contracts](docs/context-workspace-v3-contracts.md).
 
-Publishing, installation and host-session refresh are separate actions. Deterministic tests establish tool behavior, not universal model compliance.
+- Separate explicit creation from opening and reading existing contexts.
+- Version and migrate recognized storage with source preservation and recoverable snapshots.
+- Keep instructions, project goals, independent task state, knowledge and temporary work separate.
+- Support independent search and independent invocation/approval settings.
+- Preserve semantic topics and labelled links; make the body token limit optional.
+- Keep exact local permanent history and a separate observed-operation journal.
+- Route creation, search, instructions, upgrade, audit and rework through scoped skills.
+- Verify storage, permissions, errors, concurrency and full workflows before claiming completion.
+
+Publishing, installation and host-session refresh are separate actions. A source candidate is not a published or installed release. Deterministic tests establish tool behavior, not universal model compliance.

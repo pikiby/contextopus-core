@@ -100,7 +100,8 @@ def test_parallel_edits_conflict_and_startup_does_not_reset_file(workspace):
 def test_instructions_mode_cannot_run_work_or_apply_knowledge(workspace):
     r, _ = workspace
     c = r.startup("edit", purpose="instructions")["cycle_id"]
-    for operation in (lambda: r.tmp_write(c, "work"), lambda: r.search(c, "work"),
+    assert r.search(c, "work")["results"] == []  # Independent reading is allowed.
+    for operation in (lambda: r.tmp_write(c, "work"),
                       lambda: r.proposal_prepare(c, [], no_changes_reason="bypass")):
         with pytest.raises(PCWError, match="only for instructions"):
             operation()

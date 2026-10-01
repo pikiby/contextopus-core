@@ -142,7 +142,8 @@ class PCWRuntime:
     """
 
     def __init__(self, work_root: str | Path, workspace: str,
-                 provider_factory: Callable = PROCESS_PROVIDERS.acquire, *, initialize: bool = True):
+                 provider_factory: Callable = PROCESS_PROVIDERS.acquire, *, initialize: bool = True,
+                 allow_create: bool = True):
         raw_root = Path(work_root)
         if not raw_root.is_absolute() or not raw_root.is_dir():
             raise PCWError("work_root must be an existing absolute directory")
@@ -154,6 +155,8 @@ class PCWRuntime:
         self.state = self.root / ".pcw-runtime"
         self.control = control_store(self.work_root, workspace)
         self._initialized = False
+        self._allow_create = allow_create
+        self._reading = False
         self._factory = provider_factory
         self._provider = None
         self._provider_config = None
@@ -174,6 +177,8 @@ class PCWRuntime:
         marker = self.control.root / "workspace-opened.json"
         self.control.safe(marker)
         if not self._initialized and not self.root.exists() and not marker.exists():
+            if not self._allow_create:
+                raise PCWError("Workspace does not exist; use explicit workspace creation")
             self.knowledge.mkdir(parents=True)
             self.state.mkdir()
         missing = [str(path.relative_to(self.root)) for path in (self.knowledge, self.state)
@@ -181,7 +186,7 @@ class PCWRuntime:
         if missing:
             raise RecoveryRequired(self.root, missing)
         self._initialized = True
-        if not marker.exists():
+        if not marker.exists() and not self._reading:
             self.control.write(marker, json.dumps({"opened_at": datetime.now(timezone.utc).isoformat()}) + "\n")
 
     def recover_workspace(self, recreate_missing_knowledge: bool = False):
@@ -315,6 +320,22 @@ class PCWRuntime:
         ])
 
     @contextlib.contextmanager
+    def read_guard(self):
+        """Open existing sources/index without creating, migrating or reconciling data."""
+        if not self.root.is_dir():
+            raise PCWError("Workspace does not exist")
+        with self.control.guard(), self._mutex:
+            previous = self._reading
+            self._reading = True
+            try:
+                with self._guard():
+                    yield
+            finally:
+                self._reading = previous
+                # A read-only reconciliation must not suppress later repair.
+                self._reconciled_token = None
+
+    @contextlib.contextmanager
     def _guard(self):
         with self.control.guard(), self._mutex:
             if self._depth:
@@ -331,6 +352,9 @@ class PCWRuntime:
                 try:
                     self._assert_safe(self.state / "active.json")
                     self._assert_safe(self.state / "lancedb")
+                    if self._reading and (not (self.state / "active.json").is_file()
+                                          or not (self.state / "lancedb").is_dir()):
+                        raise PCWError("Index is missing; use explicit recovery before search")
                     self.db = lancedb.connect(str(self.state / "lancedb"))
                     active_path = self.state / "active.json"
                     if not active_path.exists():
@@ -342,7 +366,11 @@ class PCWRuntime:
                                             "search": dataclasses.asdict(SearchConfig()),
                                             "search_calibration": "engineering defaults; not calibrated on PCW"})
                     self.active = json.loads(active_path.read_text(encoding="utf-8"))
-                    self._upgrade_index()
+                    if self._reading:
+                        if self.active.get("index_format", 1) != 2:
+                            raise PCWError("Index migration required; use pcw-upgrade")
+                    else:
+                        self._upgrade_index()
                     self.table = self.db.open_table(self.active["table"])
                     self._scan()
                     self._reconcile()
@@ -427,7 +455,7 @@ class PCWRuntime:
     def _reconcile(self):
         """Reconcile saved memory only, including externally restored Git content."""
         token = (self.table.name, self.table.version, self._content_signature, self._chunking_id())
-        if token == self._reconciled_token:
+        if token == self._reconciled_token and not self._reading:
             return
         rows = self._rows(["material_id", "revision", "path", "chunking_id", "part_index", "part_count"])
         chunk_id = self._chunking_id()
@@ -448,11 +476,12 @@ class PCWRuntime:
             if (any(row["part_count"] != len(group) for row in group) or
                     {row["part_index"] for row in group} != set(range(len(group)))):
                 changed.add(ident)
-        for ident in changed:
-            self._delete_rows(ident)
-        for ident, path in paths.items():
-            if ident not in changed:
-                self.table.update(where=f"material_id = '{_id(ident)}'", values={"path": path})
+        if not self._reading:
+            for ident in changed:
+                self._delete_rows(ident)
+            for ident, path in paths.items():
+                if ident not in changed:
+                    self.table.update(where=f"material_id = '{_id(ident)}'", values={"path": path})
         self.pending = {ident for ident, material in self.materials.items()
                         if material.content.strip() and (ident not in indexed or ident in changed or
                             any(self._legacy_ids.get(old, old) == ident for old in changed))}
@@ -472,6 +501,8 @@ class PCWRuntime:
 
     def _result(self, material: Material, content=False):
         result = {"id": material.id, "path": material.path, "links": material.links,
+                  **self._label(material.id),
+                  "link_targets": [self._label(ident) for ident in material.links],
                   "revision": material.revision,
                   "index_status": "pending_preparation" if material.id in self.pending else "indexed"}
         if content:
@@ -484,6 +515,13 @@ class PCWRuntime:
             result.update(knowledge_status="needs_correction", invalidations=invalidations,
                           warning="This saved revision has a known discrepancy. Correct the knowledge before using it as an established fact.")
         return result
+
+    def _label(self, ident):
+        material = self.materials.get(ident)
+        if material is None:
+            return {"id": ident, "title": ident, "description": "", "missing": True}
+        title = next((line[2:].strip() for line in material.content.splitlines() if line.startswith("# ")), ident)
+        return {"id": ident, "title": title, "description": material.metadata.get("description", "")}
 
     def _material_invalidations(self, material: Material):
         # Read-only migration compatibility: do not forget known bad revisions
@@ -981,6 +1019,9 @@ class PCWRuntime:
                 # No fast_search: LanceDB includes fresh rows outside an ANN index.
                 lookup = self.table.search(vector).distance_type(config.metric).select(["material_id", "path"])
                 excluded = set(needs_correction)
+                excluded.update(self.pending)
+                excluded.update(row["material_id"] for row in self._rows(["material_id"])
+                                if self._legacy_ids.get(row["material_id"], row["material_id"]) not in self.materials)
                 excluded.update(old for old, target in self._legacy_ids.items() if target in excluded)
                 if excluded:
                     lookup = lookup.where("material_id NOT IN (" + ",".join("'" + _id(ident) + "'" for ident in sorted(excluded)) + ")")
@@ -990,7 +1031,7 @@ class PCWRuntime:
                     ident = self._legacy_ids.get(row["material_id"], row["material_id"])
                     material = self.materials.get(ident)
                     if material is not None and ident not in excluded:
-                        canonical.append({"id": ident, "path": material.path, "distance": row["_distance"]})
+                        canonical.append({**self._label(ident), "path": material.path, "distance": row["_distance"]})
                 results = select_candidates(canonical, config)
             return {"results": results, "pending_preparation": sorted(self.pending)[:50],
                     "pending_count": len(self.pending), "unregistered": self.unregistered[:50],

@@ -1,68 +1,94 @@
 # Persistent Context Workspace
 
-Version 0.10.0 provides project knowledge through explicit cycles: permanent Markdown topics, temporary working context, configurable knowledge approval and automatic token-window embeddings in LanceDB. It works over standard MCP without requiring a particular agent host or native session identifier.
+Version 0.11.0 implements the [v3 design](docs/context-workspace-design-v3.md): selected project memory, independent reading, task state, configurable work/approval policies, local history and an analytical journal over standard MCP. Source changes do not update an installed plugin automatically.
 
-The [governing document](docs/context-workspace-design-v2.md) defines the current cycle. The [previous design](docs/context-workspace-design.md) and older assessments remain historical references. See [release notes](CHANGELOG.md).
+See the [API and storage contracts](docs/context-workspace-v3-contracts.md), [upgrade plan](docs/context-workspace-upgrade-plan.md), [execution goal](docs/context-workspace-upgrade-goal.md), [verification results](docs/context-workspace-v3-verification.md) and [release notes](CHANGELOG.md). Earlier design documents describe earlier versions.
 
-## Project instructions and work cycle
+## Select the procedure
 
-Current is replaced by persistent `<work_root>/.pcw/<workspace>/INSTRUCTIONS.md`. Its free Markdown is the workspace's primary project guidance. The single [default template](plugins/persistent-context-workspace/pcw_runtime/default_instructions.md) is copied only on initial creation; existing user instructions are not merged with it or reset.
+| Skill | Purpose |
+| --- | --- |
+| pcw | Work cycle and natural-language routing |
+| pcw-create | Explicit creation with selected location, scope and settings |
+| pcw-search | Independent retrieval without a work cycle |
+| pcw-instructions | Requested and explicitly approved rule changes |
+| pcw-upgrade | Technical migration of selected contexts |
+| pcw-audit | Evidence-based inspection without permanent changes |
+| pcw-rework | Requested transformation of existing knowledge |
 
-The main [pcw skill](plugins/persistent-context-workspace/skills/pcw/SKILL.md) requires explicit invocation, reads the complete instructions returned by startup, then searches and reads project knowledge. Work results and task state go to tmp. Before closure, the agent reviews results against knowledge according to `INSTRUCTIONS.md`, prepares changes or an explained empty result, presents actual changes in chat, and applies the exact shown revision according to `knowledge_approval_required` in INSTRUCTIONS.md frontmatter. The default template sets `false`: show changes and apply without asking. Set `true` to require user approval; existing files without the setting retain required approval. Changes to INSTRUCTIONS.md always require explicit approval. Finish clears cycle tmp without a separate closure question and preserves instructions and knowledge.
+Creation and switching require clear user direction. A guessed repository name or empty search cannot create a workspace. If the intended context is unclear, the agent asks. Each procedure reads the selected context's rules; remembered chat does not replace PCW retrieval. The plugin does not choose models, launch workers or require a host-specific session ID.
 
-The [pcw-instructions mini-skill](plugins/persistent-context-workspace/skills/pcw-instructions/SKILL.md) is the single procedure for direct requests to edit project rules, including requests routed from the main skill. A standalone instructions cycle uses `purpose="instructions"`; it does not run ordinary work or write knowledge. Project policies are not duplicated in the skills or MCP prompts. Tools bind revisions but cannot authenticate the human origin of a confirmation.
+## Project rules and work
 
-Context creation and switching require an unambiguous user instruction. The agent keeps the established workspace, asks if the intended context is unclear and checks that an existing workspace is present before startup; it must not probe guessed names with a tool that can create storage. The [pcw-create mini-skill](plugins/persistent-context-workspace/skills/pcw-create/SKILL.md) helps choose a new context's location and task in ordinary language. The main `pcw` routes explicit functional requests to all additional skills: "PCW create a context for this task" opens creation, and "PCW update the instructions" opens instructions editing. Users do not need to name the mini-skill. These are agent instructions, not a runtime guarantee of correct selection.
+`INSTRUCTIONS.md` is the single source of project rules and settings. The [default template](plugins/persistent-context-workspace/pcw_runtime/default_instructions.md) is used for creation, with the user's selected settings; upgrades preserve custom text. A direct rule-edit request follows pcw-instructions and always needs approval of shown changes.
 
-## Storage and recovery
+Four settings are selected separately at creation:
+
+| Setting | Meaning | Missing legacy value |
+| --- | --- | --- |
+| allow_implicit_updates | Permit work without an explicit PCW invocation | false |
+| knowledge_approval_required | Wait for approval of shown knowledge/PROJECT changes | true |
+| git_history_enabled | Record local permanent-data snapshots | false |
+| material_max_tokens | Optional body limit with the index tokenizer | null (disabled) |
+
+Independent reading needs no work cycle, tmp, proposal or finish. It never creates storage, repairs an index or migrates a context. Normal work opens a cycle, reads instructions and PROJECT, retrieves relevant knowledge and creates/resumes a task Current. Significant results go to tmp; concise verified progress goes to Current.
+
+Before closure, the agent compares results with existing knowledge and prepares actual changes or an explained no-change result. It shows exact new text or changed passages, deletions and link effects in chat. It applies the shown revision under the approval setting; showing a file link is insufficient in either mode. Finish clears only that cycle's tmp without another permission question. Pending review or incomplete application/indexing prevents normal closure.
+
+## Storage
 
 ```text
-<work-root>/.pcw/<workspace>/
-  INSTRUCTIONS.md               # persistent project guidance
-  knowledge/<generated-id>.md
-  tmp/<cycle-id>/
-    materials/<generated-id>.md
-    proposals/<proposal-id>.json
-    proposals/<proposal-id>.md   # readable review
-  .pcw-runtime/                 # derived index/configuration
-  .git/                         # only after an authorized memory checkpoint
-<work-root>/.pcw/.control/<workspace>/
-  cycles.json                   # IDs, states, revisions; no retained draft bodies
-  instructions-initialized.json # prevents silent recreation of lost user rules
+<work_root>/.pcw/<workspace>/
+  INSTRUCTIONS.md              # rules and settings
+  PROJECT.md                   # purpose, goals and accepted boundaries
+  current/<task-id>.md          # separate persistent task states
+  knowledge/<filename-id>.md    # current factual descriptions
+  tmp/<cycle-id>/               # results, drafts and proposal reviews
+  .pcw-runtime/                # derived vector index and configuration
+  .git/                        # when local history is selected
+<work_root>/.pcw/.control/<workspace>/
+  format.json                  # workspace format, independent of plugin version
+  cycles.json                  # cycle identities and states
+  creation.json                # idempotent creation receipt
+  task-requests.json           # idempotent task creation
+  migration.json, backups/     # migration recovery
+  history/                     # immutable pending Git snapshots
+<work_root>/.pcw/.analytics/events.sqlite
 ```
 
-Other active cycles are not cleared. A fresh cycle does not inherit temporary results or permissions. Startup and closure retries cannot erase later work. Temporary materials and proposals never enter permanent vector search or memory Git checkpoints.
+Task IDs belong to tasks, not host sessions. Several tasks/cycles can use one workspace. Updating Current checks its revision and affects only the explicitly bound task; closing a cycle preserves Current. PROJECT changes do not rewrite earlier tasks. Knowledge, PROJECT and instructions have distinct purposes; Current and analytics are not vector knowledge.
 
-Proposals preserve existing filename IDs and can create, update, move, delete, merge or split topics with exact links. New-topic keys allow links between newly created materials. Complete affected-file fingerprints detect concurrent body, path and link changes. Incoming links are rewritten before deletion. Multi-file writes report partial state rather than claiming rollback or all-or-nothing filesystem transactions; retrying the same operation does not duplicate materials.
+## Materials, links and embeddings
 
-If indexing fails, saved knowledge and tmp remain. Repair the cause and retry the same proposal, or reconcile derived indexing before retrying apply. History restoration uses `pcw_history_read` followed by a reviewed proposal. Existing knowledge is preserved on upgrade; legacy root Current and older orchestration records are not resumed. Missing permanent storage is reported as a recovery problem, never silently recreated.
+Materials answer independent questions according to workspace instructions. Agents prepare coherent final topics and links; the code does not choose semantic boundaries. Reads return the entire selected topic plus target titles and saved descriptions. Only useful neighbors are loaded; `from_id` records a declared traversal of an actual link.
 
-## Embeddings
+Proposals can create, revise, move, delete, merge or split topics while preserving filename IDs and reviewing incoming-link effects. Metadata and unchanged-body updates do not reembed. An optional token cap rejects oversized final bodies before a permanent write; it does not certify semantic quality.
 
-Default: local `Qwen/Qwen3-Embedding-0.6B`, pinned revision, 1024 dimensions, CPU. Overlapping token windows default to 512/64 tokens. Other sentence-transformers models, Ollama or explicitly configured embedding APIs are supported with compatible tokenizers. No boundary-generation agent is needed.
+Default embeddings use local `Qwen/Qwen3-Embedding-0.6B`, a pinned revision, CPU and 1024 dimensions. Index windows default to 512 tokens with 64-token overlap. Other sentence-transformers models, Ollama and configured APIs are supported with compatible tokenizers. Only permanent bodies enter the index. See [embedding configuration](plugins/persistent-context-workspace/skills/pcw/references/embeddings.md).
 
-Only applied permanent text is indexed. Unchanged bodies, link edits and moves preserve embeddings. Provider or chunking changes rebuild an inactive table and activate it after source revision checks; failure retains the previous configuration. API credentials are referenced by environment-variable name, not stored in knowledge. See [embedding configuration](plugins/persistent-context-workspace/skills/pcw/references/embeddings.md).
+## History and analysis
 
-## Upgrade
+When selected, Git creates an initial snapshot and one commit per actual applied permanent change. It includes knowledge, PROJECT and INSTRUCTIONS; excludes tmp, Current, index and analytics; and never pushes automatically. Empty comparisons do not create commits. Failed commits retain exact snapshots for ordered retry without incorporating later file edits. File-save, index and Git statuses are distinct.
 
-The 0.10.0 API removes `pcw_current_get`, `pcw_current_set` and startup's fixed goal/constraints/completion arguments. Startup accepts `purpose` and returns `instructions` with full Markdown and its revision. Task state is ordinary temporary material. Instructions have separate read/prepare/apply tools and survive cleanup. Legacy Current files are preserved but never loaded as project rules. A previously initialized missing instructions file is reported, not silently reset. Pending knowledge proposals bind the instructions revision; changes to rules require fresh preparation.
+SQLite automatically records dispatched MCP calls, parameters, results, errors, timing, selected context/cycle/task and observed file versions. Read only selected event bodies when analyzing operations. Assessments remain separate from observations. A missing terminal record has an unknown outcome; filesystem and SQLite are not one transaction.
 
+Optional adapters import an explicitly selected other-agent transcript (`codex-jsonl` or portable `pcw-session-v1`). No disk-wide session discovery or timestamp-based actor attribution is performed. Git/file observations do not establish every outside action. Credential filters run before logging, but cannot identify arbitrary unlabelled secrets. Do not submit secrets as content. See [history and analytics](plugins/persistent-context-workspace/skills/pcw/references/history-analytics.md).
 
-0.9.2 removes the `confirmation` argument from `pcw_finish`; use `pcw_finish(cycle_id)` when the cycle is complete. Knowledge application still requires approval of the presented proposal.
+## Compatibility and recovery
 
-0.9.3 requires preparation covering the current temporary results before normal closure. Existing proposals without a tmp revision need a fresh result review. If comparison finds no changes, use `pcw_proposal_prepare(changes=[], no_changes_reason=...)`; it records the review without a knowledge write or an approval request. New or changed temporary results invalidate the earlier review for closure.
+Workspace format 1 is separate from the plugin version. Opening incompatible storage reports the need for pcw-upgrade. Recognized unversioned 0.8–0.10 contexts can be copied, migrated and verified explicitly. Knowledge, links, IDs and user instructions are preserved. Old root Current files remain intact; deciding how their contents become PROJECT, Current or knowledge is separate semantic rework.
 
-0.9.0 changes the MCP API: callers pass cycle_id, permanent mutations use proposal preparation/application, and Current belongs to cycle tmp. Old immediate-write tools are no longer exposed. Start a new host session for the changed skill/tool definitions.
+Missing permanent files are not reset to defaults. Missing derived storage is repaired explicitly. Failed multi-file writes report partial state and retain the proposal; retry that same operation. Indexing errors preserve written text. Source conflicts require a new review. No filesystem-wide atomic transaction or universal model compliance is claimed.
 
-For the existing Git marketplace tracking this repository:
+## Installation and verification
+
+For an existing Git marketplace tracking this repository, authorized installation uses:
 
 ```bash
 codex plugin marketplace upgrade persistent-context-workspace
 codex plugin add persistent-context-workspace@persistent-context-workspace
 ```
 
-These are installation commands, not actions performed by this source update. Portable hosts use the packaged plugin and `mcp.json`. Startup never installs Python dependencies or downloads model weights. Read [setup](plugins/persistent-context-workspace/skills/pcw/references/setup.md) for a concrete setup failure.
+Portable hosts use the packaged plugin and `mcp.json`. These commands are not executed by a source update. Startup never installs dependencies or downloads model weights. Use [setup](plugins/persistent-context-workspace/skills/pcw/references/setup.md) for an actual failure.
 
-## Verification
-
-The tests retain the existing storage/token-window regressions and add cycle isolation, proposal review/conflicts, partial failure/retry and full cleanup tests. The standard-MCP launcher test uses a temporary workspace. Opt-in real-agent host tests exercise reading and tmp retention before approval, followed by application after a separate human-message turn. Static and deterministic tests do not establish model compliance in every host.
+Tests use temporary workspaces and deterministic embeddings with real LanceDB, Git and SQLite. They cover storage preservation, independent reading, policy combinations, revision conflicts, tasks, history retry, analytics and session imports. Opt-in host tests use real model inference and must report the exact tested candidate; deterministic tests alone do not prove every agent follows the skill.

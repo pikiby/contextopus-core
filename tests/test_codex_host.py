@@ -1,6 +1,7 @@
 """Opt-in integration through Codex itself, including a two-turn human-approval scenario.
 
-PCW_TEST_CODEX=1 requires a locally installed matching PCW candidate.
+PCW_TEST_CODEX=1 requires a locally installed matching PCW candidate, unless
+PCW_TEST_SOURCE=1 selects an isolated source-backed MCP and temporary local skills.
 It also runs a normal question and a separate approval through the configured model (inference costs apply).
 PCW_TEST_QWEN=1 additionally exercises the already provisioned local model.
 Only temporary knowledge is changed. No plugin/config installation is done here.
@@ -33,12 +34,13 @@ PLUGIN_ID = "persistent-context-workspace@persistent-context-workspace"
 
 class CodexHost:
     def __init__(self, environment, work, notification_sink=None, server_request_sink=None,
-                 server_decision_sink=None, server_request_handler=None, notification_observer=None):
+                 server_decision_sink=None, server_request_handler=None, notification_observer=None,
+                 source_root=None):
         settings_path = Path.home() / ".codex" / "config.toml"
         settings = tomllib.loads(settings_path.read_text()) if settings_path.exists() else {}
         names = set(settings.get("plugins", {})) | {PLUGIN_ID}
         plugin_policy = "{" + ",".join(
-            json.dumps(name) + "={enabled=" + ("true" if name == PLUGIN_ID else "false") + "}"
+            json.dumps(name) + "={enabled=" + ("true" if name == PLUGIN_ID and source_root is None else "false") + "}"
             for name in sorted(names)
         ) + "}"
         self.messages = queue.Queue()
@@ -53,8 +55,9 @@ class CodexHost:
         self._write_lock = threading.Lock()
         self.request_id = 0
         self.errors = tempfile.TemporaryFile(mode="w+")
+        mcp_policy = "{}" if source_root is None else '{pcw={command="sh",args=[' + json.dumps(str(source_root / "scripts/launch.sh")) + ']}}'
         self.process = subprocess.Popen(
-            ["codex", "-c", "mcp_servers={}", "-c", "plugins=" + plugin_policy,
+            ["codex", "-c", "mcp_servers=" + mcp_policy, "-c", "plugins=" + plugin_policy,
              "-c", "features.apps=false", "app-server", "--stdio"],
             env=environment, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self.errors, text=True, bufsize=1,
@@ -184,15 +187,19 @@ class CodexHostTests(unittest.TestCase):
         for name in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT", "PCW_PYTHON", "PCW_DEPENDENCIES"):
             environment.pop(name, None)
         environment.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", PYTHONDONTWRITEBYTECODE="1")
-        result = subprocess.run(["codex", "mcp", "get", "pcw", "--json"], env=environment,
-                                text=True, capture_output=True, timeout=30, check=True)
-        cls.configuration = json.loads(result.stdout)
-        cls.transport = cls.configuration["transport"]
-        assert cls.transport["command"] == "sh", cls.transport
-        assert len(cls.transport["args"]) == 1, cls.transport
-        cls.launcher = Path(cls.transport["args"][0])
-        assert cls.launcher.is_absolute() and cls.launcher.is_file(), cls.transport
-        assert "${" not in str(cls.launcher), cls.transport
+        cls.source_mode = os.environ.get("PCW_TEST_SOURCE") == "1"
+        if cls.source_mode:
+            cls.launcher = PLUGIN / "scripts/launch.sh"
+        else:
+            result = subprocess.run(["codex", "mcp", "get", "pcw", "--json"], env=environment,
+                                    text=True, capture_output=True, timeout=30, check=True)
+            cls.configuration = json.loads(result.stdout)
+            cls.transport = cls.configuration["transport"]
+            assert cls.transport["command"] == "sh", cls.transport
+            assert len(cls.transport["args"]) == 1, cls.transport
+            cls.launcher = Path(cls.transport["args"][0])
+        assert cls.launcher.is_absolute() and cls.launcher.is_file()
+        assert "${" not in str(cls.launcher)
         installed = json.loads((cls.launcher.parents[1] / "plugin.json").read_text())
         source = json.loads((PLUGIN / "plugin.json").read_text())
         assert installed["name"] == source["name"]
@@ -202,7 +209,13 @@ class CodexHostTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory(prefix="pcw actual codex ")
         cls.addClassCleanup(cls.temporary.cleanup)
         cls.work = cls.temporary.name
-        cls.host = CodexHost(environment, cls.work)
+        cls.skill_root = cls.installed_root / "skills"
+        cls.skill_prefix = "persistent-context-workspace:"
+        if cls.source_mode:
+            cls.skill_root = Path(cls.work) / ".agents/skills"
+            shutil.copytree(PLUGIN / "skills", cls.skill_root)
+            cls.skill_prefix = ""
+        cls.host = CodexHost(environment, cls.work, source_root=PLUGIN if cls.source_mode else None)
         cls.addClassCleanup(cls.host.close)
         cls.host.call("initialize", {
             "clientInfo": {"name": "pcw_host_regression", "version": "1"},
@@ -215,11 +228,15 @@ class CodexHostTests(unittest.TestCase):
         cls.thread_id = thread["thread"]["id"]
 
     def setUp(self):
+        self.tool("workspace_create", request_id="create-" + self._testMethodName,
+                  instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text(),
+                  project_content="# Host integration fixture\nTemporary PCW test workspace.\n",
+                  user_request="Create this temporary test context with the supplied settings")
         opened = self.tool("startup", request_id="fixture-" + uuid.uuid4().hex)
         self.cycle_id = opened["cycle_id"]
 
     def tool(self, name, **arguments):
-        if name != "startup" and hasattr(self, "cycle_id"):
+        if name not in {"startup", "workspace_create"} and hasattr(self, "cycle_id"):
             arguments.setdefault("cycle_id", self.cycle_id)
         result = self.host.call("mcpServer/tool/call", {
             "threadId": self.thread_id, "server": "pcw", "tool": "pcw_" + name,
@@ -304,10 +321,10 @@ class CodexHostTests(unittest.TestCase):
 
     def test_native_pcw_skill_is_discoverable_for_explicit_turn_input(self):
         skills = self.host.call("skills/list", {"cwds": [self.work], "forceReload": True})
-        for short_name in ("pcw", "pcw-instructions"):
+        for short_name in ("pcw", "pcw-instructions", "pcw-search", "pcw-create", "pcw-audit", "pcw-rework", "pcw-upgrade"):
             matching = [skill for entry in skills["data"] for skill in entry["skills"]
-                        if skill["name"] == "persistent-context-workspace:" + short_name
-                        and skill["pluginId"] == PLUGIN_ID]
+                        if skill["name"] == self.skill_prefix + short_name
+                        and (self.source_mode or skill.get("pluginId") == PLUGIN_ID)]
             self.assertEqual(1, len(matching), skills)
             self.assertTrue(matching[0]["enabled"])
             self.assertTrue(matching[0]["path"].endswith("/skills/" + short_name + "/SKILL.md"))
@@ -345,12 +362,12 @@ class CodexHostTests(unittest.TestCase):
             "threadId": thread_id,
             "input": [
                 {"type": "text", "text": (
-                    "$persistent-context-workspace:pcw Какой код поставки у проекта? "
+                    f"${self.skill_prefix}pcw Какой код поставки у проекта? "
                     f"Рабочая папка: {self.work}. Workspace: {self._testMethodName}. "
                     "Исходные файлы проекта не изменяй."
                 )},
-                {"type": "skill", "name": "persistent-context-workspace:pcw",
-                 "path": str(self.installed_root / "skills" / "pcw" / "SKILL.md")},
+                {"type": "skill", "name": self.skill_prefix + "pcw",
+                 "path": str(self.skill_root / "pcw" / "SKILL.md")},
             ],
         })
         turn_id = turn["turn"]["id"]

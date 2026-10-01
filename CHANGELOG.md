@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0 — 2026-09-30
+
+- Separate explicit workspace creation, existing-context opening and independent reading; add format inspection and recoverable migration of recognized legacy contexts.
+- Add PROJECT and independent per-task Current with revision checks, alongside separate implicit-update and approval policies.
+- Add saved link descriptions, validated link traversal and an optional token limit for final semantic materials.
+- Capture local permanent-data Git history with exact snapshots for retry; expose version listing, comparison and reading.
+- Record dispatched MCP calls and observed file revisions in SQLite, with sanitized bodies, explicit transcript imports and separate assessments.
+- Add search, upgrade, audit and rework mini-skills and natural-language routing. Preserve exact chat review and mandatory approval for instruction changes.
+- Fix retrieving link labels from a prepared proposal after a fresh process starts.
+
+### Upgrade
+
+Refresh the configured marketplace, reinstall PCW and start a new Codex session. Existing workspaces are preserved; use `pcw-upgrade` explicitly for their format transition before opening work cycles. Installation does not migrate memories or reset their instructions. Missing legacy settings retain restricted defaults. See [contracts and compatibility](docs/context-workspace-v3-contracts.md) and [verification](docs/context-workspace-v3-verification.md).
+
 ## 0.10.0 — 2026-09-23
 
 - Add pcw-create for user-requested context creation with placement and task selection. Route functional requests through pcw; require explicit creation/switching instructions and clarification of an unknown context before startup.

@@ -1,12 +1,12 @@
 # Memory operations
 
-All calls after startup require the active `cycle_id`. Tools do not authenticate a human: explicit invocation, chat presentation and any required approval are obligations of the cycle agent. Drafts and permanent changes are separate interfaces; no direct create/update/delete/link/restore MCP bypass is exposed.
+Mutating work operations require an active `cycle_id`. Search, reads, lists, instructions, PROJECT, Current and history can be read independently without starting a cycle. Tools do not authenticate a human: invocation policy, chat presentation and any required approval are obligations of the cycle agent. Drafts and permanent changes are separate interfaces; no direct create/update/delete/link/restore MCP bypass is exposed.
 
 ## Temporary work
 
 `pcw_tmp_write(cycle_id, content)` stores ordinary Markdown and returns a generated ID, revision and path. Update that result with its `material_id` and `expected_revision`. Use `pcw_tmp_list` for bounded metadata and `pcw_tmp_read` for a chosen result. Temporary materials are not embedded or included in permanent search.
 
-Task goals, progress, blockers and notes are ordinary temporary Markdown written through `pcw_tmp_write`; there is no fixed Current schema. Knowledge writes preserve temporary results. Startup and finish clear only the addressed cycle tmp. The workspace's persistent `INSTRUCTIONS.md` remains outside tmp, is returned by startup and is read again through `pcw_instructions_read` when needed. Changes to it follow only the [instructions-edit skill](../../pcw-instructions/SKILL.md), never a knowledge proposal.
+Task state uses `pcw_current_create/list/read/update`: goal, constraints, verified_state, next_step, blockers and status, stored in `current/<task-id>.md`. Update only the cycle's bound task with its current revision. PROJECT contains project purpose and accepted boundaries; `pcw_project_update` prepares a shown proposal, and `pcw_project_apply` applies it under the approval policy. Neither is vector knowledge. Notes and working results remain in tmp. Startup/finish clear only the addressed cycle tmp; Current survives. INSTRUCTIONS is read in full and changed only through the [instructions-edit skill](../../pcw-instructions/SKILL.md).
 
 ## Prepare a permanent change
 
@@ -22,7 +22,7 @@ Call `pcw_proposal_prepare(cycle_id, changes, replacements?, proposal_id?, no_ch
 ```
 
 - A new topic uses a unique `key` and complete `content`; the plugin generates its filename-ID. `@key` refers to another new topic in this set, including mutual links.
-- An existing topic requires `material_id` and `expected_revision`. Supply changed `content`, complete outgoing `links`, or a `path` relative to knowledge. Omitted fields are preserved. Moving preserves the filename-ID.
+- An existing topic requires `material_id` and `expected_revision`. Supply changed `content`, complete outgoing `links`, a concise `description`, or a `path` relative to knowledge. Omitted fields are preserved. Moving preserves the filename-ID. Description changes are shown in review; metadata-only changes do not reembed. Reads return title/description labels for selected link targets without loading their bodies.
 - Deletion uses `material_id`, `expected_revision`, `delete:true` without other changes on that entry.
 - A merge supplies the final survivor plus deleted entries and `replacements: {"old.md": "survivor.md"}`. A split supplies the revised original and new topics. A replacement target may be `@key`.
 - Incoming link removal/redirection is computed before application and included in the review. The apply checks complete file fingerprints, including links and paths, so concurrent navigation changes also conflict.
@@ -35,6 +35,8 @@ The response contains the proposal ID/revision, created-ID map, review path, str
 Present the actual changes in chat according to `INSTRUCTIONS.md`: topic names, full new text or exact before/after passages, deletions, moves and link effects. A file link, UUID, tool log or general summary does not replace the changed content. Large proposals may span messages. Present the full scope in both approval modes; ask only when the workspace requires approval. The review file is supplementary.
 
 ## Apply under the workspace policy
+
+If `material_max_tokens` is configured, preparation counts each final body with the index tokenizer. A `needs_split` response lists the exact oversized entries and counts, without writing knowledge or saving an applicable proposal. Revise semantic topics and prepare again; the limit never chooses the meaning boundaries for the agent.
 
 `pcw_proposal_apply(cycle_id, proposal_id, expected_revision, confirmation?)` applies the previously shown version. The boolean `knowledge_approval_required` in INSTRUCTIONS.md frontmatter selects the mode. With `true`, wait for approval of the shown revision and pass the actual user message as `confirmation`; silence, saved approvals and self-approval do not qualify. With `false`, apply after presenting the changes without waiting or supplying confirmation. Missing setting retains required approval for existing/custom instructions; malformed settings are errors. The packaged template sets the initial value. Preparation returns `approval_required` and the corresponding `next_action`. The policy is read from instructions, never chosen in the apply arguments. Instruction edits always require approval through the mini-skill.
 
@@ -50,6 +52,6 @@ For a new explicit invocation use a fresh `request_id` with `pcw_startup`. Only 
 
 ## History and older workspaces
 
-`pcw_checkpoint` accepts only exact permanent knowledge Markdown paths and needs separate user authorization. Tmp and runtime state cannot enter memory Git history. `pcw_history_read` reads historical text; restoration is an ordinary reviewed proposal, not an immediate overwrite.
+When enabled in INSTRUCTIONS, local Git captures permanent data automatically. `pcw_history_list/diff/read` expose older versions; restoration is an ordinary shown proposal. `pcw_history_retry` uses immutable saved snapshots after a failed commit. Legacy manual `pcw_checkpoint` accepts only exact knowledge paths with separate user authority. Tmp, Current, analytics and runtime state are excluded. See [History and analytics](history-analytics.md).
 
-Existing knowledge IDs, content and links are preserved on upgrade. Legacy workspace-root Current and old control records remain on disk but are not resumed as cycle context or authority. Opening does not migrate those files. Missing derived storage uses `pcw_recover_workspace`; missing knowledge remains blocked, not silently recreated. Legacy UUID links remain readable via filename identity; applied topic updates write canonical navigation links.
+Opening checks workspace format without migration or creation. Use pcw-create for explicit creation and pcw-upgrade for selected legacy contexts. Migration preserves knowledge IDs, content, links and custom instructions. Legacy workspace-root Current and control records remain on disk; their semantic redistribution requires a requested rework. Missing derived storage uses `pcw_recover_workspace`; missing knowledge remains blocked. Legacy UUID links remain readable through filename identity; applied topic updates write canonical navigation links.

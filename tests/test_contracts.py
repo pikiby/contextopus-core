@@ -83,17 +83,18 @@ class PluginContractTests(unittest.TestCase):
 
     def test_explicit_skills_are_packaged(self):
         expected = {PLUGIN / "skills" / name / "SKILL.md"
-                    for name in ("pcw", "pcw-instructions", "pcw-create")}
+                    for name in ("pcw", "pcw-instructions", "pcw-create", "pcw-search", "pcw-upgrade", "pcw-audit", "pcw-rework")}
         self.assertEqual(expected, set((PLUGIN / "skills").glob("*/SKILL.md")))
         for entrypoint in expected:
             ui = (entrypoint.parent / "agents" / "openai.yaml").read_text()
-            self.assertIn("allow_implicit_invocation: false", ui)
+            implicit = "true" if entrypoint.parent.name in {"pcw", "pcw-search"} else "false"
+            self.assertIn("allow_implicit_invocation: " + implicit, ui)
             self.assertEqual(entrypoint.parent.name, frontmatter(entrypoint)["name"])
         metadata = frontmatter(SKILL / "SKILL.md")
         self.assertEqual("pcw", metadata["name"])
         self.assertTrue(metadata["description"].strip())
         ui = (SKILL / "agents" / "openai.yaml").read_text()
-        self.assertIn("allow_implicit_invocation: false", ui)
+        self.assertIn("allow_implicit_invocation: true", ui)
         self.assertIn("$pcw", ui)
         prompts = json.loads((PLUGIN / ".codex-plugin" / "plugin.json").read_text())["interface"]["defaultPrompt"]
         self.assertTrue(all("$pcw" in prompt and "$pcw-run" not in prompt for prompt in prompts))
@@ -118,7 +119,8 @@ class PluginContractTests(unittest.TestCase):
     def test_documented_tools_exist_in_runtime(self):
         documented = set()
         for path in (PLUGIN / "skills").rglob("*.md"):
-            documented.update(re.findall(r"\bpcw_[a-z_]+\b", path.read_text()))
+            # The package path pcw_runtime/... is not a tool reference.
+            documented.update(re.findall(r"\bpcw_[a-z_]+\b(?!/)", path.read_text()))
         self.assertTrue(documented)
         self.assertEqual(set(), documented - server_tools())
 
@@ -251,13 +253,14 @@ class LauncherTests(unittest.TestCase):
                     self.assertNotIn("confirmation", schemas["pcw_proposal_apply"]["required"])
                     self.assertNotIn("confirmation", schemas["pcw_finish"]["properties"])
                     self.assertIn("no_changes_reason", schemas["pcw_proposal_prepare"]["properties"])
-                    self.assertEqual({"request_id", "purpose", "restart_cycle_id", "work_root", "workspace"},
+                    self.assertEqual({"request_id", "purpose", "restart_cycle_id", "invocation", "task_id", "work_root", "workspace"},
                                      set(schemas["pcw_startup"]["properties"]))
                     self.assertIn("user_request", schemas["pcw_instructions_prepare"]["required"])
                     self.assertIn("confirmation", schemas["pcw_instructions_apply"]["required"])
-                    for name, schema in schemas.items():
-                        if name != "pcw_startup":
-                            self.assertIn("cycle_id", schema["required"])
+                    for name in ("pcw_search", "pcw_read", "pcw_read_many", "pcw_list", "pcw_instructions_read", "pcw_project_read"):
+                        self.assertNotIn("cycle_id", schemas[name].get("required", []))
+                    for name in ("pcw_proposal_prepare", "pcw_proposal_apply", "pcw_tmp_write", "pcw_current_update", "pcw_project_update", "pcw_instructions_apply"):
+                        self.assertIn("cycle_id", schemas[name]["required"])
                     self.assertNotIn("pcw_environment_check", schemas)
                     self.assertNotIn("pcw_assignment_prepare", schemas)
                     self.assertNotIn("pcw_submit_parts", schemas)
@@ -273,8 +276,15 @@ class LauncherTests(unittest.TestCase):
                             **({"cycle_id": cycle_id} if cycle_id and name != "startup" else {}), **arguments}}})
                         response = receive(request_id)
                         self.assertFalse(response.get("isError"), response)
-                        return json.loads(response["content"][0]["text"])
+                        result = json.loads(response["content"][0]["text"])
+                        self.assertEqual("recorded", result.pop("analytics")["status"])
+                        return result
 
+                    created = call("workspace_create", request_id="protocol-create", user_request="Create the protocol fixture",
+                        instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text(),
+                        project_content="# Protocol fixture\nA temporary test project.\n")
+                    self.assertEqual("created", created["status"])
+                    self.assertEqual([], call("search", query="empty")["results"])
                     opened = call("startup", request_id="protocol-invocation")
                     cycle_id = opened["cycle_id"]
                     self.assertEqual(0, opened["materials"])

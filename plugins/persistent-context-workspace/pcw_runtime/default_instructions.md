@@ -1,11 +1,16 @@
 ---
+allow_implicit_updates: false
 knowledge_approval_required: false
+git_history_enabled: false
+material_max_tokens: null
 ---
 # Project instructions
 
 ## Knowledge approval
 
 Show the exact knowledge changes in chat before applying them. The frontmatter setting controls whether to wait for user approval: `false` means apply after showing; `true` means wait for explicit approval of the shown revision. Changes to these instructions always require explicit approval through pcw-instructions.
+
+`allow_implicit_updates` separately controls starting a work cycle without an explicit PCW invocation. When false, only independent reading is allowed without that invocation. Creation, switching context and changing instructions still require the user's clear direction. `git_history_enabled` enables local history of permanent data; `material_max_tokens` optionally limits each final knowledge body, with null disabling the limit.
 
 ## Goals and limits
 
@@ -19,7 +24,9 @@ Action reports, intermediate calculations, working notes and unfinished investig
 
 ## Structure and maintenance
 
-Compare results with existing knowledge. Maintain coherent topic materials: correct superseded claims, consolidate repetition and preserve meaningful historical distinctions, conditions and links. Separate general principles from particular cases when this improves retrieval. Do not grow a topic by appending task-by-task reports. Do not create a separate material for every individual fact.
+Compare results with existing knowledge. Each material answers one independent question. Sections usually needed for different queries should become separate linked materials, retaining their conditions and evidence. Read a mixed material completely before splitting it; prepare its replacement topics and the treatment of its original ID and incoming links together. Add a concise description of each topic so an agent can choose useful links without loading every neighbor. Do not create a separate material for every individual fact.
+
+Keep accurate current descriptions, replacing outdated claims and consolidating repetition. Project goals and accepted boundaries belong in PROJECT.md; task progress belongs in current/<task-id>.md. Knowledge contains how the project works, not a task-by-task change log. Git, when enabled, retains earlier permanent revisions.
 
 ## Presenting results
 
