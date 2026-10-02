@@ -204,6 +204,156 @@ def test_migration_interruption_keeps_backup_and_retries_same_operation(tmp_path
     assert (runtime.engine.root / item["path"]).read_bytes() == original
 
 
+def legacy_with_work(tmp_path):
+    runtime = CycleRuntime(tmp_path, "old", provider_factory=Factory())
+    create(runtime, knowledge_approval_required=True)
+    pending = runtime.startup("consolidate-runbooks")["cycle_id"]
+    runtime.tmp_write(pending, "# Contract procedures\nVerified source findings.")
+    proposal = runtime.proposal_prepare(pending, [{"key": "new", "content": "# Contract setup\nExact procedure."}])
+    saved = runtime.startup("retention-rules")["cycle_id"]
+    runtime.tmp_write(saved, "# Storage retention\nVerified retention rules.")
+    applied = runtime.proposal_prepare(saved, [{"key": "saved", "content": "# Retention\nSaved rules."}])
+    runtime.proposal_apply(saved, applied["proposal_id"], applied["revision"], confirmation="Approve this text")
+    # The preceding release has the same draft format, but no workspace format marker.
+    runtime._format_path().unlink()
+    (runtime.engine.root / "PROJECT.md").unlink()
+    (runtime.engine.root / "current").rmdir()
+    return runtime, pending, proposal, saved, applied
+
+
+def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_path):
+    runtime, pending, proposal, saved, applied = legacy_with_work(tmp_path)
+    before = runtime._source_files()
+    control = runtime._migration_tree(runtime.control.root, control=True)
+    plan = runtime.upgrade_plan()
+    assert plan["ready"] and not plan["blockers"]
+    work = {row["cycle_id"]: row for row in plan["pending_work"]}
+    assert work[pending]["request_ids"] == ["consolidate-runbooks"]
+    assert work[pending]["temporary_materials"][0]["title"] == "Contract procedures"
+    assert work[pending]["proposals"][0]["state"] == "prepared"
+    assert work[pending]["proposals"][0]["changes"][0]["title"] == "Contract setup"
+    assert work[saved]["proposals"][0]["state"] == "applied"
+    result = runtime.upgrade_apply(plan["revision"], "Upgrade without cancelling work")
+    assert result["pending_work_preserved"] and result["status"] == "complete"
+    after = runtime._source_files()
+    assert all(after[path] == digest for path, digest in before.items())
+    assert (Path(result["control_backup"]) / "cycles.json").read_bytes() == runtime.record_path.read_bytes()
+    assert (Path(result["control_backup"]) / "material-ids.json").read_bytes() == (runtime.control.root / "material-ids.json").read_bytes()
+    runtime._migration_verify_backup(result)
+    assert result["control_sources"] == control
+    assert runtime._records()["cycles"][pending]["state"] == "active"
+    assert runtime._records()["cycles"][saved]["state"] == "active"
+    assert not (runtime.engine.knowledge / proposal["created_ids"]["new"]).exists()
+    # A cold process can continue the same review with the same revisions and approval requirement.
+    runtime.close()
+    cold = CycleRuntime(tmp_path, "old", provider_factory=Factory())
+    read = cold.proposal_read(pending, proposal["proposal_id"])
+    assert read["revision"] == proposal["revision"] and read["approval_required"]
+    assert cold.tmp_list(pending)["total"] == 1
+    with pytest.raises(PCWError, match="confirmation"):
+        cold.proposal_apply(pending, proposal["proposal_id"], proposal["revision"])
+    assert cold.proposal_apply(pending, proposal["proposal_id"], proposal["revision"], confirmation="Approve now")["status"] == "applied"
+    assert cold.finish(pending)["status"] == "closed"
+    assert cold.proposal_apply(saved, applied["proposal_id"], applied["revision"])["replayed"]
+    assert cold.finish(saved)["status"] == "closed"
+    cold.close()
+
+
+@pytest.mark.parametrize("changed", ["tmp", "registry"])
+def test_upgrade_review_detects_changes_to_work(tmp_path, changed):
+    runtime, pending, proposal, _, _ = legacy_with_work(tmp_path)
+    plan = runtime.upgrade_plan()
+    if changed == "tmp":
+        runtime.tmp_write(pending, "Another finding")
+    else:
+        records = runtime._records()
+        records["cycles"][pending]["proposals"][proposal["proposal_id"]]["state"] = "discarded"
+        runtime._persist(records)
+    with pytest.raises(PCWError, match="changed since migration review"):
+        runtime.upgrade_apply(plan["revision"], "Upgrade")
+    assert not (runtime.control.root / "migration.json").exists()
+    assert not runtime._format_path().exists()
+
+
+@pytest.mark.parametrize("problem", ["missing_proposal", "unknown_kind", "closing"])
+def test_upgrade_reports_incompatible_work_before_apply(tmp_path, problem):
+    runtime, pending, proposal, _, _ = legacy_with_work(tmp_path)
+    if problem == "missing_proposal":
+        runtime._plan_path(pending, proposal["proposal_id"]).unlink()
+    elif problem == "unknown_kind":
+        records = runtime._records()
+        records["cycles"][pending]["purpose"] = "future-purpose"
+        runtime._persist(records)
+    else:
+        records = runtime._records()
+        records["cycles"][pending]["state"] = "closing"
+        runtime._persist(records)
+    before = runtime.record_path.read_bytes()
+    plan = runtime.upgrade_plan()
+    assert not plan["ready"] and plan["next_action"] == "inspect_blockers"
+    assert any(row["cycle_id"] == pending for row in plan["blockers"])
+    with pytest.raises(PCWError, match="preflight blocked"):
+        runtime.upgrade_apply(plan["revision"], "Upgrade")
+    assert runtime.record_path.read_bytes() == before
+    assert not runtime._format_path().exists()
+
+
+def test_snapshot_interruption_resumes_same_backup_without_overwrite(tmp_path):
+    runtime, _, _, _, _ = legacy_with_work(tmp_path)
+    plan = runtime.upgrade_plan()
+    copy = runtime._migration_copy
+    def interrupt(source, target, manifest):
+        copy(source, target, manifest)
+        if target.name == "workspace":
+            raise OSError("lost snapshot acknowledgement")
+    with patch.object(runtime, "_migration_copy", side_effect=interrupt):
+        with pytest.raises(OSError):
+            runtime.upgrade_apply(plan["revision"], "Upgrade")
+    operation = json.loads((runtime.control.root / "migration.json").read_text())
+    first = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in Path(operation["backup"]).rglob("*") if p.is_file()}
+    assert runtime.upgrade_plan()["resume_revision"] == plan["revision"]
+    result = runtime.upgrade_apply(plan["revision"], "Retry same operation")
+    assert result["backup"] == operation["backup"]
+    assert all((p.read_bytes(), p.stat().st_mtime_ns) == values for p, values in first.items())
+    assert len(list((runtime.control.root / "backups").iterdir())) == 1
+
+
+def test_changed_work_after_interruption_blocks_resume(tmp_path):
+    runtime, pending, _, _, _ = legacy_with_work(tmp_path)
+    plan = runtime.upgrade_plan()
+    write = runtime.engine._write
+    def interrupt(path, content):
+        write(path, content)
+        if path.name == "PROJECT.md":
+            raise OSError("interrupted")
+    with patch.object(runtime.engine, "_write", side_effect=interrupt):
+        with pytest.raises(OSError):
+            runtime.upgrade_apply(plan["revision"], "Upgrade")
+    runtime.tmp_write(pending, "Work changed while migration was interrupted")
+    changed_plan = runtime.upgrade_plan()
+    assert not changed_plan["ready"]
+    assert changed_plan["resume_revision"] == plan["revision"]
+    assert any("Source changed" in issue["reason"] for issue in changed_plan["blockers"])
+    with pytest.raises(PCWError, match="Source changed"):
+        runtime.upgrade_apply(plan["revision"], "Retry")
+    assert not runtime._format_path().exists()
+
+
+def test_backup_corruption_does_not_overwrite_or_mark_format_current(tmp_path):
+    runtime, _, _, _, _ = legacy_with_work(tmp_path)
+    plan = runtime.upgrade_plan()
+    original = runtime._migration_verify_backup
+    def corrupt(operation):
+        (Path(operation["control_backup"]) / "cycles.json").write_text("corrupt")
+        original(operation)
+    with patch.object(runtime, "_migration_verify_backup", side_effect=corrupt):
+        with pytest.raises(PCWError, match="backup verification failed"):
+            runtime.upgrade_apply(plan["revision"], "Upgrade")
+    with pytest.raises(PCWError, match="Retained backup changed"):
+        runtime.upgrade_apply(plan["revision"], "Retry")
+    assert not runtime._format_path().exists()
+
+
 def test_audit_reports_evidence_and_preserves_all_files(workspace):
     a = workspace.engine.create("# Same\nBody")
     b = workspace.engine.create("# Same\nBody")

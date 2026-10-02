@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.1 — 2026-10-02
+
+- Include compatibility, concrete unfinished work and blockers in the migration plan; the upgrade skill needs only this preflight call.
+- Preserve compatible active cycles, temporary results, prepared proposals and already-applied proposal states during format migration. Migration neither approves proposals nor closes old work.
+- Back up the entire workspace and its separate control state, including cycle records and material-ID reservations. Bind review to temporary and control changes and verify both snapshots before recording the new format.
+- Resume interrupted snapshots and migrations using the original revision and backup, without overwriting retained files. Report incompatible work before application.
+
 ## 0.11.0 — 2026-09-30
 
 - Separate explicit workspace creation, existing-context opening and independent reading; add format inspection and recoverable migration of recognized legacy contexts.
