@@ -79,9 +79,13 @@ def test_legacy_migration_preserves_every_source(tmp_path):
     with pytest.raises(PCWError, match="pcw-upgrade"):
         runtime.startup("start")
     plan = runtime.upgrade_plan()
+    assert plan["project_description"]["status"] == "missing"
     result = runtime.upgrade_apply(plan["revision"], "Upgrade this workspace")
     assert result["status"] == "complete"
-    assert runtime.upgrade_apply(plan["revision"], "Retry")["replayed"]
+    assert result["project_description"]["status"] == "placeholder"
+    replay = runtime.upgrade_apply(plan["revision"], "Retry")
+    assert replay["replayed"]
+    assert replay["project_description"]["status"] == "placeholder"
     assert path.read_bytes() == text
     assert runtime.instructions_read()["content"] == instructions
     assert (engine.root / "CURRENT.md").read_text() == "old task state"
@@ -247,6 +251,16 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     # A cold process can continue the same review with the same revisions and approval requirement.
     runtime.close()
     cold = CycleRuntime(tmp_path, "old", provider_factory=Factory())
+    current_plan = cold.upgrade_plan()
+    assert current_plan["compatible"] and current_plan["changes"] == []
+    assert current_plan["pending_work"] == plan["pending_work"]
+    assert current_plan["project_description"]["status"] == "placeholder"
+    unchanged = cold._source_files(), cold._migration_tree(cold.control.root, control=True)
+    current_result = cold.upgrade_apply(current_plan["revision"], "Check current context")
+    assert current_result["status"] == "current"
+    assert current_result["pending_work"] == plan["pending_work"]
+    assert current_result["project_description"]["status"] == "placeholder"
+    assert unchanged == (cold._source_files(), cold._migration_tree(cold.control.root, control=True))
     read = cold.proposal_read(pending, proposal["proposal_id"])
     assert read["revision"] == proposal["revision"] and read["approval_required"]
     assert cold.tmp_list(pending)["total"] == 1
@@ -257,6 +271,36 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     assert cold.proposal_apply(saved, applied["proposal_id"], applied["revision"])["replayed"]
     assert cold.finish(saved)["status"] == "closed"
     cold.close()
+
+
+@pytest.mark.parametrize("content,status", [
+    (None, "missing"), ("\n \n", "empty"), (EMPTY_PROJECT, "placeholder"),
+    ("# My project\nVerified purpose and boundaries.\n", "present"),
+])
+def test_current_format_reports_project_content_without_rewriting(workspace, content, status):
+    path = workspace.engine.root / "PROJECT.md"
+    if content is None:
+        path.unlink()
+    else:
+        path.write_text(content)
+    before = workspace._source_files(), workspace._migration_tree(workspace.control.root, control=True)
+    plan = workspace.upgrade_plan()
+    assert plan["compatible"] and plan["changes"] == []
+    assert plan["project_description"] == {
+        "path": "PROJECT.md", "status": status, "content_reviewed": False,
+    }
+    assert before == (workspace._source_files(), workspace._migration_tree(workspace.control.root, control=True))
+
+
+def test_current_format_reports_damaged_unfinished_work(workspace):
+    cycle = workspace.startup("pending-review")["cycle_id"]
+    proposal = workspace.proposal_prepare(cycle, [{"key": "new", "content": "# Fact\nChecked."}])
+    workspace._plan_path(cycle, proposal["proposal_id"]).unlink()
+    plan = workspace.upgrade_plan()
+    assert plan["compatible"] and plan["changes"] == []
+    assert not plan["ready"] and plan["next_action"] == "inspect_blockers"
+    assert plan["pending_work"][0]["cycle_id"] == cycle
+    assert any(row["proposal_id"] == proposal["proposal_id"] for row in plan["blockers"])
 
 
 @pytest.mark.parametrize("changed", ["tmp", "registry"])

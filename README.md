@@ -1,6 +1,6 @@
 # Persistent Context Workspace
 
-Version 0.11.1 implements the [v3 design](docs/context-workspace-design-v3.md): selected project memory, independent reading, task state, configurable work/approval policies, local history and an analytical journal over standard MCP. Source changes do not update an installed plugin automatically.
+Version 0.11.2 implements the [v3 design](docs/context-workspace-design-v3.md): selected project memory, independent reading, task state, configurable work/approval policies, local history and an analytical journal over standard MCP. Source changes do not update an installed plugin automatically.
 
 See the [API and storage contracts](docs/context-workspace-v3-contracts.md), [upgrade plan](docs/context-workspace-upgrade-plan.md), [execution goal](docs/context-workspace-upgrade-goal.md), [verification results](docs/context-workspace-v3-verification.md) and [release notes](CHANGELOG.md). Earlier design documents describe earlier versions.
 
@@ -79,6 +79,8 @@ Optional adapters import an explicitly selected other-agent transcript (`codex-j
 Workspace format 1 is separate from the plugin version. Opening incompatible storage reports the need for pcw-upgrade. Recognized unversioned 0.8–0.10 contexts can be copied, migrated and verified explicitly. Knowledge, links, IDs and user instructions are preserved. Old root Current files remain intact; deciding how their contents become PROJECT, Current or knowledge is separate semantic rework.
 
 `pcw_upgrade_plan` performs the preflight in one call: compatibility, exact revision, technical changes, unfinished work with proposal states and material titles, and blockers. Compatible active cycles survive migration unchanged. The backup includes the entire workspace (including tmp and the index) and separate control state (including cycle records and ID reservations). Prepared proposals are neither applied nor discarded; already-applied proposals keep their state. Source and backup integrity are checked before marking the format current. Retry a pending migration with its returned `resume_revision` and the same snapshot. Unsupported/interrupted cycle states or damaged proposals are reported before application and need separate recovery, not blanket cancellation.
+
+The plan inspects unfinished work even when the format is already current. `project_description` separately reports whether PROJECT is missing, empty, the migration placeholder, or present. Presence does not validate the description's meaning. Migration results also report this status: a successful format upgrade can still leave PROJECT unfilled. Filling it is a requested, source-grounded project update under the workspace approval policy.
 
 Missing permanent files are not reset to defaults. Missing derived storage is repaired explicitly. Failed multi-file writes report partial state and retain the proposal; retry that same operation. Indexing errors preserve written text. Source conflicts require a new review. No filesystem-wide atomic transaction or universal model compliance is claimed.
 

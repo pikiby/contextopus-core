@@ -213,13 +213,24 @@ class WorkspaceMixin:
         with self.control.guard():
             return self._upgrade_plan()
 
+    def _project_description_status(self):
+        path = self.engine.root / "PROJECT.md"
+        self.engine._assert_safe(path)
+        if not path.exists():
+            status = "missing"
+        else:
+            text = path.read_text(encoding="utf-8").strip()
+            status = "empty" if not text else "placeholder" if text == EMPTY_PROJECT.strip() else "present"
+        # Presence is a structural observation, not a review of accuracy or completeness.
+        return {"path": "PROJECT.md", "status": status, "content_reviewed": False}
+
     def _upgrade_plan(self):
         version = self._format()
         if version not in (0, FORMAT_VERSION):
             raise PCWError("No supported migration path for this workspace format")
         state = {"from_version": version, "to_version": FORMAT_VERSION, "sources": self._source_files(),
                  "control_sources": self._migration_tree(self.control.root, control=True)}
-        work, blockers = self._migration_work() if version != FORMAT_VERSION else ([], [])
+        work, blockers = self._migration_work()
         operation_path = self.control.root / "migration.json"
         self.control.safe(operation_path)
         operation = json.loads(operation_path.read_text()) if operation_path.exists() else None
@@ -240,6 +251,7 @@ class WorkspaceMixin:
         return {**state, "workspace": str(self.engine.root), "revision": _revision(encode(state)),
                 "compatible": version == FORMAT_VERSION, "ready": not blockers,
                 "pending_work": work, "blockers": blockers,
+                "project_description": self._project_description_status(),
                 "resume_revision": pending["revision"] if pending else None,
                 "backup": pending["backup"] if pending else None,
                 "backup_scope": ["entire workspace including tmp and index", "control state excluding locks, migration receipt and older backups"],
@@ -320,7 +332,8 @@ class WorkspaceMixin:
             operation = json.loads(record_path.read_text()) if record_path.exists() else None
             if operation and operation["revision"] == expected_revision and operation["status"] == "complete":
                 self._require_format()
-                return {**operation, "replayed": True}
+                return {**operation, "replayed": True,
+                        "project_description": self._project_description_status()}
             if operation and operation["status"] != "complete":
                 if operation["revision"] != expected_revision:
                     raise PCWError("Resume the pending migration revision before starting another")
@@ -331,7 +344,9 @@ class WorkspaceMixin:
                 if plan["revision"] != expected_revision:
                     raise PCWError("Workspace changed since migration review; inspect a fresh plan")
                 if not plan["changes"]:
-                    return {"status": "current", "format_version": FORMAT_VERSION}
+                    return {"status": "current", "format_version": FORMAT_VERSION,
+                            "pending_work": plan["pending_work"], "blockers": plan["blockers"],
+                            "project_description": plan["project_description"]}
                 if not plan["ready"]:
                     raise PCWError("Migration preflight blocked: " + encode(plan["blockers"]))
                 backup_root = self.control.root / "backups" / uuid.uuid4().hex
@@ -372,4 +387,5 @@ class WorkspaceMixin:
             operation["pending_preparation"] = index_status["pending_preparation"]
             operation["pending_work_preserved"] = True
             self.control.write(record_path, encode(operation))
-            return {**operation, "format_version": FORMAT_VERSION, "semantic_rework": "not_performed", "history": history}
+            return {**operation, "format_version": FORMAT_VERSION, "semantic_rework": "not_performed",
+                    "project_description": self._project_description_status(), "history": history}

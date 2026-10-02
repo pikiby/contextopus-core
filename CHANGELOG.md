@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.2 — 2026-10-02
+
+- Inspect unfinished work and damaged proposals even when a workspace already uses the current format.
+- Report missing, empty or placeholder PROJECT descriptions separately from format compatibility, including after migration; presence alone is not a content review.
+- Make the upgrade procedure report remaining content work and route requested PROJECT completion through the existing reviewed update procedure.
+
 ## 0.11.1 — 2026-10-02
 
 - Include compatibility, concrete unfinished work and blockers in the migration plan; the upgrade skill needs only this preflight call.

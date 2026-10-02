@@ -1,6 +1,6 @@
 # PCW implementation
 
-Version 0.11.1 implements the [v3 design](docs/context-workspace-design-v3.md).
+Version 0.11.2 implements the [v3 design](docs/context-workspace-design-v3.md).
 
 The complete ordered work is tracked in [the upgrade plan](docs/context-workspace-upgrade-plan.md). Its execution procedure is [the goal](docs/context-workspace-upgrade-goal.md); API details are in [the contracts](docs/context-workspace-v3-contracts.md).
 
