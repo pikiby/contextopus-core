@@ -1,5 +1,5 @@
 interface:
-  display_name: "PCW Create"
+  display_name: "pcw-create"
   short_description: "Choose a task and location for a new PCW context"
   default_prompt: "Use $pcw-create to create a context for my task and help me choose where to store it."
 policy:

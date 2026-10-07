@@ -82,7 +82,7 @@ class WorkspaceMixin:
             raise PCWError("An explicit user request to create this context is required")
         if not isinstance(project_content, str) or not project_content.strip():
             raise PCWError("Supply the project description agreed with the user")
-        settings = policies(instructions_content, creation=True)
+        settings = policies(instructions_content)
         signature = _revision(encode([request_id, instructions_content, project_content, user_request]))
         with self.control.guard():
             record = self.control.root / "creation.json"
@@ -97,6 +97,9 @@ class WorkspaceMixin:
             elif self.engine.root.exists():
                 raise PCWError("Workspace already exists; opening or migration never replaces it")
             else:
+                # New requests require the current choices. An identical older
+                # accepted request must remain resumable after a plugin update.
+                settings = policies(instructions_content, creation=True)
                 previous = {"signature": signature, "status": "creating"}
                 self.control.write(record, encode(previous))
             self.engine._assert_safe(self.engine.knowledge)

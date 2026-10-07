@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import json
 import os
 import re
@@ -42,14 +41,7 @@ def frontmatter(path: Path) -> dict:
 
 
 def server_tools() -> set[str]:
-    tree = ast.parse((PLUGIN / "pcw_runtime" / "server.py").read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "_DESCRIPTIONS"
-            for target in node.targets
-        ):
-            return {"pcw_" + name for name in ast.literal_eval(node.value)}
-    raise AssertionError("server tool registry not found")
+    return {"pcw_query", "pcw_execute"}
 
 
 class PluginContractTests(unittest.TestCase):
@@ -83,11 +75,11 @@ class PluginContractTests(unittest.TestCase):
 
     def test_explicit_skills_are_packaged(self):
         expected = {PLUGIN / "skills" / name / "SKILL.md"
-                    for name in ("pcw", "pcw-instructions", "pcw-create", "pcw-search", "pcw-upgrade", "pcw-audit", "pcw-rework")}
+                    for name in ("pcw", "pcw-edit-instructions", "pcw-create", "pcw-search", "pcw-upgrade", "pcw-audit", "pcw-rework", "pcw-analyze")}
         self.assertEqual(expected, set((PLUGIN / "skills").glob("*/SKILL.md")))
         for entrypoint in expected:
             ui = (entrypoint.parent / "agents" / "openai.yaml").read_text()
-            implicit = "true" if entrypoint.parent.name in {"pcw", "pcw-search"} else "false"
+            implicit = "true" if entrypoint.parent.name in {"pcw", "pcw-search", "pcw-analyze"} else "false"
             self.assertIn("allow_implicit_invocation: " + implicit, ui)
             self.assertEqual(entrypoint.parent.name, frontmatter(entrypoint)["name"])
         metadata = frontmatter(SKILL / "SKILL.md")
@@ -203,9 +195,12 @@ class LauncherTests(unittest.TestCase):
                     environment.pop("PCW_PYTHON", None)
                 active_plugin = Path(cache) / "installed plugin with spaces"
                 shutil.copytree(PLUGIN, active_plugin, ignore=shutil.ignore_patterns("__pycache__", ".venv", "*.egg-info", "build"))
+                # The descriptor requests add many log lines. An unread stderr
+                # pipe can fill and block the server while stdout is awaited.
+                error_log = tempfile.TemporaryFile(mode="w+")
                 process = subprocess.Popen(
                     ["/bin/sh", str(active_plugin / "scripts" / "launch.sh")], env=environment, cwd=directory,
-                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=error_log,
                     text=True, bufsize=1,
                 )
 
@@ -241,42 +236,49 @@ class LauncherTests(unittest.TestCase):
                     send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
                     tools = receive(2)["tools"]
                     self.assertEqual(server_tools(), {tool["name"] for tool in tools})
-                    for tool in tools:
-                        schema = tool["inputSchema"]
-                        self.assertTrue({"work_root", "workspace"} <= set(schema["required"]))
-                    self.assertEqual([], list(Path(directory).iterdir()))
                     schemas = {tool["name"]: tool["inputSchema"] for tool in tools}
-                    for removed in ("pcw_create", "pcw_update", "pcw_delete", "pcw_links", "pcw_merge", "pcw_restore", "pcw_current_get", "pcw_current_set"):
-                        self.assertNotIn(removed, schemas)
-                    self.assertIn("expected_revision", schemas["pcw_proposal_apply"]["required"])
-                    self.assertIn("confirmation", schemas["pcw_proposal_apply"]["properties"])
-                    self.assertNotIn("confirmation", schemas["pcw_proposal_apply"]["required"])
-                    self.assertNotIn("confirmation", schemas["pcw_finish"]["properties"])
-                    self.assertIn("no_changes_reason", schemas["pcw_proposal_prepare"]["properties"])
-                    self.assertEqual({"request_id", "purpose", "restart_cycle_id", "invocation", "task_id", "work_root", "workspace"},
-                                     set(schemas["pcw_startup"]["properties"]))
-                    self.assertIn("user_request", schemas["pcw_instructions_prepare"]["required"])
-                    self.assertIn("confirmation", schemas["pcw_instructions_apply"]["required"])
-                    for name in ("pcw_search", "pcw_read", "pcw_read_many", "pcw_list", "pcw_instructions_read", "pcw_project_read"):
-                        self.assertNotIn("cycle_id", schemas[name].get("required", []))
-                    for name in ("pcw_proposal_prepare", "pcw_proposal_apply", "pcw_tmp_write", "pcw_current_update", "pcw_project_update", "pcw_instructions_apply"):
-                        self.assertIn("cycle_id", schemas[name]["required"])
-                    self.assertNotIn("pcw_environment_check", schemas)
-                    self.assertNotIn("pcw_assignment_prepare", schemas)
-                    self.assertNotIn("pcw_submit_parts", schemas)
-                    self.assertIn("chunking", schemas["pcw_switch_embeddings"]["properties"])
+                    self.assertEqual(["operation"], schemas["pcw_query"]["required"])
+                    self.assertTrue({"operation", "work_root", "workspace"} <= set(schemas["pcw_execute"]["required"]))
+                    self.assertEqual([], list(Path(directory).iterdir()))
                     request_id = 2
                     cycle_id = None
 
-                    def call(name, **arguments):
+                    def raw_call(tool, arguments):
                         nonlocal request_id
                         request_id += 1
                         send({"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {
-                            "name": "pcw_" + name, "arguments": {"work_root": directory, "workspace": "protocol",
-                            **({"cycle_id": cycle_id} if cycle_id and name != "startup" else {}), **arguments}}})
+                            "name": tool, "arguments": arguments}})
                         response = receive(request_id)
                         self.assertFalse(response.get("isError"), response)
-                        result = json.loads(response["content"][0]["text"])
+                        return json.loads(response["content"][0]["text"])
+
+                    catalog = raw_call("pcw_query", {"operation": "describe"})["operations"]
+                    self.assertEqual(42, sum(map(len, catalog.values())))
+                    operations = {name: raw_call("pcw_query", {
+                        "operation": "describe", "arguments": {"operation": name}})["arguments_schema"]
+                        for names in catalog.values() for name in names}
+                    self.assertEqual([], list(Path(directory).iterdir()))
+                    self.assertIn("expected_revision", operations["proposal_apply"]["required"])
+                    self.assertIn("confirmation", operations["proposal_apply"]["properties"])
+                    self.assertNotIn("confirmation", operations["proposal_apply"]["required"])
+                    self.assertNotIn("confirmation", operations["finish"]["properties"])
+                    self.assertIn("no_changes_reason", operations["proposal_prepare"]["properties"])
+                    self.assertEqual({"request_id", "purpose", "restart_cycle_id", "invocation", "task_id"},
+                                     set(operations["startup"]["properties"]))
+                    self.assertIn("user_request", operations["instructions_prepare"]["required"])
+                    self.assertIn("confirmation", operations["instructions_apply"]["required"])
+                    for name in ("search", "read", "read_many", "list", "instructions_read", "project_read"):
+                        self.assertNotIn("cycle_id", operations[name].get("required", []))
+                    for name in ("proposal_prepare", "proposal_apply", "tmp_write", "current_update", "project_update", "instructions_apply"):
+                        self.assertIn("cycle_id", operations[name]["required"])
+                    self.assertIn("chunking", operations["switch_embeddings"]["properties"])
+
+                    def call(name, **arguments):
+                        tool = "pcw_query" if name in catalog["pcw_query"] else "pcw_execute"
+                        if cycle_id and "cycle_id" in operations[name]["properties"]:
+                            arguments.setdefault("cycle_id", cycle_id)
+                        result = raw_call(tool, {"operation": name, "work_root": directory, "workspace": "protocol",
+                                                 "arguments": arguments})
                         self.assertEqual("recorded", result.pop("analytics")["status"])
                         return result
 
@@ -332,9 +334,13 @@ class LauncherTests(unittest.TestCase):
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         process.terminate()
-                        process.wait(timeout=5)
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
                     process.stdout.close()
-                    process.stderr.close()
+                    error_log.close()
 
 
 class MemoryFixtureTests(unittest.TestCase):

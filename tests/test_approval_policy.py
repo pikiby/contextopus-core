@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from pcw_runtime import PCWError
-from pcw_runtime.server import mcp
+from pcw_runtime.server import pcw_query
 from test_cycles import workspace
 from test_instructions import edit, apply as apply_instructions
 
@@ -144,9 +144,8 @@ def test_auto_mode_still_checks_file_conflicts_and_full_revision(workspace):
 
 
 def test_mcp_schema_allows_omitting_confirmation_only_for_knowledge():
-    tools = mcp._tool_manager._tools
-    knowledge = tools["pcw_proposal_apply"].parameters
-    instructions = tools["pcw_instructions_apply"].parameters
+    knowledge = pcw_query("describe", arguments={"operation": "proposal_apply"})["arguments_schema"]
+    instructions = pcw_query("describe", arguments={"operation": "instructions_apply"})["arguments_schema"]
     assert "confirmation" not in knowledge["required"]
     assert "confirmation" in instructions["required"]
     assert "knowledge_approval_required" not in knowledge["properties"]

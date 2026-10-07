@@ -81,6 +81,7 @@ class StartupTests(unittest.TestCase):
             ("lancedb", "lancedb", "0.20.0"),
             ("mcp", "mcp", mcp_version),
             ("PyYAML", "yaml", "6.0"),
+            ("pydantic", "pydantic", "2.11.0"),
             ("pyarrow", "pyarrow", "19.0.1"),
         ):
             self.distribution(name, module, version, body=body)

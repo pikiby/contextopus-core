@@ -1,5 +1,5 @@
 interface:
-  display_name: "PCW"
+  display_name: "pcw"
   short_description: "Use project knowledge with temporary work context"
   default_prompt: "Use $pcw for my task and show me proposed permanent-memory changes before applying them."
 policy:

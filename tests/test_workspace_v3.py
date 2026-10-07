@@ -146,6 +146,28 @@ def test_project_review_and_audit_cannot_write(workspace):
     assert workspace.finish(audit)["status"] == "closed"
 
 
+@pytest.mark.parametrize("override,limit", [("standard", 1024), (None, None), (2000, 2000)])
+def test_creation_material_limit_default_and_explicit_overrides(tmp_path, override, limit):
+    runtime = CycleRuntime(tmp_path, "sized", provider_factory=Factory())
+    try:
+        create(runtime, **({} if override == "standard" else {"material_max_tokens": override}))
+        instructions = runtime.instructions_read()["content"]
+        assert policies(instructions)["material_max_tokens"] == limit
+        cycle = runtime.startup("work")["cycle_id"]
+        # This fixture tokenizer counts characters, making the exact boundary deterministic.
+        length = limit if limit is not None else 4096
+        accepted = runtime.proposal_prepare(cycle, [{"key": "topic", "content": "x" * length}])
+        assert accepted["status"] == "prepared"
+        if limit is not None:
+            rejected = runtime.proposal_prepare(cycle, [{"key": "large", "content": "x" * (limit + 1)}])
+            assert rejected["status"] == "needs_split"
+            assert rejected["materials"][0]["tokens"] == limit + 1
+        assert runtime.list()["total"] == 0
+        assert policies("Legacy instructions without settings")["material_max_tokens"] is None
+    finally:
+        runtime.close()
+
+
 def test_optional_limit_rejects_before_write_and_labels_need_no_embedding(tmp_path):
     factory = Factory()
     runtime = CycleRuntime(tmp_path, "limited", provider_factory=factory)

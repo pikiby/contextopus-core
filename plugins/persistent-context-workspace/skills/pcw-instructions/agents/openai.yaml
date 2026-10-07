@@ -1,6 +1,0 @@
-interface:
-  display_name: "PCW Instructions"
-  short_description: "Review a requested change to project instructions"
-  default_prompt: "Use $pcw-instructions to prepare my requested changes to INSTRUCTIONS.md and show them for approval."
-policy:
-  allow_implicit_invocation: false

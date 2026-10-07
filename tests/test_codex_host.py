@@ -13,7 +13,6 @@ release evidence.
 
 from __future__ import annotations
 
-import ast
 import json
 import os
 from pathlib import Path
@@ -213,9 +212,19 @@ class CodexHostTests(unittest.TestCase):
         cls.skill_prefix = "persistent-context-workspace:"
         if cls.source_mode:
             cls.skill_root = Path(cls.work) / ".agents/skills"
-            shutil.copytree(PLUGIN / "skills", cls.skill_root)
+            # Keep packaged relative references (notably the creation template)
+            # valid. Copying only skills made the model search for missing files.
+            shutil.copytree(PLUGIN, cls.skill_root.parent,
+                            ignore=shutil.ignore_patterns("__pycache__", ".venv", "*.egg-info", "build"))
             cls.skill_prefix = ""
-        cls.host = CodexHost(environment, cls.work, source_root=PLUGIN if cls.source_mode else None)
+        trace = {}
+        if os.environ.get("PCW_TEST_TRACE_DIR"):
+            trace_root = Path(os.environ["PCW_TEST_TRACE_DIR"])
+            trace_root.mkdir(parents=True, exist_ok=True)
+            prefix = uuid.uuid4().hex
+            trace = {name: trace_root / (prefix + "-" + name + ".jsonl")
+                     for name in ("notification_sink", "server_request_sink", "server_decision_sink")}
+        cls.host = CodexHost(environment, cls.work, source_root=PLUGIN if cls.source_mode else None, **trace)
         cls.addClassCleanup(cls.host.close)
         cls.host.call("initialize", {
             "clientInfo": {"name": "pcw_host_regression", "version": "1"},
@@ -226,8 +235,17 @@ class CodexHostTests(unittest.TestCase):
             "cwd": cls.work, "ephemeral": True, "approvalPolicy": "never", "sandbox": "workspace-write",
         })
         cls.thread_id = thread["thread"]["id"]
+        described = cls.host.call("mcpServer/tool/call", {
+            "threadId": cls.thread_id, "server": "pcw", "tool": "pcw_query",
+            "arguments": {"operation": "describe"},
+        })
+        assert not described.get("isError"), described
+        catalog = described.get("structuredContent") or json.loads(described["content"][0]["text"])
+        cls.operation_tools = {name: tool for tool, names in catalog["operations"].items() for name in names}
 
     def setUp(self):
+        if self._testMethodName == "test_agent_creates_context_through_compact_interface":
+            return  # The agent, not the harness, must create this workspace.
         self.tool("workspace_create", request_id="create-" + self._testMethodName,
                   instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text(),
                   project_content="# Host integration fixture\nTemporary PCW test workspace.\n",
@@ -239,8 +257,8 @@ class CodexHostTests(unittest.TestCase):
         if name not in {"startup", "workspace_create"} and hasattr(self, "cycle_id"):
             arguments.setdefault("cycle_id", self.cycle_id)
         result = self.host.call("mcpServer/tool/call", {
-            "threadId": self.thread_id, "server": "pcw", "tool": "pcw_" + name,
-            "arguments": {"work_root": self.work, "workspace": self._testMethodName, **arguments},
+            "threadId": self.thread_id, "server": "pcw", "tool": self.operation_tools[name],
+            "arguments": {"operation": name, "work_root": self.work, "workspace": self._testMethodName, "arguments": arguments},
         })
         self.assertFalse(result.get("isError"), result)
         if result.get("structuredContent") is not None:
@@ -292,15 +310,7 @@ class CodexHostTests(unittest.TestCase):
 
     @staticmethod
     def _declared_tool_names():
-        """Read server registrations statically, without importing MCP dependencies."""
-        tree = ast.parse((PLUGIN / "pcw_runtime" / "server.py").read_text(encoding="utf-8"))
-        descriptions = next(
-            node.value for node in tree.body
-            if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "_DESCRIPTIONS" for target in node.targets)
-        )
-        assert isinstance(descriptions, ast.Dict)
-        return {"pcw_" + key.value for key in descriptions.keys if isinstance(key, ast.Constant)}
+        return {"pcw_query", "pcw_execute"}
 
     def test_tools_are_loaded_and_memory_works_through_codex(self):
         inventory = self.host.call("mcpServerStatus/list", {
@@ -321,13 +331,71 @@ class CodexHostTests(unittest.TestCase):
 
     def test_native_pcw_skill_is_discoverable_for_explicit_turn_input(self):
         skills = self.host.call("skills/list", {"cwds": [self.work], "forceReload": True})
-        for short_name in ("pcw", "pcw-instructions", "pcw-search", "pcw-create", "pcw-audit", "pcw-rework", "pcw-upgrade"):
+        for short_name in ("pcw", "pcw-edit-instructions", "pcw-search", "pcw-create", "pcw-audit", "pcw-rework", "pcw-upgrade", "pcw-analyze"):
             matching = [skill for entry in skills["data"] for skill in entry["skills"]
                         if skill["name"] == self.skill_prefix + short_name
                         and (self.source_mode or skill.get("pluginId") == PLUGIN_ID)]
             self.assertEqual(1, len(matching), skills)
             self.assertTrue(matching[0]["enabled"])
             self.assertTrue(matching[0]["path"].endswith("/skills/" + short_name + "/SKILL.md"))
+
+    def test_agent_creates_context_through_compact_interface(self):
+        target = Path(self.work) / ".pcw" / self._testMethodName
+        self.assertFalse(target.exists())
+        thread = self.host.call("thread/start", {
+            "cwd": self.work, "ephemeral": True, "approvalPolicy": "on-request",
+            "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
+        })
+        thread_id = thread["thread"]["id"]
+        purpose = "Контекст для правил проверки учебных документов."
+        turn = self.host.call("turn/start", {
+            "threadId": thread_id,
+            "input": [
+                {"type": "text", "text": (
+                    f"${self.skill_prefix}pcw-create Создай новый контекст по точному пути {target}. "
+                    f"Назначение: {purpose} "
+                    "Настройки выбраны: обновления без отдельного вызова PCW запрещены; "
+                    "показанные изменения знаний требуют моего подтверждения; "
+                    "Git-историю не включать; лимит размера материалов отключён. "
+                    "Создание обязательных ссылок для повторной проверки источников отключено. "
+                    "Используй стандартные инструкции с этими настройками и указанное назначение. "
+                    "Подтверждаю создание с этими текстами и настройками. "
+                    "Другие контексты не трогай; рабочую задачу после создания не запускай."
+                )},
+                {"type": "skill", "name": self.skill_prefix + "pcw-create",
+                 "path": str(self.skill_root / "pcw-create" / "SKILL.md")},
+            ],
+        })
+        turn_id = turn["turn"]["id"]
+        try:
+            completed = self.host.wait_notification(
+                lambda event: event.get("method") == "turn/completed"
+                and event.get("params", {}).get("threadId") == thread_id
+                and event["params"].get("turn", {}).get("id") == turn_id, timeout=300)
+        except TimeoutError:
+            self.host.call("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
+            raise
+        self.assertEqual("completed", completed["params"]["turn"]["status"], completed)
+        items = [event["params"]["item"] for event in self.host.notification_snapshot()
+                 if event.get("method") == "item/completed"
+                 and event.get("params", {}).get("threadId") == thread_id
+                 and event["params"].get("turnId") == turn_id]
+        calls = [item for item in items if item.get("type") == "mcpToolCall" and item.get("server") == "pcw"]
+        self.assertTrue(calls, items)
+        self.assertTrue({item["tool"] for item in calls} <= {"pcw_query", "pcw_execute"})
+        successful = [item for item in calls if item.get("status") == "completed"
+                      and not item.get("error") and not (item.get("result") or {}).get("isError")]
+        self.assertTrue(any(item["tool"] == "pcw_query" and item["arguments"].get("operation") == "describe"
+                            for item in successful), "The model could not discover the operation schema")
+        created = [item for item in successful if item["tool"] == "pcw_execute"
+                   and item["arguments"].get("operation") == "workspace_create"]
+        self.assertEqual(1, len(created), items)
+        self.assertEqual(str(target.parent.parent), created[0]["arguments"]["work_root"])
+        self.assertEqual(target.name, created[0]["arguments"]["workspace"])
+        self.assertTrue((target / "INSTRUCTIONS.md").is_file())
+        self.assertIn(purpose, (target / "PROJECT.md").read_text())
+        self.assertFalse(list((target / "knowledge").glob("*.md")))
+        self.assertFalse(any(item["arguments"].get("operation") == "startup" for item in calls))
 
 
     def test_agent_retains_tmp_and_waits_for_human_approval(self):
@@ -401,25 +469,25 @@ class CodexHostTests(unittest.TestCase):
         successful = [(index, item) for index, item in calls
                       if item.get("status") == "completed" and not item.get("error")
                       and not (item.get("result") or {}).get("isError")]
-        names = [item.get("tool") for _, item in successful]
-        self.assertIn("pcw_startup", names)
-        self.assertIn("pcw_search", names)
-        self.assertTrue({"pcw_read", "pcw_read_many"} & set(names))
-        self.assertLess(names.index("pcw_search"), min(names.index(name) for name in
-                        ("pcw_read", "pcw_read_many") if name in names))
-        writes = [(index, item) for index, item in successful if item.get("tool") == "pcw_tmp_write"
-                  and fact in item["arguments"].get("content", "")]
+        names = [item.get("arguments", {}).get("operation") for _, item in successful]
+        self.assertIn("startup", names)
+        self.assertIn("search", names)
+        self.assertTrue({"read", "read_many"} & set(names))
+        self.assertLess(names.index("search"), min(names.index(name) for name in
+                        ("read", "read_many") if name in names))
+        writes = [(index, item) for index, item in successful if item.get("arguments", {}).get("operation") == "tmp_write"
+                  and fact in item["arguments"]["arguments"].get("content", "")]
         self.assertTrue(writes, "The agent did not retain the discovered result in temporary context")
         self.assertTrue(any(index < answer_index for index, _ in writes))
-        self.assertIn("pcw_proposal_prepare", names)
-        prepared_at = next(index for index, item in successful if item.get("tool") == "pcw_proposal_prepare")
-        self.assertTrue(any(writes[0][0] < index < prepared_at and item.get("tool") == "pcw_search"
+        self.assertIn("proposal_prepare", names)
+        prepared_at = next(index for index, item in successful if item.get("arguments", {}).get("operation") == "proposal_prepare")
+        self.assertTrue(any(writes[0][0] < index < prepared_at and item.get("arguments", {}).get("operation") == "search"
                             for index, item in successful),
                         "The agent must compare the new result with memory before preparing changes")
-        self.assertNotIn("pcw_proposal_apply", names, "Knowledge changed before human approval")
-        self.assertNotIn("pcw_finish", names, "Cycle closed while waiting for the user")
+        self.assertNotIn("proposal_apply", names, "Knowledge changed before human approval")
+        self.assertNotIn("finish", names, "Cycle closed while waiting for the user")
         self.assertTrue(all(fact not in path.read_text() for path in knowledge.glob("*.md")))
-        active_cycle = writes[-1][1]["arguments"]["cycle_id"]
+        active_cycle = writes[-1][1]["arguments"]["arguments"]["cycle_id"]
         temporary = knowledge.parent / "tmp" / active_cycle
         self.assertTrue(any(fact in path.read_text() for path in (temporary / "materials").glob("*.md")))
         before_approval = len(self.host.notification_snapshot())
@@ -443,7 +511,7 @@ class CodexHostTests(unittest.TestCase):
                        and event.get("params", {}).get("threadId") == thread_id
                        and event["params"].get("turnId") == approval_id
                        and event["params"].get("item", {}).get("type") == "mcpToolCall"]
-        applied = [item for item in later_calls if item.get("tool") == "pcw_proposal_apply"
+        applied = [item for item in later_calls if item.get("arguments", {}).get("operation") == "proposal_apply"
                    and item.get("status") == "completed" and not item.get("error")
                    and not (item.get("result") or {}).get("isError")]
         self.assertTrue(applied, "The agent failed to apply after explicit approval")

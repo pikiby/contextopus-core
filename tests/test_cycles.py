@@ -99,6 +99,13 @@ def test_preparation_returns_full_new_text_without_needing_review_file(workspace
 def test_review_returns_only_changed_passages_with_local_context(workspace):
     runtime, _ = workspace
     cycle = start(runtime)
+    # This scenario deliberately uses a very large document to check compact
+    # review output. Explicitly disable the new-context size limit for it.
+    rules = runtime.instructions_read()
+    draft = runtime.instructions_prepare(cycle,
+        rules["content"].replace("material_max_tokens: 1024", "material_max_tokens: null"),
+        rules["revision"], "Disable the size limit for this large-document review test")
+    runtime.instructions_apply(cycle, draft["proposal_id"], draft["revision"], "Approve these test instructions")
     text = "# Service\n\n" + "".join(f"Unchanged section {i}\n" for i in range(500))
     seed = prepare(runtime, cycle, text)
     apply(runtime, cycle, seed)

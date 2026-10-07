@@ -24,6 +24,7 @@ BASE = (
     ("lancedb", "lancedb", ">=0.20,<1", (0, 20), (1,)),
     ("mcp", "mcp", ">=1.10,<2", (1, 10), (2,)),
     ("PyYAML", "yaml", ">=6,<7", (6,), (7,)),
+    ("pydantic", "pydantic", ">=2.11,<3", (2, 11), (3,)),
     ("pyarrow", "pyarrow", "installed", None, None),
 )
 LOCAL = (

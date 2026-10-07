@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.0 — 2026-10-07
+
+- Ask separately whether new contexts should author required external source links. Store the explicit choice in INSTRUCTIONS; preserve existing settings and retries of older accepted creation requests.
+- Define body-level required-source blocks with a URL and bounded extraction question. Skills require a fresh check on every receipt, independently of the authoring setting; ordinary citations remain ordinary citations. Fetching is an agent procedure, not an automatic runtime operation.
+- Rename `pcw-instructions` to `pcw-edit-instructions` for action-based naming and add `pcw-analyze` for scoped, evidence-based analysis of PCW reads, link traversals, changes and errors, optionally using another agent's selected transcript.
+
+## 0.12.2 — 2026-10-05
+
+- Restore the material-size question at context creation. Offer 1024 tokens first as the recommended choice, then a custom limit or no limit. Ask for a number only for a custom choice and wait for the user's selection.
+
+## 0.12.1 — 2026-10-05
+
+- Use a standard 1024-token knowledge-body limit for new contexts. Creation takes it from the instructions template without asking the user to choose a number; explicit overrides and disabling remain supported.
+- Preserve existing context settings and the legacy no-limit fallback. Explain the default in terms of full-material retrieval size rather than an unmeasured semantic optimum.
+
+## 0.12.0 — 2026-10-05
+
+- Replace 42 per-operation MCP tools with `pcw_query` and `pcw_execute`; keep existing operations behind explicit read/change allowlists and strict parameter validation.
+- Describe one operation's contract on demand, or list operation names, without accessing workspace storage or loading all schemas into the model context.
+- Preserve operation-level analytics, workspace selection, cycle, revision and approval checks. Workspace format remains 1; clients must reload the new MCP interface.
+- Update all seven skills and host/protocol checks for the two entrypoints. Diagnose server registration, host connection and model-visible tools separately; do not substitute internal runtime calls for missing MCP tools.
+
 ## 0.11.2 — 2026-10-02
 
 - Inspect unfinished work and damaged proposals even when a workspace already uses the current format.

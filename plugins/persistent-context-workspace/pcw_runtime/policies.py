@@ -7,7 +7,8 @@ from .runtime import PCWError
 
 
 DEFAULTS = {"allow_implicit_updates": False, "knowledge_approval_required": True,
-            "git_history_enabled": False, "material_max_tokens": None}
+            "git_history_enabled": False, "material_max_tokens": None,
+            "create_required_sources": False}
 
 
 def policies(content: str, *, creation: bool = False) -> dict:
@@ -45,5 +46,5 @@ def policies(content: str, *, creation: bool = False) -> dict:
                     raise PCWError(f"{name} must be one boolean true or false")
                 result[name] = value.value.lower() == "true"
     if creation and supplied != set(DEFAULTS):
-        raise PCWError("Creation requires all four settings selected by the user: " + ", ".join(DEFAULTS))
+        raise PCWError("Creation requires all five settings explicitly supplied in INSTRUCTIONS, including the source-link choice: " + ", ".join(DEFAULTS))
     return result

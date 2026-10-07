@@ -7,14 +7,21 @@ import threading
 import time
 from typing import get_type_hints
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+from pydantic import ConfigDict, create_model
 from .cycles import CycleRuntime
 from .control import RecoveryRequired
 from .analytics import EventStore
 
 mcp = FastMCP("persistent-context-workspace", instructions=(
+    "PCW exposes pcw_query for reading and pcw_execute for changes. Put the operation's parameters in arguments. "
+    "For an unknown signature, use pcw_query(operation='describe', arguments={'operation': '<name>'}); "
+    "describe with empty arguments lists operation names and their entrypoints. "
     "Keep the context selected by the user; ask if ambiguous. Creation or switching requires clear user direction. "
     "Follow the relevant PCW skill. Read INSTRUCTIONS.md as the authoritative workspace rules, then PROJECT.md "
     "and relevant knowledge. Independent reading needs no cycle; it never creates or migrates a workspace. "
+    "On every receipt of a material with a required_sources block, freshly check each listed source for its "
+    "extract question; prior checks never substitute, even when creation of new links is disabled. "
     "Work cycles follow workspace invocation and approval settings. Keep progress in task Current and results in tmp. "
     "Review results, prepare changes or a grounded no-change conclusion, show actual changed passages and links in chat, "
     "apply under the current policy, then finish. Never replace the review with a file link. "
@@ -41,14 +48,14 @@ atexit.register(close_runtimes)
 
 _DESCRIPTIONS = {
     "workspace_inspect": "Read the selected existing workspace format and compatibility, without creating or migrating it.",
-    "workspace_create": "Only after an explicit creation request: create the exact context with the INSTRUCTIONS settings and PROJECT text agreed with the user through pcw-create. All four settings must be explicit. A repeated request_id with identical input resumes safely; existing contexts are not replaced.",
+    "workspace_create": "Only after an explicit creation request: create the exact context with the INSTRUCTIONS settings and PROJECT text agreed with the user through pcw-create. All five settings, including create_required_sources, must be explicit for a new request. A repeated request_id with identical input resumes safely, including accepted older requests; existing contexts are not replaced.",
     "upgrade_plan": "Preflight the selected existing context, including already-current formats: return compatibility, source revision, technical changes, unfinished work with material titles and proposal states, exact blockers and project_description status. Format compatibility does not imply complete project content or finished work; present text is not a content review. No source changes. Compatible active cycles are preserved, not cancelled. A pending migration returns resume_revision and its retained backup. Use pcw-upgrade.",
     "upgrade_apply": "Apply the reviewed technical migration on explicit user request. Back up the entire workspace including tmp and separate control state; verify preservation before marking the format current. Keep compatible unfinished cycles, draft revisions and approval states unchanged. Never apply or cancel their proposals. Retry the original revision and snapshot after interruption.",
     "startup": "Open an existing compatible context with a fresh request_id; retries reuse it. Never creates or migrates. purpose is work, instructions, audit or rework. invocation=implicit is allowed only for work under allow_implicit_updates. Optional task_id explicitly resumes an existing task. Clear only this cycle's tmp (restart_cycle_id requires an explicit restart request). Returns instructions and project; read them before work.",
     "status": "Read current cycle, proposal states and permanent index status without loading weights.",
     "list": "List bounded permanent knowledge metadata without bodies.",
-    "read": "Read one complete permanent topic with revision, title, description and labelled navigation links, without a cycle. Optional from_id validates a declared link traversal; linked bodies are not loaded automatically.",
-    "read_many": "Read selected complete permanent topics in one call.",
+    "read": "Read one complete permanent topic with revision, title, description and labelled navigation links, without a cycle. Optional from_id validates a declared link traversal; linked bodies are not loaded automatically. On every receipt, the agent must freshly check any required_sources body block for its extract questions; this tool does not fetch external sources.",
+    "read_many": "Read selected complete permanent topics in one call. For every returned required_sources block, freshly check each source for its extract question, even on repeated reads. The tool returns bodies, not fetched external evidence.",
     "search": "Search only permanent knowledge without a cycle. Return bounded IDs, paths, titles, descriptions and distances; read suitable topics and links. Empty output is not proof of absence. Pending or invalid entries are excluded without implicit repair.",
     "instructions_read": "Read the workspace's complete INSTRUCTIONS.md and revision. Follow it as project guidance before work; it persists across cycles and is not vector knowledge.",
     "project_read": "Read the selected context's project purpose, goals and boundaries without a cycle or vector search.",
@@ -58,8 +65,8 @@ _DESCRIPTIONS = {
     "current_list": "List task IDs, goals, states and revisions. Select by the user's task; ask if ambiguous.",
     "current_read": "Read one task's current state without opening a work cycle. No vector lookup.",
     "current_update": "Update the bound task after a significant result, blocker, next-step or status change. Use the revision read. Current is not an action log and survives cycle closure.",
-    "instructions_prepare": "Only for a direct user request to edit instructions: stage complete Markdown against the revision read, with the actual user_request. Follow the pcw-instructions skill. Returns exact review_changes without writing INSTRUCTIONS.md. Optional proposal_id revises the same unapplied instructions proposal.",
-    "instructions_apply": "Apply an instructions proposal only after explicit user approval of its shown revision; pass the actual confirmation. Conflicts require renewed review and approval. No embeddings or tmp cleanup. Follow the pcw-instructions skill.",
+    "instructions_prepare": "Only for a direct user request to edit instructions: stage complete Markdown against the revision read, with the actual user_request. Follow the pcw-edit-instructions skill. Returns exact review_changes without writing INSTRUCTIONS.md. Optional proposal_id revises the same unapplied instructions proposal.",
+    "instructions_apply": "Apply an instructions proposal only after explicit user approval of its shown revision; pass the actual confirmation. Conflicts require renewed review and approval. No embeddings or tmp cleanup. Follow the pcw-edit-instructions skill.",
     "tmp_write": "Save an ordinary Markdown work result, worker return or note as temporary context, never knowledge. New ID is generated; updates need material_id and expected_revision. No embeddings.",
     "tmp_read": "Read a selected temporary result in this active cycle. It is not approved permanent knowledge.",
     "tmp_list": "List bounded metadata for this cycle's temporary results without their bodies.",
@@ -121,26 +128,87 @@ def dispatch(work_root: str, workspace: str, method_name: str, kwargs: dict):
                                             "reason": "Result recording failed; inspect file revisions before retrying the action"}}
 
 
-def _register(method_name: str, description: str):
-    """Publish the programmatic method signature with explicit workspace routing."""
-    method = getattr(CycleRuntime, method_name)
+_QUERY_OPERATIONS = frozenset({
+    "workspace_inspect", "upgrade_plan", "status", "list", "read", "read_many", "search",
+    "instructions_read", "project_read", "current_list", "current_read", "tmp_read", "tmp_list",
+    "proposal_read", "history_read", "history_list", "history_diff", "analytics_query",
+    "analytics_read", "analytics_blob_read", "audit",
+})
+_EXECUTE_OPERATIONS = frozenset({
+    "workspace_create", "upgrade_apply", "startup", "project_update", "project_apply",
+    "current_create", "current_update", "instructions_prepare", "instructions_apply",
+    "tmp_write", "proposal_prepare", "proposal_discard", "proposal_apply", "finish",
+    "reconcile", "switch_embeddings", "checkpoint", "history_retry", "analytics_evaluate",
+    "analytics_import", "recover_workspace",
+})
+if (_QUERY_OPERATIONS & _EXECUTE_OPERATIONS or
+        _QUERY_OPERATIONS | _EXECUTE_OPERATIONS != _DESCRIPTIONS.keys()):
+    raise RuntimeError("Every PCW operation must have exactly one entrypoint")
+
+
+def _argument_model(name: str):
+    """Use the existing method contract for both validation and on-demand help."""
+    method = getattr(CycleRuntime, name)
     annotations = get_type_hints(method)
-    parameters = [inspect.Parameter("work_root", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
-                  inspect.Parameter("workspace", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str)]
-    for parameter in inspect.signature(method).parameters.values():
-        if parameter.name != "self":
-            parameters.append(parameter.replace(annotation=annotations.get(parameter.name, parameter.annotation)))
-
-    def tool(work_root: str, workspace: str, **kwargs):
-        return dispatch(work_root, workspace, method_name, kwargs)
-
-    tool.__name__ = "pcw_" + method_name
-    tool.__doc__ = description
-    tool.__signature__ = inspect.Signature(parameters, return_annotation=dict)
-    tool.__annotations__ = {p.name: p.annotation for p in parameters if p.annotation is not inspect.Parameter.empty}
-    tool.__annotations__["return"] = dict
-    mcp.tool(name=tool.__name__, description=description)(tool)
+    fields = {
+        p.name: (annotations[p.name], ... if p.default is inspect.Parameter.empty else p.default)
+        for p in inspect.signature(method).parameters.values() if p.name != "self"
+    }
+    return create_model(name + "_arguments", __config__=ConfigDict(extra="forbid", strict=True), **fields)
 
 
-for _method, _description in _DESCRIPTIONS.items():
-    _register(_method, _description)
+_ARGUMENT_MODELS = {name: _argument_model(name) for name in _DESCRIPTIONS}
+_DESCRIBE_MODEL = create_model("describe_arguments", operation=(str | None, None),
+                               __config__=ConfigDict(extra="forbid", strict=True))
+
+
+def _describe(arguments: dict) -> dict:
+    name = _DESCRIBE_MODEL.model_validate(arguments).operation
+    if name is None:
+        return {"operations": {"pcw_query": sorted(_QUERY_OPERATIONS),
+                               "pcw_execute": sorted(_EXECUTE_OPERATIONS)}}
+    if name not in _DESCRIPTIONS:
+        raise ValueError("Unknown PCW operation; use pcw_query(operation='describe') to list operations")
+    return {"operation": name, "tool": "pcw_query" if name in _QUERY_OPERATIONS else "pcw_execute",
+            "description": _DESCRIPTIONS[name],
+            "arguments_schema": _ARGUMENT_MODELS[name].model_json_schema()}
+
+
+def _route(operation: str, work_root: str, workspace: str, arguments: dict, allowed: frozenset) -> dict:
+    if operation not in allowed:
+        if operation in _DESCRIPTIONS:
+            target = "pcw_query" if operation in _QUERY_OPERATIONS else "pcw_execute"
+            raise ValueError(f"Operation {operation!r} requires {target}")
+        raise ValueError("Unknown PCW operation; use pcw_query(operation='describe') to list operations")
+    # Reject invalid input before opening storage or writing an analytics event.
+    parameters = _ARGUMENT_MODELS[operation].model_validate(arguments).model_dump()
+    if not work_root or not workspace:
+        raise ValueError("work_root and workspace are required for workspace operations")
+    return dispatch(work_root, workspace, operation, parameters)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+def pcw_query(operation: str, work_root: str | None = None, workspace: str | None = None,
+              arguments: dict | None = None) -> dict:
+    """Read the selected PCW workspace. Pass operation parameters in arguments, coordinates separately.
+
+    Use operation='describe', arguments={'operation':'workspace_create'} for one operation's
+    description, entrypoint and JSON parameter schema; empty arguments list names only.
+    Describe needs no workspace and accesses no storage. Other reads require both coordinates.
+    Read operations do not create contexts or change knowledge; observed calls are journaled.
+    """
+    if operation == "describe":
+        return _describe({} if arguments is None else arguments)
+    return _route(operation, work_root, workspace, {} if arguments is None else arguments, _QUERY_OPERATIONS)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=False))
+def pcw_execute(operation: str, work_root: str, workspace: str, arguments: dict | None = None) -> dict:
+    """Execute a PCW change with the existing authorization, revision and approval checks.
+
+    Pass operation parameters in arguments, coordinates separately. For its exact schema use
+    pcw_query(operation='describe', arguments={'operation':'<name>'}). Creation needs an explicit
+    request; startup never creates. Present prepared changes and follow workspace approval rules.
+    Instructions changes always require approval. Calls are journaled under their operation names.
+    """
+    return _route(operation, work_root, workspace, {} if arguments is None else arguments, _EXECUTE_OPERATIONS)
