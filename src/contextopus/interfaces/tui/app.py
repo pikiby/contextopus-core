@@ -93,6 +93,8 @@ class ContextopusApp(App):
                 self.preview,
                 self.message,
             )
+        elif self.page == "connections":
+            text, self.actions = render.connections(width, self.selected, self.message)
         elif self.page == "errors":
             text = (
                 " CONTEXTOPUS · ERROR DETAILS\n\n "
@@ -258,6 +260,18 @@ class ContextopusApp(App):
             elif action == "Error details":
                 self.page = "errors"
                 self.selected = 0
+            elif action == "Client connections":
+                self.page, self.selected, self.message = "connections", 0, None
+            elif action in {"Reload Codex (all loaded threads)", "Claude Code recovery", "OpenCode recovery", "Crush recovery"}:
+                client = {"Reload Codex (all loaded threads)": "codex", "Claude Code recovery": "claude-code",
+                          "OpenCode recovery": "opencode", "Crush recovery": "crush"}[action]
+                result = await self.backend.reconnect(client)
+                self.message = result.get("instruction", result.get("note", result["status"]))
+            elif action in {"Start MCP", "Stop MCP", "Restart MCP"}:
+                result = await self.backend.service(action.split()[0].lower())
+                self.message = "MCP: " + result["state"]
+                self.selected = 0
+                await self.poll()
             elif action.startswith("Include archived"):
                 self.action_change()
             elif action == "Preview changes":

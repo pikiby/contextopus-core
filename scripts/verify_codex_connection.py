@@ -99,7 +99,7 @@ def verify(cwd, expected_root, delivery="direct"):
                 {
                     "clientInfo": {
                         "name": "contextopus-verification",
-                        "version": "1.0.0",
+                        "version": "1.1.0",
                     },
                     "capabilities": {"experimentalApi": True},
                 },
@@ -127,7 +127,7 @@ def verify(cwd, expected_root, delivery="direct"):
                 and (
                     item.get("pluginId") == "contextopus@contextopus"
                     if delivery == "plugin"
-                    else item["name"] in {"w", "ws", "wi", "wc", "wu", "wa", "wr", "wx"}
+                    else item["name"] in {"w", "w-search", "w-create", "w-settings", "w-find", "w-analyze"}
                     and not item.get("pluginId")
                     and Path(item["path"]).parent.parent
                     == Path.home() / ".agents/skills"
@@ -135,11 +135,11 @@ def verify(cwd, expected_root, delivery="direct"):
             ]
             expected_skills = {
                 ("contextopus:" if delivery == "plugin" else "") + name
-                for name in ("w", "ws", "wi", "wc", "wu", "wa", "wr", "wx")
+                for name in ("w", "w-search", "w-create", "w-settings", "w-find", "w-analyze")
             }
             if {item["name"] for item in skills} != expected_skills:
                 raise RuntimeError(
-                    "Fresh Codex did not discover all eight expected short skills"
+                    "Fresh Codex did not discover all six expected short skills"
                 )
             if any(
                 item.get("pluginId")

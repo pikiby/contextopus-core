@@ -49,14 +49,16 @@ def test_dispatch_records_calls_errors_and_actual_files(tmp_path):
         event = runtime.analytics_read(result["analytics"]["event_id"])
         assert event["state"] == "completed"
         assert event["duration_ms"] >= 0
-        version = event["versions"][0]
-        assert version["relation"] == "during_call"
-        assert "Observed mechanism" in runtime.analytics_blob_read(version["after_blob"])["value"]
+        assert event["versions"] == []
+        assert event["result"]["value"]["history"]["status"] == "committed"
+        assert event["operation_id"] == p["proposal_id"]
         path = runtime.engine.root / result["materials"][0]["path"]
         path.write_text(path.read_text().replace("Observed mechanism", "Outside MCP edit"))
         read = dispatch(str(tmp_path), "p", "read", {"material_id": p["created_ids"]["fact"]})
         observed = runtime.analytics_read(read["analytics"]["event_id"])
-        assert observed["versions"][0]["relation"] == "observed_before_call"
+        assert observed["references"][0]["status"] == "unversioned"
+        assert observed["versions"] == []
+        assert runtime.analytics_reference_read(read["analytics"]["event_id"])["status"] == "unavailable"
         with pytest.raises(PCWError):
             dispatch(str(tmp_path), "p", "read", {"material_id": "unknown.md"})
     report = runtime.analytics_query()
@@ -102,7 +104,8 @@ def test_import_another_agent_session_and_keep_evaluation_separate(tmp_path):
     assert report["totals"]["calls"] == 2
     event_id = report["events"][0]["id"]
     runtime.analytics_evaluate("Read before write", "Insufficient observations", [event_id])
-    assert runtime.analytics_query()["totals"]["calls"] == 2
+    assert runtime.analytics_query(import_id=result["import_id"])["totals"]["calls"] == 2
+    assert runtime.analytics_query()["totals"]["calls"] == 0  # old import is outside the default week
     assert not runtime.engine.root.exists()
 
 
@@ -113,7 +116,11 @@ def test_large_result_is_retrievable_and_failed_ack_is_not_success(tmp_path):
     store = EventStore(tmp_path)
     event = store.begin("p", "large_read", {})
     store.end(event, "p", time.monotonic(), {}, {}, result={"content": large})
-    assert store.read(event)["result"]["value"]["content"] == large
+    body = store.read(event)["result"]
+    assert body["truncated"]
+    first = store.blob_read(body["blob_id"], max_chars=1000)
+    assert first["truncated"] and first["next_offset"] == 1000
+    assert "Observed source text" in first["text"]
     with patch("pcw_runtime.server.runtime", return_value=runtime):
         cycle = dispatch(str(tmp_path), "p", "startup", {"request_id": "work"})["cycle_id"]
         p = runtime.proposal_prepare(cycle, [{"key": "fact", "content": "Durable fact"}])

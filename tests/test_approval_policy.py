@@ -32,7 +32,7 @@ def test_default_shows_changes_then_applies_indexes_and_closes_without_confirmat
     assert p["next_action"] == "present_changes_in_chat_then_apply"
     assert p["review_changes"][0]["body_changes"][0]["after"] == "# Facts\nAccurate project description"
     assert r.proposal_read(c, p["proposal_id"])["approval_required"] is False
-    assert r.status(c)["materials"] == 0
+    assert r.status(c)["materials"] == 1
     assert r.finish(c)["status"] == "blocked"
     result = apply_knowledge(r, c, p)
     assert result["status"] == "applied" and result["materials"][0]["index_status"] == "indexed"
@@ -52,7 +52,7 @@ def test_manual_or_missing_policy_requires_actual_confirmation_without_mutation(
     for confirmation in (None, "", " "):
         with pytest.raises(PCWError, match="confirmation"):
             apply_knowledge(r, c, p, confirmation=confirmation)
-    assert r.status(c)["materials"] == 0 and f.calls == []
+    assert r.status(c)["materials"] == 1 and f.calls == []
     assert apply_knowledge(r, c, p, confirmation="Approve the shown text")["status"] == "applied"
 
 
@@ -90,7 +90,7 @@ def test_invalid_policy_fails_without_saving_a_proposal_or_changing_instructions
     (r.engine.root / "INSTRUCTIONS.md").write_text("---\n" + header + "\n---\n")
     with pytest.raises(PCWError):
         prepare(r, c)
-    assert r.status(c)["materials"] == 0
+    assert r.status(c)["materials"] == 1
     assert r.status(c)["outstanding_proposal_count"] == 0
 
 
@@ -103,7 +103,7 @@ def test_policy_change_invalidates_old_preparation_in_both_directions(workspace,
     apply_instructions(r, c, edit(r, c, policy(not required)))
     with pytest.raises(PCWError, match="Instructions changed"):
         apply_knowledge(r, c, p, confirmation="yes")
-    assert r.status(c)["materials"] == 0
+    assert r.status(c)["materials"] == 1
     renewed = r.proposal_prepare(c, [{"key": "topic", "content": "Fact"}], proposal_id=p["proposal_id"])
     assert renewed["approval_required"] is not required
 
@@ -121,7 +121,7 @@ def test_automatic_retry_recovers_same_partial_write_after_policy_changes(worksp
         assert apply_knowledge(r, c, p)["status"] == "partial"
     apply_instructions(r, c, edit(r, c, policy(True)))
     assert apply_knowledge(r, c, p)["status"] == "applied"
-    assert r.status(c)["materials"] == 1
+    assert r.status(c)["materials"] == 2
     assert r.finish(c)["status"] == "blocked"
     r.proposal_prepare(c, [], no_changes_reason="The same stored fact meets the updated rules")
     assert r.finish(c)["status"] == "closed"

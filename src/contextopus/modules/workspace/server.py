@@ -3,6 +3,7 @@
 from __future__ import annotations
 import atexit
 import inspect
+import json
 from pathlib import Path
 import threading
 import time
@@ -13,6 +14,7 @@ from pydantic import ConfigDict, create_model
 from .cycles import CycleRuntime
 from .control import RecoveryRequired
 from .analytics import EventStore
+from .analytics_observation import Observation
 
 mcp = FastMCP(
     "persistent-context-workspace",
@@ -21,17 +23,19 @@ mcp = FastMCP(
         "For an unknown signature, use pcw_query(operation='describe', arguments={'operation': '<name>'}); "
         "describe with empty arguments lists operation names and their entrypoints. "
         "Keep the context selected by the user; ask if ambiguous. Creation or switching requires clear user direction. "
-        "Follow the relevant PCW skill. Read INSTRUCTIONS.md as the authoritative workspace rules, then PROJECT.md "
-        "and relevant knowledge. Independent reading needs no cycle. On format incompatibility immediately use "
-        "pcw-upgrade, then resume; do not create replacement storage or wait for another migration request. "
+        "Follow the relevant Workspace procedure through w. Read INSTRUCTIONS.md as the authoritative workspace rules, "
+        "then the project record and relevant typed records. Independent reading needs no cycle. On format incompatibility "
+        "immediately use the upgrade procedure, then resume; do not create replacement storage or wait for another migration request. "
         "Contexts under one memory root share an index. Search categories or all_categories without changing active rules. "
         "Material IDs are stable YAML values, independent of descriptive filenames. On every receipt of a sources block, "
         "freshly obtain each reference according to its instruction; prior checks never substitute, even when authoring is disabled. "
-        "Work cycles follow workspace invocation and approval settings. Keep progress in task Current and results in tmp. "
+        "Work cycles follow workspace invocation and approval settings. Keep progress in typed task records and results in tmp. "
         "Review results, prepare changes or a grounded no-change conclusion, show actual changed passages and links in chat, "
         "apply under the current policy, then finish. Never replace the review with a file link. "
         "Instructions changes always require the user's direct request and approval. Tools bind revisions but cannot "
-        "authenticate chat origin. PCW does not control agents; external actions retain their authorization requirements."
+        "authenticate chat origin. For operation analysis use w-analyze and the canonical analyze procedure: scope the period "
+        "or task/cycle/import, inspect recorded historical rules and Git references, and report evidence gaps. PCW does not "
+        "control agents; external actions retain their authorization requirements."
     ),
 )
 _runtimes: dict[tuple[str, str], CycleRuntime] = {}
@@ -85,29 +89,23 @@ def dispatch(
     )
     events = EventStore(instance.engine.work_root)
     with instance.control.guard():
-        snapshot_error = None
-        try:
-            before = events.snapshot(instance)
-        except Exception as exc:
-            before, snapshot_error = None, exc
+        observation = Observation(instance, method_name, kwargs)
         cycle = instance._records()["cycles"].get(kwargs.get("cycle_id"), {})
         mode = kwargs.get("purpose", cycle.get("purpose", "read"))
         started = time.monotonic()
         operation = events.begin(
-            workspace, method_name, kwargs, mode, cycle.get("task_id"), before
+            workspace, method_name, observation.payload(kwargs), mode, cycle.get("task_id"),
+            metadata={**observation.metadata, "operation_id": kwargs.get("proposal_id")},
         )
         try:
-            if snapshot_error is not None:
-                raise snapshot_error
             try:
                 result = getattr(instance, method_name)(**kwargs)
             except RecoveryRequired as exc:
                 result = exc.details
         except Exception as exc:
             try:
-                after = events.snapshot(instance) if snapshot_error is None else None
                 events.end(
-                    operation, workspace, started, before or {}, after, error=str(exc)
+                    operation, workspace, started, error=str(exc), references=observation.references,
                 )
             except Exception:
                 pass  # The start remains unresolved; never invent a successful completion.
@@ -117,9 +115,9 @@ def dispatch(
                 operation,
                 workspace,
                 started,
-                before,
-                events.snapshot(instance),
-                result=result,
+                result=observation.historical_payload(result),
+                references=observation.references,
+                result_bytes=len(json.dumps(result, ensure_ascii=False).encode()),
             )
             return {
                 **result,

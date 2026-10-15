@@ -17,7 +17,7 @@ from pcw_runtime.cycles import _json
 
 
 def create(runtime, **settings):
-    text = files("pcw_runtime").joinpath("default_instructions.md").read_text()
+    text = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text()
     for name, value in settings.items():
         old = policies(text)[name]
         literal = lambda x: "null" if x is None else str(x).lower()
@@ -49,9 +49,9 @@ def test_create_idempotent_no_models_and_read_without_cycle(tmp_path):
     assert create(runtime)["replayed"]
     assert runtime.instructions_read()["content"]
     assert runtime.project_read()["content"] == EMPTY_PROJECT
-    assert runtime.list()["total"] == 0
-    assert runtime.search(query="facts")["results"] == []
-    assert factory.instances == []
+    assert runtime.list()["total"] == 1
+    assert runtime.search(query="facts", types=["knowledge"])["results"] == []
+    assert len(factory.instances) == 1
     assert not (runtime.engine.root / "tmp").exists()
     assert not runtime.record_path.exists()
 
@@ -62,7 +62,7 @@ def test_read_reports_stale_index_without_repair(workspace):
     path = workspace.engine.root / item["path"]
     path.write_text(path.read_text().replace("old knowledge", "new knowledge"))
     assert workspace.read(material_id=item["id"])["content"] == "new knowledge"
-    result = workspace.search(query="old", d_max=2)
+    result = workspace.search(query="old", types=["knowledge"], d_max=2)
     assert result["results"] == []
     assert result["pending_count"] == 1
     assert workspace.engine.table.version == version
@@ -85,15 +85,16 @@ def test_legacy_migration_preserves_every_source(tmp_path):
     assert plan["project_description"]["status"] == "missing"
     result = runtime.upgrade_apply(plan["revision"], "Upgrade this workspace")
     assert result["status"] == "complete"
-    assert result["project_description"]["status"] == "placeholder"
+    assert result["project_description"]["status"] == "missing"
     replay = runtime.upgrade_apply(plan["revision"], "Retry")
     assert replay["replayed"]
-    assert replay["project_description"]["status"] == "placeholder"
+    assert replay["project_description"]["status"] == "missing"
     migrated = runtime.read(material_id=item["id"])
     assert migrated["content"] == _parse(text.decode())[1]
     assert migrated["path"] == "knowledge/Exact-facts.md"
     assert runtime.instructions_read()["content"] == instructions
-    assert (engine.root / "CURRENT.md").read_text() == "old task state"
+    assert not (engine.root / "CURRENT.md").exists()
+    assert any("old task state" in m.content for m in runtime.engine.materials.values() if m.metadata.get("type") == "task")
     assert runtime.read(material_id=item["id"])["content"].startswith("# Exact facts")
     assert policies(instructions)["knowledge_approval_required"] is True
     assert policies(instructions)["allow_implicit_updates"] is False
@@ -102,20 +103,19 @@ def test_legacy_migration_preserves_every_source(tmp_path):
 def test_parallel_tasks_revision_conflicts_and_tmp_lifetime(workspace):
     a = workspace.startup("task-a")["cycle_id"]
     b = workspace.startup("task-b")["cycle_id"]
-    first = workspace.current_create(a, "a", "First task")
-    other = workspace.current_create(b, "b", "Second task")
-    assert first["task_id"] != other["task_id"]
-    changed = workspace.current_update(a, first["task_id"], first["revision"], {"verified_state": "Checked source"})
-    with pytest.raises(PCWError, match="Current changed"):
-        workspace.current_update(a, first["task_id"], first["revision"], {"next_step": "overwrite"})
-    with pytest.raises(PCWError, match="not bound"):
-        workspace.current_update(b, first["task_id"], changed["revision"], {"status": "completed"})
+    p = workspace.proposal_prepare(a, [{"key": "task", "type": "task", "content": "# First task", "status": "active"}])
+    workspace.proposal_apply(a, p["proposal_id"], p["revision"])
+    first = workspace.read(material_id=p["created_ids"]["task"])
+    change = {"material_id": first["id"], "expected_revision": first["revision"], "content": "# First task\nChecked source"}
+    updated = workspace.proposal_prepare(a, [change])
+    workspace.proposal_apply(a, updated["proposal_id"], updated["revision"])
+    with pytest.raises(PCWError, match="changed"):
+        workspace.proposal_prepare(b, [change])
     workspace.tmp_write(b, "ongoing")
-    workspace.proposal_prepare(a, [], no_changes_reason="No new knowledge after comparison")
     assert workspace.finish(a)["status"] == "closed"
-    assert workspace.current_read(first["task_id"])["verified_state"] == "Checked source"
+    assert "Checked source" in workspace.read(material_id=first["id"])["content"]
     assert workspace.tmp_list(b)["total"] == 1
-    assert workspace.startup("resume-a", task_id=first["task_id"])["task_id"] == first["task_id"]
+    assert workspace.startup("resume-a", task_id=first["id"])["task_id"] == first["id"]
 
 
 @pytest.mark.parametrize("implicit", [False, True])
@@ -138,14 +138,13 @@ def test_independent_permission_settings(tmp_path, implicit, approval):
 def test_project_review_and_audit_cannot_write(workspace):
     cycle = workspace.startup("project-work")["cycle_id"]
     before = workspace.project_read()
-    plan = workspace.project_update(cycle, "# Project\nUser's accepted scope.\n", before["revision"], "Change the scope")
+    change = {"material_id": before["id"], "expected_revision": before["revision"], "content": "# Project\nUser's accepted scope.\n"}
+    plan = workspace.proposal_prepare(cycle, [change])
     assert workspace.project_read() == before
-    result = workspace.project_apply(cycle, plan["proposal_id"], plan["revision"])
-    assert "accepted scope" in result["project"]["content"]
+    workspace.proposal_apply(cycle, plan["proposal_id"], plan["revision"])
+    assert "accepted scope" in workspace.project_read()["content"]
     audit = workspace.startup("audit", purpose="audit")["cycle_id"]
-    assert workspace.list(audit)["total"] == 0
-    with pytest.raises(PCWError):
-        workspace.project_update(audit, "x", result["project"]["revision"], "x")
+    assert workspace.list(audit)["total"] == 1
     with pytest.raises(PCWError):
         workspace.proposal_prepare(audit, [{"key": "x", "content": "x"}])
     assert workspace.finish(audit)["status"] == "closed"
@@ -167,7 +166,7 @@ def test_creation_material_limit_default_and_explicit_overrides(tmp_path, overri
             rejected = runtime.proposal_prepare(cycle, [{"key": "large", "content": "x" * (limit + 1)}])
             assert rejected["status"] == "needs_split"
             assert rejected["materials"][0]["tokens"] == limit + 1
-        assert runtime.list()["total"] == 0
+        assert runtime.list()["total"] == 1
         assert policies("Legacy instructions without settings")["material_max_tokens"] is None
     finally:
         runtime.close()
@@ -181,8 +180,8 @@ def test_optional_limit_rejects_before_write_and_labels_need_no_embedding(tmp_pa
     oversized = runtime.proposal_prepare(cycle, [{"key": "large", "content": "x" * 31}])
     assert oversized["status"] == "needs_split"
     assert oversized["materials"][0]["tokens"] == 31
-    assert runtime.list()["total"] == 0
-    assert factory.calls == []
+    assert runtime.list()["total"] == 1
+    assert len(factory.calls) == 1  # Only initial project indexing.
     plan = runtime.proposal_prepare(cycle, [
         {"key": "a", "content": "# Storage\nFacts", "description": "Storage mechanism", "links": ["@b"]},
         {"key": "b", "content": "# Recovery\nSteps", "description": "Recovering storage"}])
@@ -220,7 +219,7 @@ def test_migration_interruption_keeps_backup_and_retries_same_operation(tmp_path
     write = runtime.engine._write
     def interrupt(path, content):
         write(path, content)
-        if path.name == "PROJECT.md":
+        if path.parent == runtime.engine.knowledge:
             raise OSError("lost project write acknowledgement")
     with patch.object(runtime.engine, "_write", side_effect=interrupt):
         with pytest.raises(OSError):
@@ -255,6 +254,9 @@ def legacy_with_work(tmp_path):
         text = "---\n" + yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True) + "---\n" + body
         return {"path": "knowledge/" + ident, "text": text, "fingerprint": _revision(text)}
     for material in list(runtime.engine.materials.values()):
+        if material.metadata.get("type") == "project":
+            (runtime.engine.root / material.path).unlink()
+            continue
         path = runtime.engine.root / material.path
         snapshot = old_snapshot(material.id, {"text": path.read_text()})
         path.unlink()
@@ -279,8 +281,6 @@ def legacy_with_work(tmp_path):
     old_engine.reconcile()
     old_engine.close()
     runtime._format_path().unlink()
-    (runtime.engine.root / "PROJECT.md").unlink()
-    (runtime.engine.root / "current").rmdir()
     return runtime, pending, proposal, saved, applied
 
 
@@ -314,12 +314,12 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     current_plan = cold.upgrade_plan()
     assert current_plan["compatible"] and current_plan["changes"] == []
     assert current_plan["pending_work"] == plan["pending_work"]
-    assert current_plan["project_description"]["status"] == "placeholder"
+    assert current_plan["project_description"]["status"] == "missing"
     unchanged = cold._source_files(), cold._migration_tree(cold.control.root, control=True)
     current_result = cold.upgrade_apply(current_plan["revision"], "Check current context")
     assert current_result["status"] == "current"
     assert current_result["pending_work"] == plan["pending_work"]
-    assert current_result["project_description"]["status"] == "placeholder"
+    assert current_result["project_description"]["status"] == "missing"
     assert unchanged == (cold._source_files(), cold._migration_tree(cold.control.root, control=True))
     read = cold.proposal_read(pending, proposal["proposal_id"])
     assert read["revision"] == proposal["revision"] and read["approval_required"]
@@ -338,18 +338,19 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     ("# My project\nVerified purpose and boundaries.\n", "present"),
 ])
 def test_current_format_reports_project_content_without_rewriting(workspace, content, status):
-    path = workspace.engine.root / "PROJECT.md"
+    project = workspace.project_read()
+    path = workspace.engine.root / project["path"]
     if content is None:
         path.unlink()
     else:
-        path.write_text(content)
-    before = workspace._source_files(), workspace._migration_tree(workspace.control.root, control=True)
+        from contextopus.modules.workspace.records import record_text
+        metadata, _ = _parse(path.read_text())
+        path.write_text(record_text(metadata, content))
+    before = workspace._source_files()
     plan = workspace.upgrade_plan()
-    assert plan["compatible"] and plan["changes"] == []
-    assert plan["project_description"] == {
-        "path": "PROJECT.md", "status": status, "content_reviewed": False,
-    }
-    assert before == (workspace._source_files(), workspace._migration_tree(workspace.control.root, control=True))
+    assert plan["project_description"]["status"] == status
+    assert plan["project_description"]["content_reviewed"] is False
+    assert before == workspace._source_files()
 
 
 def test_current_format_reports_damaged_unfinished_work(workspace):
@@ -428,7 +429,7 @@ def test_changed_work_after_interruption_blocks_resume(tmp_path):
     write = runtime.engine._write
     def interrupt(path, content):
         write(path, content)
-        if path.name == "PROJECT.md":
+        if path.parent == runtime.engine.knowledge:
             raise OSError("interrupted")
     with patch.object(runtime.engine, "_write", side_effect=interrupt):
         with pytest.raises(OSError):
@@ -483,7 +484,6 @@ def test_rework_split_redirects_links_and_keeps_whole_procedure(workspace):
     workspace.proposal_apply(first, seed["proposal_id"], seed["revision"])
     workspace.finish(first)
     c = workspace.startup("rework", purpose="rework")["cycle_id"]
-    task = workspace.current_create(c, "rework-task", "Separate connection and recovery")
     old = workspace.read(c, seed["created_ids"]["mixed"])
     workspace.tmp_write(c, "Both facts and their conditions were retained in separate topics")
     plan = workspace.proposal_prepare(c, [
@@ -494,6 +494,4 @@ def test_rework_split_redirects_links_and_keeps_whole_procedure(workspace):
     assert workspace.finish(c)["status"] == "blocked"
     workspace.proposal_apply(c, plan["proposal_id"], plan["revision"])
     assert workspace.read(material_id=seed["created_ids"]["entry"])["links"] == [plan["created_ids"]["connection"]]
-    workspace.current_update(c, task["task_id"], task["revision"], {"status": "completed", "verified_state": "Conditions and incoming links preserved"})
     assert workspace.finish(c)["tmp_cleared"]
-    assert workspace.current_read(task["task_id"])["status"] == "completed"

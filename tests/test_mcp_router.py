@@ -19,7 +19,7 @@ def test_two_small_tools_and_storage_free_discovery(tmp_path):
         for tool in tools:
             assert set(tool.inputSchema["properties"]) == {"operation", "work_root", "workspace", "arguments"}
         catalog = server.pcw_query("describe")["operations"]
-        assert len(catalog["pcw_query"]) + len(catalog["pcw_execute"]) == 42
+        assert len(catalog["pcw_query"]) + len(catalog["pcw_execute"]) == 44
         assert not set(catalog["pcw_query"]) & set(catalog["pcw_execute"])
         assert set(catalog["pcw_query"] + catalog["pcw_execute"]) == server._DESCRIPTIONS.keys()
         for tool, names in catalog.items():
@@ -83,7 +83,7 @@ def test_router_preserves_approval_conflicts_and_operation_journal(tmp_path):
                 execute("proposal_apply", **params)
             with pytest.raises(PCWError, match="exact presented"):
                 execute("proposal_apply", **{**params, "expected_revision": "stale", "confirmation": "Approved"})
-            assert query("list")["total"] == 0
+            assert query("list")["total"] == 1
             assert execute("finish", cycle_id=cycle)["status"] == "blocked"
             saved = execute("proposal_apply", **params, confirmation="Approve the shown test fact")
             material = query("read", material_id=saved["materials"][0]["id"])

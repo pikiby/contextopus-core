@@ -164,7 +164,8 @@ def test_core_search_workspace_source_freshness_without_cycle_or_repair(
         found = app.query("core.search", {"query": "answer", "distance": 2.0})[
             "results"
         ]
-        assert {row["key"][0] for row in found} == {"second"}
+        assert "second" in {row["key"][0] for row in found}
+        assert material["id"] not in {row["key"][2] for row in found}
         assert workspace.engine.table.version == version
         app.close()
     workspace.close()

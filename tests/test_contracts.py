@@ -286,7 +286,7 @@ class LauncherTests(unittest.TestCase):
                         return json.loads(response["content"][0]["text"])
 
                     catalog = raw_call("pcw_query", {"operation": "describe"})["operations"]
-                    self.assertEqual(42, sum(map(len, catalog.values())))
+                    self.assertEqual(44, sum(map(len, catalog.values())))
                     operations = {name: raw_call("pcw_query", {
                         "operation": "describe", "arguments": {"operation": name}})["arguments_schema"]
                         for names in catalog.values() for name in names}
@@ -302,9 +302,13 @@ class LauncherTests(unittest.TestCase):
                     self.assertIn("confirmation", operations["instructions_apply"]["required"])
                     for name in ("search", "read", "read_many", "list", "instructions_read", "project_read"):
                         self.assertNotIn("cycle_id", operations[name].get("required", []))
-                    for name in ("proposal_prepare", "proposal_apply", "tmp_write", "current_update", "project_update", "instructions_apply"):
+                    for name in ("proposal_prepare", "proposal_apply", "tmp_write", "instructions_apply"):
                         self.assertIn("cycle_id", operations[name]["required"])
                     self.assertIn("chunking", operations["switch_embeddings"]["properties"])
+                    self.assertTrue({"since", "until", "workspaces", "instruction_revision", "cursor"}
+                                    <= operations["analytics_report"]["properties"].keys())
+                    self.assertIn("history_index", catalog["pcw_execute"])
+                    self.assertIn("history_lineage", catalog["pcw_query"])
 
                     def call(name, **arguments):
                         tool = "pcw_query" if name in catalog["pcw_query"] else "pcw_execute"
@@ -318,19 +322,21 @@ class LauncherTests(unittest.TestCase):
                     created = call("workspace_create", request_id="protocol-create", user_request="Create the protocol fixture",
                         # Protocol/approval coverage is strictly offline; the real
                         # model/tokenizer is exercised by separate inference tests.
-                        instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text().replace("material_max_tokens: 1024", "material_max_tokens: null"),
+                        instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text()
+                            .replace("material_max_tokens: 1024", "material_max_tokens: null")
+                            .replace("git_history_enabled: false", "git_history_enabled: true"),
                         project_content="# Protocol fixture\nA temporary test project.\n")
                     self.assertEqual("created", created["status"])
-                    self.assertEqual([], call("search", query="empty")["results"])
+                    self.assertEqual([], call("search", query="empty", types=["knowledge"])["results"])
                     opened = call("startup", request_id="protocol-invocation")
                     cycle_id = opened["cycle_id"]
-                    self.assertEqual(0, opened["materials"])
+                    self.assertEqual(1, opened["materials"])
                     self.assertEqual("blocked", call("finish")["status"])
                     self.assertEqual("no_changes", call("proposal_prepare", changes=[],
                                      no_changes_reason="No results yet; this fixture has no permanent changes.")["status"])
                     pending = call("tmp_write", content="Protocol fixture content")
                     self.assertEqual("blocked", call("finish")["status"])
-                    self.assertEqual(0, call("status")["materials"])
+                    self.assertEqual(1, call("status")["materials"])
                     proposal = call("proposal_prepare", changes=[{"key": "fixture", "content": "Protocol fixture content"}])
                     self.assertEqual("Protocol fixture content", proposal["review_changes"][0]["body_changes"][0]["after"])
                     review = call("proposal_read", proposal_id=proposal["proposal_id"])
@@ -345,6 +351,13 @@ class LauncherTests(unittest.TestCase):
                     other = call("proposal_apply", proposal_id=second["proposal_id"], expected_revision=second["revision"],
                                  confirmation="Apply the displayed related fact")["materials"][0]
                     self.assertEqual([item["id"]], call("read", material_id=other["id"])["links"])
+                    observed = call("analytics_query", tool="read", limit=1)
+                    replay = call("analytics_reference_read", event_id=observed["events"][0]["id"])
+                    self.assertEqual("Protocol fixture content", replay["text"])
+                    report = call("analytics_report", tool="read", max_events=1)
+                    self.assertEqual(1, report["analyzed_events"])
+                    self.assertTrue(report["partial"])
+                    self.assertEqual(["protocol"], report["scope"]["workspaces"])
                     instructions = call("instructions_read")
                     self.assertEqual(opened["instructions"], instructions)
                     edit = call("instructions_prepare", content="# Project rules\nTest-specific instructions.\n",

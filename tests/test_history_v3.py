@@ -15,16 +15,20 @@ def test_automatic_history_tracks_permanent_files_only(tmp_path):
     initial = create(runtime, git_history_enabled=True)
     assert initial["history"]["status"] == "committed"
     cycle = runtime.startup("work")["cycle_id"]
-    runtime.current_create(cycle, "task", "Some task")
     runtime.tmp_write(cycle, "Some result")
-    plan, result = apply(runtime, cycle, [{"key": "a", "content": "# Fact\nFirst"}])
+    plan, result = apply(runtime, cycle, [
+        {"key": "a", "content": "# Fact\nFirst"},
+        {"key": "task", "type": "task", "status": "active", "content": "# Some task\nNext action"},
+    ])
     assert result["history"]["status"] == "committed"
     item = runtime.read(cycle, plan["created_ids"]["a"])
     _, unchanged = apply(runtime, cycle, [{"material_id": item["id"], "expected_revision": item["revision"], "content": item["content"]}])
     assert unchanged["history"]["status"] == "unchanged"
     assert len(runtime.history_list()["versions"]) == 2
     paths = runtime.engine._git("ls-tree", "--name-only", "-r", "HEAD").stdout.splitlines()
-    assert sorted(paths) == sorted(["PROJECT.md", "INSTRUCTIONS.md", item["path"]])
+    task = runtime.read(material_id=plan["created_ids"]["task"])
+    assert sorted(paths) == sorted([runtime.project_read()["path"], "INSTRUCTIONS.md", item["path"], task["path"]])
+    assert not any(path.startswith("tmp/") for path in paths)
     diff = runtime.history_diff(initial["history"]["commit"], result["history"]["commit"])
     assert "+First" in diff["diff"]
     assert "First" in runtime.history_read(paths=[item["path"]])["materials"][0]["text"]

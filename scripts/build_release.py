@@ -3,11 +3,11 @@
 from pathlib import Path
 import hashlib
 import json
-import shutil
+import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "1.0.0"
+VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
                     bundle.write(path, "skills/" + path.relative_to(skills).as_posix())
             bundle.writestr(
                 "INSTALL.txt",
-                f"Install contextopus_core-{VERSION}-py3-none-any.whl first.\nRun: contextopus service start\nRun: contextopus integrate {client} --project <project>\nReview paths, then repeat with --apply.\nNative clients connect to http://127.0.0.1:8765/mcp.\n",
+                f"Install contextopus_core-{VERSION}-py3-none-any.whl first.\nRun: contextopus service install\nRun: contextopus integrate {client} --project <project>\nReview paths, then repeat with --apply.\nNative clients connect to http://127.0.0.1:8765/mcp.\n",
             )
     assets = sorted(
         path

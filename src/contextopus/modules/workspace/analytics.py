@@ -1,4 +1,4 @@
-"""Observed PCW calls and file revisions. No model calls or vector indexing."""
+"""Observed calls and Git references. Legacy file bodies remain readable evidence."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import time
 import uuid
 
 from .runtime import PCWError
+from .analytics_migration import AnalyticsMigrationMixin
 
 
 SECRET_KEY = re.compile(
@@ -139,7 +140,22 @@ class EventStore:
                       source_path TEXT, session_id TEXT, imported_at TEXT, records INTEGER);
                     CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, created_at TEXT,
                       criterion TEXT, assessment TEXT, evidence TEXT);
+                    CREATE TABLE IF NOT EXISTS event_references (
+                      event_id TEXT, ordinal INTEGER, reference TEXT NOT NULL,
+                      PRIMARY KEY(event_id, ordinal));
                 """)
+                columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
+                for name, kind in {
+                    "instructions_revision": "TEXT", "instructions_ref": "TEXT",
+                    "runtime_version": "TEXT", "procedures_revision": "TEXT",
+                    "operation_id": "TEXT", "journal_format": "INTEGER NOT NULL DEFAULT 1",
+                }.items():
+                    if name not in columns:
+                        db.execute(f"ALTER TABLE events ADD COLUMN {name} {kind}")
+                evaluation_columns = {row[1] for row in db.execute("PRAGMA table_info(evaluations)")}
+                for name in ("scope", "instruction_basis"):
+                    if name not in evaluation_columns:
+                        db.execute(f"ALTER TABLE evaluations ADD COLUMN {name} TEXT")
                 with db:
                     yield db
             finally:
@@ -155,29 +171,7 @@ class EventStore:
         )
         return ident
 
-    @staticmethod
-    def snapshot(runtime):
-        """Called under the same workspace lock as the tool, never through vector reads."""
-        files = {}
-        root = runtime.engine.root
-        if not root.is_dir():
-            return files
-        for path in [
-            root / "INSTRUCTIONS.md",
-            root / "PROJECT.md",
-            *sorted((root / "knowledge").rglob("*.md")),
-            *sorted((root / "current").glob("*.md")),
-        ]:
-            runtime.engine._assert_safe(path)
-            if path.is_file():
-                raw = path.read_bytes()
-                files[path.relative_to(root).as_posix()] = {
-                    "hash": hashlib.sha256(raw).hexdigest(),
-                    "text": raw.decode("utf-8"),
-                }
-        return files
-
-    def begin(self, workspace, tool, params, mode=None, task_id=None, before=None):
+    def begin(self, workspace, tool, params, mode=None, task_id=None, before=None, metadata=None):
         ident = uuid.uuid4().hex
         with self.connect() as db:
             params_blob = self._blob(db, params)
@@ -195,52 +189,24 @@ class EventStore:
                     params_blob,
                 ),
             )
-            # A change already present before this call has no established author.
-            previous = (
-                {
-                    row["path"]: dict(row)
-                    for row in db.execute(
-                        "SELECT * FROM observed WHERE workspace=?", (workspace,)
-                    )
-                }
-                if before is not None
-                else {}
+            metadata = metadata or {}
+            db.execute(
+                "UPDATE events SET instructions_revision=?,instructions_ref=?,runtime_version=?,"
+                "procedures_revision=?,operation_id=?,journal_format=2 WHERE id=?",
+                (metadata.get("instructions_revision"),
+                 json.dumps(metadata["instructions_ref"]) if metadata.get("instructions_ref") else None,
+                 metadata.get("runtime_version"), metadata.get("procedures_revision"),
+                 metadata.get("operation_id"), ident),
             )
-            for path in previous.keys() | (before or {}).keys():
-                old, current = previous.get(path), (before or {}).get(path)
-                if old and current and old["hash"] == current["hash"]:
-                    continue
-                blob = self._blob(db, current["text"]) if current else None
-                db.execute(
-                    "INSERT INTO versions VALUES (?,?,?,?,?,?,?)",
-                    (
-                        ident,
-                        path,
-                        "observed_before_call",
-                        old["hash"] if old else None,
-                        current["hash"] if current else None,
-                        old["blob"] if old else None,
-                        blob,
-                    ),
-                )
-            if before is not None:
-                self._observe(db, workspace, before)
         return ident
 
-    def _observe(self, db, workspace, files):
-        db.execute("DELETE FROM observed WHERE workspace=?", (workspace,))
-        for path, content in files.items():
-            db.execute(
-                "INSERT INTO observed VALUES (?,?,?,?)",
-                (workspace, path, content["hash"], self._blob(db, content["text"])),
-            )
-
-    def end(self, ident, workspace, started, before, after, result=None, error=None):
+    def end(self, ident, workspace, started, before=None, after=None, result=None, error=None,
+            references=None, result_bytes=None):
         with self.connect() as db:
             row = db.execute("SELECT tool FROM events WHERE id=?", (ident,)).fetchone()
             if row is None:
                 raise PCWError("Unknown analytics operation")
-            result_bytes = (
+            result_bytes = result_bytes if result_bytes is not None else (
                 len(json.dumps(result, ensure_ascii=False).encode())
                 if result is not None
                 else 0
@@ -265,124 +231,93 @@ class EventStore:
             )
             if isinstance(result, dict):
                 db.execute(
-                    "UPDATE events SET cycle_id=coalesce(cycle_id,?),task_id=coalesce(task_id,?) WHERE id=?",
-                    (result.get("cycle_id"), result.get("task_id"), ident),
+                    "UPDATE events SET cycle_id=coalesce(cycle_id,?),task_id=coalesce(task_id,?),"
+                    "operation_id=coalesce(operation_id,?) WHERE id=?",
+                    (result.get("cycle_id"), result.get("task_id"),
+                     result.get("proposal_id") or (result.get("history") or {}).get("operation_id"), ident),
                 )
-            for path in (before.keys() | after.keys()) if after is not None else ():
-                old, current = before.get(path), after.get(path)
-                if old and current and old["hash"] == current["hash"]:
-                    continue
-                db.execute(
-                    "INSERT INTO versions VALUES (?,?,?,?,?,?,?)",
-                    (
-                        ident,
-                        path,
-                        "during_call",
-                        old["hash"] if old else None,
-                        current["hash"] if current else None,
-                        self._blob(db, old["text"]) if old else None,
-                        self._blob(db, current["text"]) if current else None,
-                    ),
-                )
-            if after is not None:
-                self._observe(db, workspace, after)
+            db.executemany("INSERT OR REPLACE INTO event_references VALUES (?,?,?)",
+                           [(ident, i, json.dumps(ref)) for i, ref in enumerate(references or [])])
 
-    def query(
-        self,
-        workspace=None,
-        cycle_id=None,
-        task_id=None,
-        tool=None,
-        since=None,
-        until=None,
-        offset=0,
-        limit=50,
-        import_id=None,
-    ):
-        if (
-            type(offset) is not int
-            or offset < 0
-            or type(limit) is not int
-            or not 1 <= limit <= 100
-        ):
-            raise PCWError("Use a nonnegative offset and limit between 1 and 100")
-        where, args = [], []
-        for name, value in {
-            "workspace": workspace,
-            "cycle_id": cycle_id,
-            "task_id": task_id,
-            "tool": tool,
-            "import_id": import_id,
-        }.items():
-            if value is not None:
-                where.append(name + "=?")
-                args.append(value)
-        for op, value in ((">=", since), ("<=", until)):
-            if value is not None:
-                where.append("started_at" + op + "?")
-                args.append(value)
-        condition = " WHERE " + " AND ".join(where) if where else ""
-        with self.connect() as db:
-            rows = db.execute(
-                "SELECT * FROM events"
-                + condition
-                + " ORDER BY started_at,id LIMIT ? OFFSET ?",
-                [*args, limit, offset],
-            ).fetchall()
-            totals = dict(
-                db.execute(
-                    "SELECT count(*) AS calls, sum(state='error') AS errors, sum(state='started') AS unknown_outcomes, "
-                    "sum(duration_ms) AS duration_ms, sum(result_bytes) AS result_bytes FROM events"
-                    + condition,
-                    args,
-                ).fetchone()
-            )
-        return {
-            "events": [dict(row) for row in rows],
-            "totals": totals,
-            "tokens": None,
-            "cost": None,
-            "measurement_limit": "PCW calls only; started events have an unconfirmed outcome",
-        }
+    def query(self, workspace=None, cycle_id=None, task_id=None, tool=None,
+              since=None, until=None, offset=0, limit=50, import_id=None,
+              workspaces=None, instruction_revision=None, runtime_version=None,
+              procedures_revision=None, cursor=None):
+        from .analytics_queries import query_events
+        if workspace is not None and workspaces is not None:
+            raise PCWError("Select workspace or workspaces, not both")
+        result = query_events(self, workspaces=[workspace] if workspace is not None else workspaces,
+                              cycle_id=cycle_id, task_id=task_id, tool=tool,
+                              since=since, until=until, offset=offset, limit=limit,
+                              import_id=import_id, instruction_revision=instruction_revision,
+                              runtime_version=runtime_version, procedures_revision=procedures_revision,
+                              cursor=cursor)
+        return {**result, "tokens": None, "cost": None,
+                "measurement_limit": "Recorded tool durations and bytes; not task duration, token savings or causal quality."}
 
-    def read(self, event_id):
+    def read(self, event_id, max_chars=16000, offset=0, limit=50):
+        from .history_queries import page
+        page(offset, limit)
+        if type(max_chars) is not int or not 1 <= max_chars <= 100000:
+            raise PCWError("Analytics body budget must be between 1 and 100000 characters")
         with self.connect() as db:
             row = db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
             if row is None:
                 raise PCWError("Unknown analytics event")
             result = dict(row)
+            remaining = max_chars
             for field in ("params", "result", "error"):
                 if result[field]:
                     blob = db.execute(
-                        "SELECT * FROM blobs WHERE id=?", (result[field],)
+                        "SELECT id, length(text) AS size, redactions FROM blobs WHERE id=?", (result[field],)
                     ).fetchone()
+                    if blob["size"] > remaining:
+                        result[field] = {"blob_id": blob["id"], "characters": blob["size"],
+                                         "redactions": blob["redactions"], "truncated": True}
+                        continue
+                    text = db.execute("SELECT text FROM blobs WHERE id=?", (blob["id"],)).fetchone()[0]
+                    remaining -= len(text)
                     result[field] = {
-                        "value": json.loads(blob["text"]),
+                        "blob_id": blob["id"], "value": json.loads(text),
                         "redactions": blob["redactions"],
                         "truncated": False,
                     }
             result["versions"] = [
                 dict(value)
                 for value in db.execute(
-                    "SELECT * FROM versions WHERE event_id=?", (event_id,)
+                    "SELECT * FROM versions WHERE event_id=? ORDER BY path,relation LIMIT ? OFFSET ?", (event_id, limit, offset)
                 )
             ]
+            result["references"] = [
+                {"reference_index": row["ordinal"], **json.loads(row["reference"])}
+                for row in db.execute("SELECT * FROM event_references WHERE event_id=? ORDER BY ordinal LIMIT ? OFFSET ?", (event_id, limit, offset))
+            ]
+            result["versions_count"] = db.execute("SELECT count(*) FROM versions WHERE event_id=?", (event_id,)).fetchone()[0]
+            result["references_count"] = db.execute("SELECT count(*) FROM event_references WHERE event_id=?", (event_id,)).fetchone()[0]
+            total = max(result["versions_count"], result["references_count"])
+            result["next_offset"] = offset + limit if offset + limit < total else None
+            if result.get("instructions_ref"):
+                result["instructions_ref"] = json.loads(result["instructions_ref"])
+            result["legacy_snapshot_evidence"] = bool(result["versions_count"])
             return result
 
-    def blob_read(self, blob_id):
+    def blob_read(self, blob_id, offset=0, max_chars=16000):
+        if type(offset) is not int or offset < 0 or type(max_chars) is not int or not 1 <= max_chars <= 100000:
+            raise PCWError("Use a nonnegative offset and 1 to 100000 characters")
         with self.connect() as db:
-            row = db.execute("SELECT * FROM blobs WHERE id=?", (blob_id,)).fetchone()
+            row = db.execute("SELECT redactions,length(text) AS size,substr(text,?,?) AS fragment FROM blobs WHERE id=?",
+                             (offset + 1, max_chars, blob_id)).fetchone()
             if row is None:
                 raise PCWError("Unknown analytics body")
-            return {
-                "id": blob_id,
-                "value": json.loads(row["text"]),
-                "redactions": row["redactions"],
-                "truncated": False,
-            }
+            complete = offset == 0 and row["size"] <= max_chars
+            return {"id": blob_id, "redactions": row["redactions"], "encoding": "json",
+                    "offset": offset, "total_chars": row["size"],
+                    "truncated": offset + max_chars < row["size"],
+                    "next_offset": offset + max_chars if offset + max_chars < row["size"] else None,
+                    **({"value": json.loads(row["fragment"])} if complete else {"text": row["fragment"]})}
 
 
-class AnalyticsMixin:
+class AnalyticsMixin(AnalyticsMigrationMixin):
     def _events(self):
         return EventStore(self.engine.work_root)
 
@@ -397,7 +332,14 @@ class AnalyticsMixin:
         offset: int = 0,
         limit: int = 50,
         import_id: str | None = None,
+        workspaces: list[str] | None = None,
+        instruction_revision: str | None = None,
+        runtime_version: str | None = None,
+        procedures_revision: str | None = None,
+        cursor: str | None = None,
     ):
+        if target_workspace is None and workspaces is None and cursor is None:
+            target_workspace = self.engine.workspace
         return self._events().query(
             target_workspace,
             cycle_id,
@@ -408,20 +350,89 @@ class AnalyticsMixin:
             offset,
             limit,
             import_id,
+            workspaces, instruction_revision, runtime_version, procedures_revision, cursor,
         )
 
-    def analytics_read(self, event_id: str):
-        return self._events().read(event_id)
+    def analytics_report(
+        self, target_workspace: str | None = None, workspaces: list[str] | None = None,
+        cycle_id: str | None = None, task_id: str | None = None,
+        tool: str | None = None, since: str | None = None, until: str | None = None,
+        import_id: str | None = None, instruction_revision: str | None = None,
+        runtime_version: str | None = None, procedures_revision: str | None = None,
+        max_events: int = 1000, cursor: str | None = None, max_blob_bytes: int = 4000000,
+    ):
+        from .analytics_queries import analytics_report
+        if target_workspace is not None and workspaces is not None:
+            raise PCWError("Select target_workspace or workspaces, not both")
+        if target_workspace is None and workspaces is None and cursor is None:
+            target_workspace = self.engine.workspace
+        return analytics_report(
+            self._events(), workspaces=[target_workspace] if target_workspace is not None else workspaces,
+            cycle_id=cycle_id, task_id=task_id, tool=tool, since=since, until=until,
+            import_id=import_id, instruction_revision=instruction_revision,
+            runtime_version=runtime_version, procedures_revision=procedures_revision,
+            max_events=max_events, cursor=cursor, max_blob_bytes=max_blob_bytes,
+        )
 
-    def analytics_blob_read(self, blob_id: str):
-        return self._events().blob_read(blob_id)
+    def analytics_read(self, event_id: str, max_chars: int = 16000, offset: int = 0, limit: int = 50):
+        return self._events().read(event_id, max_chars, offset, limit)
 
-    def analytics_evaluate(self, criterion: str, assessment: str, event_ids: list[str]):
+    def analytics_blob_read(self, blob_id: str, offset: int = 0, max_chars: int = 16000):
+        return self._events().blob_read(blob_id, offset, max_chars)
+
+    def analytics_reference_read(self, event_id: str, reference_index: int = 0,
+                                 offset: int = 0, max_chars: int = 16000):
+        from .history_queries import excerpt
+        from .runtime import _parse
+        if type(reference_index) is not int or reference_index < -1:
+            raise PCWError("Select an existing reference_index; -1 selects the recorded instructions")
+        event = self._events().read(event_id, 1, max(reference_index, 0), 1)
+        refs = event["references"]
+        if reference_index == -1:
+            reference = event.get("instructions_ref")
+        elif refs and refs[0]["reference_index"] == reference_index:
+            reference = refs[0]
+        else:
+            raise PCWError("Select an existing reference_index; -1 selects the recorded instructions")
+        if not reference or reference.get("status") != "versioned":
+            return {"status": "unavailable", "reference": reference,
+                    "reason": "This observed version has no verified Git reference"}
+        owner = reference.get("workspace", self.engine.workspace)
+        other = None
+        try:
+            runtime = self
+            if owner != self.engine.workspace:
+                other = type(self)(self.engine.work_root, owner)
+                runtime = other
+            path = reference["path"]
+            runtime._history_paths([path])
+            commit = runtime._history_revision(reference["commit"])
+            raw = runtime._history_git("show", commit + ":" + path).stdout
+            if hashlib.sha256(raw.encode()).hexdigest() != reference.get("content_sha256"):
+                raise PCWError("Historical content does not match the recorded reference")
+            text = _parse(raw)[1] if reference.get("projection") == "body" else raw
+            if "returned_characters" in reference:
+                text = text[reference.get("offset", 0):][:reference["returned_characters"]]
+            expected = reference.get("returned_sha256")
+            if expected and hashlib.sha256(text.encode()).hexdigest() != expected:
+                raise PCWError("Historical projection does not match the returned content")
+            safe, redactions = redact(text)
+            return {"status": "available", "reference": reference, "redactions": redactions,
+                    **excerpt(safe, offset, max_chars)}
+        finally:
+            if other is not None:
+                other.close()
+
+    def analytics_evaluate(self, criterion: str, assessment: str, event_ids: list[str],
+                           scope: dict | None = None, instruction_basis: list[dict] | None = None):
+        from .analytics_queries import validate_assessment_scope
         if not criterion.strip() or not assessment.strip() or not event_ids:
             raise PCWError(
                 "Evaluation requires a criterion, assessment and evidence event IDs"
             )
         events = self._events()
+        evidence = validate_assessment_scope(events, event_ids, scope, instruction_basis)
+        scope, instruction_basis = evidence["scope"], evidence["instruction_basis"]
         ident = uuid.uuid4().hex
         with events.connect() as db:
             for event_id in event_ids:
@@ -433,13 +444,15 @@ class AnalyticsMixin:
                 {"criterion": criterion, "assessment": assessment}
             )
             db.execute(
-                "INSERT INTO evaluations VALUES (?,?,?,?,?)",
+                    "INSERT INTO evaluations(id,created_at,criterion,assessment,evidence,scope,instruction_basis) VALUES (?,?,?,?,?,?,?)",
                 (
                     ident,
                     now(),
                     clean["criterion"],
                     clean["assessment"],
                     json.dumps(event_ids),
+                    json.dumps(redact(scope)[0]) if scope is not None else None,
+                    json.dumps(redact(instruction_basis)[0]) if instruction_basis is not None else None,
                 ),
             )
         return {

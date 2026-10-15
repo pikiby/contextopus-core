@@ -98,6 +98,7 @@ def test_usage_analysis_can_observe_reads_links_errors_without_claiming_usage(tm
         create(runtime)
         target = runtime.engine.create(BODY)
         source = runtime.engine.create("# Navigation", links=[target["id"]])
+        runtime._history_record("usage-fixture")
         with patch("pcw_runtime.server.runtime", return_value=runtime):
             dispatch(str(tmp_path), "p", "read_many", {"material_ids": [source["id"], target["id"]]})
             read = dispatch(str(tmp_path), "p", "read", {"material_id": target["id"], "from_id": source["id"]})
@@ -109,8 +110,9 @@ def test_usage_analysis_can_observe_reads_links_errors_without_claiming_usage(tm
         assert report["tokens"] is None and report["cost"] is None
         event = runtime.analytics_read(read["analytics"]["event_id"])
         assert event["params"]["value"]["from_id"] == source["id"]
-        assert event["result"]["value"]["content"] == BODY
+        assert event["result"]["value"]["content"]["retained"] is False
+        assert runtime.analytics_reference_read(read["analytics"]["event_id"])["text"] == BODY
         assert event["cycle_id"] is None and event["task_id"] is None
-        assert runtime.list()["total"] == 2
+        assert runtime.list()["total"] == 3
     finally:
         runtime.close()

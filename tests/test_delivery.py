@@ -202,11 +202,11 @@ def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path, crlf):
     integrate(
         plan("claude-code", tmp_path, scope="user", legacy_skills=old.parent.parent)
     )
-    assert "Compatibility alias" in old.read_text()
-    assert "contextopus_query" in old.read_text()
+    assert not old.exists()
+    old.parent.mkdir(parents=True)
     old.write_text("user customized old skill")
-    with pytest.raises(IntegrationConflict, match="User-modified"):
-        plan("claude-code", tmp_path, scope="user", legacy_skills=old.parent.parent)
+    review = plan("claude-code", tmp_path, scope="user", legacy_skills=old.parent.parent)
+    assert review["preserved"]
     cache = tmp_path / ".codex/plugins/cache/old/old/0.14.0/skills"
     with pytest.raises(IntegrationConflict, match="caches"):
         plan("codex", tmp_path, legacy_skills=cache)
@@ -215,10 +215,10 @@ def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path, crlf):
 def test_codex_native_cutover_preserves_old_cache_and_avoids_duplicate_mcp(tmp_path):
     new = (
         tmp_path
-        / ".codex/plugins/cache/contextopus/contextopus/1.0.0/.codex-plugin/plugin.json"
+        / ".codex/plugins/cache/contextopus/contextopus/1.1.0/.codex-plugin/plugin.json"
     )
     new.parent.mkdir(parents=True)
-    new.write_text('{"name":"contextopus","version":"1.0.0"}')
+    new.write_text('{"name":"contextopus","version":"1.1.0"}')
     old = (
         tmp_path
         / ".codex/plugins/cache/persistent-context-workspace/persistent-context-workspace/0.14.0/keep"
@@ -280,11 +280,11 @@ def test_service_records_actual_owner_pid_after_venv_redirector(tmp_path, monkey
     monkeypatch.setattr(
         service,
         "status",
-        lambda root: {"state": "running", "root": str(tmp_path), "pid": 111},
+        lambda root: {"state": "running", "root": str(tmp_path), "pid": 111} if not signalled else {"state": "stopped"},
     )
     signalled = []
     monkeypatch.setattr(service.os, "kill", lambda pid, signal: signalled.append(pid))
-    assert service.stop(tmp_path)["pid"] == 111
+    assert service.stop(tmp_path)["state"] == "stopped"
     assert signalled == [111]
 
 

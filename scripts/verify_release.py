@@ -46,6 +46,7 @@ def verify():
         "contextopus/modules/workspace/default_instructions.md",
         "contextopus/resources/procedures/workspace.md",
     }
+    skills = {"w", "w-search", "w-create", "w-settings", "w-find", "w-analyze"}
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
         dist_info = f"{distribution}-{version}.dist-info"
@@ -59,6 +60,10 @@ def verify():
                 raise ValueError(f"Wheel misses the exact {name}")
         if not required <= names:
             raise ValueError("Wheel misses required application modules/resources")
+        packaged_skills = {PurePosixPath(n).parts[-2] for n in names
+                           if n.startswith("contextopus/resources/skills/") and n.endswith("/SKILL.md")}
+        if packaged_skills != skills:
+            raise ValueError(f"Wrong wheel skill set: {packaged_skills}")
         if any(
             PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts
             for name in names
@@ -77,6 +82,10 @@ def verify():
         with zipfile.ZipFile(
             destination / f"contextopus-{client}-{version}.zip"
         ) as archive:
+            bundled_skills = {PurePosixPath(n).parts[-2] for n in archive.namelist()
+                              if n.startswith("skills/") and n.endswith("/SKILL.md")}
+            if bundled_skills != skills:
+                raise ValueError(f"Wrong {client} bundle skill set: {bundled_skills}")
             for name in ("LICENSE", "NOTICE"):
                 if archive.read(name) != (ROOT / name).read_bytes():
                     raise ValueError(f"{client} bundle misses the exact {name}")

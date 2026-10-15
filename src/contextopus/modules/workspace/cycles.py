@@ -28,9 +28,11 @@ from .sources import migrate_sources
 from .control import RecoveryRequired
 from .policies import policies
 from .workspaces import WorkspaceMixin
-from .migration import FormatTwoMixin
+from .migration import FormatMigrationMixin
 from .documents import DocumentsMixin
+from .records import validate_metadata, record_revision
 from .history import HistoryMixin
+from .history_events import transformations as validate_transformations
 from .analytics import AnalyticsMixin
 from .audit import AuditMixin
 
@@ -60,7 +62,7 @@ def _knowledge_approval_required(content):
 
 
 class CycleRuntime(
-    FormatTwoMixin,
+    FormatMigrationMixin,
     WorkspaceMixin,
     DocumentsMixin,
     HistoryMixin,
@@ -188,7 +190,7 @@ class CycleRuntime(
         if task_id is not None:
             if purpose not in {"work", "rework"}:
                 raise PCWError("Only work and rework cycles bind a task")
-            self.current_read(task_id)
+            self.read(material_id=task_id)
         signature = _revision(_json([purpose, restart_cycle_id, invocation, task_id]))
         with self.control.guard():
             records = self._records()
@@ -333,6 +335,8 @@ class CycleRuntime(
         multiplier: float | None = None,
         categories: list[str] | None = None,
         all_categories: bool = False,
+        types: list[str] | None = None,
+        statuses: list[str] | None = None,
     ):
         return self._read_call(
             cycle_id,
@@ -344,6 +348,7 @@ class CycleRuntime(
             multiplier=multiplier,
             categories=categories,
             all_categories=all_categories,
+            types=types, statuses=statuses,
         )
 
     def instructions_read(self, cycle_id: str | None = None):
@@ -481,6 +486,8 @@ class CycleRuntime(
             "effects": effects[:50],
             "effects_count": len(effects),
             "review_changes": self._review_changes(plan),
+            "history_summary": plan.get("summary"),
+            "transformations": plan.get("transformations", []),
             **(
                 {"no_changes_reason": plan["no_changes_reason"]}
                 if state == "no_changes"
@@ -593,6 +600,7 @@ class CycleRuntime(
                 history = self._history_record(
                     proposal_id,
                     force=policies(change["before"]["text"])["git_history_enabled"],
+                    plan=plan,
                 )
                 entry["state"] = "applied"
                 self._persist(records)
@@ -623,6 +631,8 @@ class CycleRuntime(
         replacements: dict[str, str] | None = None,
         proposal_id: str | None = None,
         no_changes_reason: str | None = None,
+        transformations: list[dict] | None = None,
+        summary: str | None = None,
     ):
         """Prepare a complete, reviewed set without changing permanent files.
 
@@ -635,6 +645,9 @@ class CycleRuntime(
             self._require_work(cycle)
             instructions = self._instructions()
             approval_required = _knowledge_approval_required(instructions["content"])
+            if summary is not None and (not isinstance(summary, str) or not summary.strip()
+                                        or len(summary) > 240 or any(ord(c) < 32 for c in summary)):
+                raise PCWError("summary must be one nonempty line of at most 240 characters")
             if not isinstance(changes, list) or len(changes) > 100:
                 raise PCWError("changes must contain 0 to 100 final material changes")
             if not changes:
@@ -646,6 +659,8 @@ class CycleRuntime(
                 raise PCWError(
                     "no_changes_reason is only valid for an empty changes list"
                 )
+            if not changes and (transformations or summary):
+                raise PCWError("A no-change review cannot declare a transformation or commit summary")
             ident = self._proposal_id(cycle_id, cycle, proposal_id, "knowledge")
             aliases, entries, touched = {}, {}, set()
             for change in changes:
@@ -658,6 +673,8 @@ class CycleRuntime(
                     "links",
                     "path",
                     "delete",
+                    "type",
+                    "status",
                 }:
                     raise PCWError("Unknown change fields")
                 existing = change.get("material_id")
@@ -665,7 +682,7 @@ class CycleRuntime(
                     if "key" in change:
                         raise PCWError("Use material_id or a new key, not both")
                     material = self.engine._material(existing)
-                    if change.get("expected_revision") != material.revision:
+                    if change.get("expected_revision") != record_revision(material):
                         raise PCWError(
                             "Material changed since it was read; read it again"
                         )
@@ -688,7 +705,7 @@ class CycleRuntime(
                     aliases[key] = target_id
                     before, metadata, content, path = (
                         None,
-                        {"links": [], "id": target_id},
+                        {"links": [], "id": target_id, "type": "knowledge"},
                         None,
                         None,
                     )
@@ -721,6 +738,13 @@ class CycleRuntime(
                     )
                 if "links" in change:
                     metadata["links"] = change["links"]
+                for field in ("type", "status"):
+                    if field in change:
+                        if field == "status" and change[field] is None:
+                            metadata.pop(field, None)
+                        else:
+                            metadata[field] = change[field]
+                validate_metadata(metadata)
                 if "description" in change:
                     if not isinstance(change["description"], str):
                         raise PCWError("description must be text")
@@ -740,6 +764,11 @@ class CycleRuntime(
                     "before": before,
                     "after": {"path": path, "content": content, "metadata": metadata},
                 }
+
+            project_count = sum(m.metadata.get("type") == "project" for i, m in self.engine.materials.items() if i not in entries)
+            project_count += sum(e["after"] is not None and e["after"]["metadata"].get("type") == "project" for e in entries.values())
+            if project_count > 1:
+                raise PCWError("Keep one canonical project record; update or consolidate the existing description")
 
             limit = policies(instructions["content"])["material_max_tokens"]
             if limit is not None:
@@ -848,6 +877,10 @@ class CycleRuntime(
                 "instructions_revision": instructions["revision"],
                 "knowledge_approval_required": approval_required,
             }
+            if transformations is not None or mapping:
+                plan["transformations"] = validate_transformations(transformations, entries, resolve, mapping)
+            if summary is not None:
+                plan["summary"] = summary.strip()
             if not changes:
                 plan["no_changes_reason"] = no_changes_reason
             state = "prepared" if changes else "no_changes"
@@ -956,6 +989,13 @@ class CycleRuntime(
                 }
             )
             if plan.get("kind", "knowledge") == "knowledge":
+                changes[-1]["metadata_changes"] = {
+                    key: {"before": _parse(before["text"])[0].get(key) if before else None,
+                          "after": _parse(after["text"])[0].get(key) if after else None}
+                    for key in ("type", "status")
+                    if (_parse(before["text"])[0].get(key) if before else None) !=
+                       (_parse(after["text"])[0].get(key) if after else None)
+                }
                 old_description = (
                     _parse(before["text"])[0].get("description", "") if before else ""
                 )
@@ -986,6 +1026,11 @@ class CycleRuntime(
                 + plan["no_changes_reason"]
                 + "\n"
             )
+        if plan.get("summary"):
+            parts.append("\nCommit summary: " + plan["summary"] + "\n")
+        for transform in plan.get("transformations", []):
+            parts.append("\n" + transform["kind"] + ": " + ", ".join(transform["sources"])
+                         + " -> " + ", ".join(transform["targets"]) + "\n")
         for ident, entry in sorted(plan["entries"].items()):
             before, after = entry["before"], entry["after"]
             parts.append(f"\n## {ident}\n")
@@ -1015,6 +1060,8 @@ class CycleRuntime(
                 **entry,
                 "review": self._review(plan),
                 "review_changes": self._review_changes(plan),
+                "history_summary": plan.get("summary"),
+                "transformations": plan.get("transformations", []),
                 **self._review_policy(plan, entry["state"]),
                 **(
                     {"no_changes_reason": plan["no_changes_reason"]}
@@ -1099,7 +1146,7 @@ class CycleRuntime(
             ):
                 raise PCWError("Apply only the exact presented proposal revision")
             plan = self._load_plan(cycle_id, proposal_id, entry)
-            if plan.get("kind") in {"instructions", "project"}:
+            if plan.get("kind") == "instructions":
                 raise PCWError(
                     "Use instructions_apply or project_apply for document changes"
                 )
@@ -1164,7 +1211,7 @@ class CycleRuntime(
                     for ident, change in plan["entries"].items()
                     if change["after"] is not None
                 ]
-                history = self._history_record(proposal_id)
+                history = self._history_record(proposal_id, plan=plan)
                 entry["state"] = (
                     "index_pending"
                     if any(m["index_status"] != "indexed" for m in materials)

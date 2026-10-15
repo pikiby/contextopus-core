@@ -22,6 +22,8 @@ def test_http_external_module_discovery_describe_dispatch_and_observation(tmp_pa
         port = listener.getsockname()[1]
     code = """
 import sys
+import time
+from pathlib import Path
 from contextopus import startup
 from contextopus.core.operations import OperationSpec
 from contextopus.interfaces.mcp.server import run
@@ -31,6 +33,15 @@ class Extension:
         def register(app):
             app.registry.register_module('third',available=True,state='available')
             app.registry.register(OperationSpec('third.echo','query',{'type':'object','properties':{'message':{'type':'string'}},'required':['message'],'additionalProperties':False},lambda ctx,message:{'message':message,'workspace':ctx.workspace}))
+            def slow(ctx):
+                root = Path(sys.argv[1])
+                (root / 'started').touch()
+                for _ in range(100):
+                    if (root / 'release').exists():
+                        return {'completed': True}
+                    time.sleep(.05)
+                raise RuntimeError('fixture was not released')
+            app.registry.register(OperationSpec('third.slow','query',{'type':'object','properties':{},'additionalProperties':False},slow))
         return register
 startup.metadata.entry_points=lambda **kw:[Extension()] if kw.get('group')=='contextopus.modules' else original(**kw)
 run(sys.argv[1],port=int(sys.argv[2]))
@@ -93,6 +104,20 @@ run(sys.argv[1],port=int(sys.argv[2]))
                     "SELECT outcome FROM operations WHERE operation='third.echo'"
                 ).fetchone() == ("ok",)
             assert not (root / ".pcw").exists()
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor() as pool:
+                pending = pool.submit(remote.query, "third.slow")
+                try:
+                    for _ in range(100):
+                        if (root / "started").exists():
+                            break
+                        time.sleep(.02)
+                    assert (root / "started").exists()
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as response:
+                        assert response.status == 200
+                finally:
+                    (root / "release").touch()
+                assert pending.result(timeout=5)["completed"]
         finally:
             if remote:
                 remote.close()

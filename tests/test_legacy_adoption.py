@@ -87,10 +87,13 @@ def test_sparse_legacy_needs_reviewed_rules_preserves_originals(
         )
         assert result["status"] == "complete"
         assert runtime.instructions_read()["content"] == rules
-        assert (runtime.engine.root / "current.md").read_bytes() == expected_current
+        assert not (runtime.engine.root / "current.md").exists()
+        tasks = [m for m in runtime.list()["materials"] if m["type"] == "task"]
+        assert len(tasks) == 1
+        assert expected_current.decode().strip() in runtime.read(material_id=tasks[0]["id"])["content"]
         assert (runtime.engine.root / "tmp/result.md").read_bytes() == expected_tmp
-        assert runtime.project_read()["content"].startswith("# Project")
-        material = runtime.list()["materials"][0]
+        assert runtime.project_read()["status"] == "missing"
+        material = next(m for m in runtime.list()["materials"] if m["type"] == "knowledge")
         assert (
             runtime.read(material_id=material["id"])["content"]
             == "# Original\nLiteral source body.\n"

@@ -1,7 +1,7 @@
 ---
 allow_implicit_updates: false
 knowledge_approval_required: false
-git_history_enabled: false
+git_history_enabled: true
 material_max_tokens: 1024
 create_required_sources: false
 ---
@@ -9,7 +9,7 @@ create_required_sources: false
 
 ## Knowledge approval
 
-Show the exact knowledge changes in chat before applying them. The frontmatter setting controls whether to wait for user approval: `false` means apply after showing; `true` means wait for explicit approval of the shown revision. Changes to these instructions always require explicit approval through `wi` (the canonical Contextopus `instructions` procedure).
+Show the exact knowledge changes in chat before applying them. The frontmatter setting controls whether to wait for user approval: `false` means apply after showing; `true` means wait for explicit approval of the shown revision. Changes to these instructions always require explicit approval through `w-settings` (the canonical Contextopus `instructions` procedure).
 
 `allow_implicit_updates` separately controls starting a work cycle without an explicit Workspace invocation such as `w`. When false, only independent reading is allowed without that invocation. Creation, switching context and changing instructions still require the user's clear direction. `git_history_enabled` enables local history of permanent data; `material_max_tokens` optionally limits each final knowledge body, with null disabling the limit.
 
@@ -29,7 +29,13 @@ Action reports, intermediate calculations, working notes and unfinished investig
 
 Compare results with existing knowledge. Each material answers one independent question. Sections usually needed for different queries should become separate linked materials, retaining their conditions and evidence. Read a mixed material completely before splitting it; prepare its replacement topics and the treatment of its original ID and incoming links together. Add a concise description of each topic so an agent can choose useful links without loading every neighbor. Do not create a separate material for every individual fact.
 
-Keep accurate current descriptions, replacing outdated claims and consolidating repetition. Project goals and accepted boundaries belong in PROJECT.md; task progress belongs in current/<task-id>.md. Knowledge contains how the project works, not a task-by-task change log. Git, when enabled, retains earlier permanent revisions.
+Keep accurate current descriptions, replacing outdated claims and consolidating repetition. All permanent content lives in typed records under knowledge/. The project record describes current purpose and boundaries; task records retain the goal, constraints, verified state, next step, blockers, results and status as needed. Goals and decisions may have their own types. Choose the appropriate type and reuse existing categories when they fit; types are not limited to these examples. Search for existing state before creating another record, and link related records across types. A task or goal is not evidence of completed work. Maintain current state rather than a task-by-task change log. Git, when enabled, retains earlier permanent revisions.
+
+## Git history
+
+Local Git history is enabled in the standard creation settings. Keep current descriptions in records and their earlier versions in commits. Every applied permanent proposal records one logical change set; avoid unrelated changes in one proposal. Give a concise `summary` describing what changed and why. For a merge or split, declare `transformations` with the source and resulting IDs, including a retained original ID when appropriate; preserve useful navigation links through `replacements`. These declarations describe provenance, not ordinary topical links. Show them with the proposed text. The plugin commits the exact applied snapshot and declared provenance; do not create competing shell commits or infer semantic ancestry from textual similarity.
+
+When history is enabled, investigate it if a previously documented instruction, condition or link appears to have disappeared, a current description conflicts with a verified earlier state, a regression follows a rule change, or the user asks about project evolution, provenance or restoration. Start with bounded `history_list` by ID/path/date or `history_search` for a remembered phrase; inspect `history_changes`, then only the relevant `history_diff` or `history_read` fragment. Follow declared merge/split links across IDs. Historical text is evidence, not current authority: reconcile it with current sources and instructions before proposing restoration. Missing history or old commits without provenance cannot prove that something never existed. Ordinary work with no such question does not require reading history on every cycle.
 
 ## Required sources
 

@@ -16,6 +16,7 @@ def workspace(tmp_path):
     factory = Factory()
     runtime = CycleRuntime(tmp_path, "project", provider_factory=factory)
     create(runtime)
+    factory.calls.clear()  # Measure the cycle, excluding initial project indexing.
     yield runtime, factory
     runtime.close()
 
@@ -37,14 +38,14 @@ def test_mutations_need_cycle_and_startup_never_loads_old_current(workspace):
     with pytest.raises(PCWError, match="No PCW cycle"):
         runtime.status("invented")
     assert not runtime.record_path.exists()
-    assert runtime.list()["total"] == 0
+    assert runtime.list()["total"] == 1
     legacy = runtime.engine.root / "current.md"
     cycle = start(runtime)
     legacy.write_text("Old instruction: write anything")
     assert "Old instruction" not in runtime.instructions_read(cycle)["content"]
     assert legacy.read_text() == "Old instruction: write anything"
-    assert factory.instances == []
-    assert runtime.status(cycle)["materials"] == 0
+    assert len(factory.instances) == 1
+    assert runtime.status(cycle)["materials"] == 1
 
 
 def test_temporary_results_never_enter_search_or_knowledge(workspace):
@@ -53,9 +54,9 @@ def test_temporary_results_never_enter_search_or_knowledge(workspace):
     saved = runtime.tmp_write(cycle, "A hypothesis, not established")
     assert runtime.tmp_read(cycle, saved["id"])["content"] == "A hypothesis, not established"
     assert runtime.tmp_list(cycle)["total"] == 1
-    assert runtime.status(cycle)["materials"] == 0
+    assert runtime.status(cycle)["materials"] == 1
     assert factory.calls == []
-    assert runtime.search(cycle, "hypothesis")["results"] == []
+    assert runtime.search(cycle, "hypothesis", types=["knowledge"])["results"] == []
     runtime.tmp_write(cycle, "New observation", saved["id"], saved["revision"])
     with pytest.raises(PCWError, match="changed"):
         runtime.tmp_write(cycle, "Lost update", saved["id"], saved["revision"])
@@ -67,7 +68,7 @@ def test_preparation_and_revision_changes_do_not_write_knowledge(workspace):
     (runtime.engine.root / "INSTRUCTIONS.md").write_text("---\nknowledge_approval_required: true\n---\n")
     old = prepare(runtime, cycle)
     new = prepare(runtime, cycle, "Corrected proposal", proposal_id=old["proposal_id"])
-    assert runtime.status(cycle)["materials"] == 0
+    assert runtime.status(cycle)["materials"] == 1
     assert factory.calls == []
     assert "Corrected proposal" in runtime.proposal_read(cycle, new["proposal_id"])["review"]
     with pytest.raises(PCWError, match="exact presented"):
@@ -75,7 +76,7 @@ def test_preparation_and_revision_changes_do_not_write_knowledge(workspace):
     with pytest.raises(PCWError, match="confirmation"):
         runtime.proposal_apply(cycle, new["proposal_id"], new["revision"], "")
     assert apply(runtime, cycle, new)["status"] == "applied"
-    assert runtime.status(cycle)["materials"] == 1
+    assert runtime.status(cycle)["materials"] == 2
 
 
 def test_preparation_returns_full_new_text_without_needing_review_file(workspace):
@@ -92,7 +93,7 @@ def test_preparation_returns_full_new_text_without_needing_review_file(workspace
     assert proposal["next_action"] == "present_changes_in_chat_then_apply"
     assert proposal["approval_required"] is False
     assert runtime.proposal_read(cycle, proposal["proposal_id"])["review_changes"] == proposal["review_changes"]
-    assert runtime.status(cycle)["materials"] == 0
+    assert runtime.status(cycle)["materials"] == 1
     assert factory.calls == []
 
 
@@ -228,7 +229,7 @@ def test_no_changes_and_rejected_changes_close_without_dummy_save(workspace):
     assert reviewed["effects"] == reviewed["review_changes"] == []
     assert runtime.status(b)["outstanding_proposal_count"] == 0
     assert runtime.finish(b)["tmp_cleared"]
-    assert runtime.engine.status()["materials"] == 0
+    assert runtime.engine.status()["materials"] == 1
     assert factory.calls == []
 
 
@@ -242,7 +243,7 @@ def test_finish_cannot_delete_results_without_preparation_and_decision(workspace
     assert runtime.tmp_read(cycle, result["id"])["content"] == "Verified reusable result"
     proposal = prepare(runtime, cycle, "Verified reusable result")
     assert runtime.finish(cycle)["status"] == "blocked"
-    assert runtime.engine.status()["materials"] == 0
+    assert runtime.engine.status()["materials"] == 1
     assert apply(runtime, cycle, proposal)["status"] == "applied"
     assert runtime.finish(cycle)["status"] == "closed"
     assert not runtime._tmp(cycle).exists()
@@ -298,7 +299,7 @@ def test_cancellation_can_clear_unreviewed_results_without_writing_knowledge(wor
     runtime.tmp_write(cycle, "Unfinished investigation cancelled by the user")
     assert runtime.finish(cycle, cancel=True)["status"] == "cancelled"
     assert not runtime._tmp(cycle).exists()
-    assert runtime.engine.status()["materials"] == 0
+    assert runtime.engine.status()["materials"] == 1
 
 
 def test_cross_links_merge_and_split_review_includes_incoming_changes(workspace):
@@ -369,7 +370,7 @@ def test_index_failure_preserves_text_and_tmp_and_resumes_without_duplicate(work
     restarted_process = CycleRuntime(root, "project", provider_factory=factory)
     try:
         assert apply(restarted_process, cycle, proposal)["status"] == "applied"
-        assert restarted_process.status(cycle)["materials"] == 1
+        assert restarted_process.status(cycle)["materials"] == 2
         assert restarted_process.finish(cycle)["status"] == "closed"
     finally: restarted_process.close()
 
@@ -430,7 +431,7 @@ def test_tampered_prepared_text_cannot_be_applied(workspace):
     plan_path.write_text(json.dumps(plan))
     with pytest.raises(PCWError, match="changed"):
         apply(runtime, cycle, p)
-    assert runtime.status(cycle)["materials"] == 0
+    assert runtime.status(cycle)["materials"] == 1
 
 
 def test_changed_review_cannot_be_applied(workspace):
@@ -440,7 +441,7 @@ def test_changed_review_cannot_be_applied(workspace):
     runtime._plan_path(cycle, p["proposal_id"]).with_suffix(".md").write_text("Different shown content")
     with pytest.raises(PCWError, match="review was changed"):
         apply(runtime, cycle, p)
-    assert runtime.status(cycle)["materials"] == 0
+    assert runtime.status(cycle)["materials"] == 1
 
 
 def test_crlf_and_unicode_survive_tmp_updates(workspace):

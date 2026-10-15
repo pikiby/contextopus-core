@@ -79,7 +79,7 @@ def test_unicode_root_upgrade_receipt_replays_after_reopen(tmp_path):
     try:
         assert reopened.upgrade_apply(revision, automatic=True)["replayed"] is True
         assert reopened.instructions_read()["content"] == rules
-        assert reopened.upgrade_plan()["from_version"] == 2
+        assert reopened.upgrade_plan()["from_version"] == 3
     finally:
         reopened.close()
 

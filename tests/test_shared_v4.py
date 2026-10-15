@@ -35,15 +35,15 @@ def test_categories_prefilter_links_rules_and_shared_reconcile(tmp_path):
         two = save(b, "# Beta procedure\nanswer", [one["id"]])
         assert a.engine.state == b.engine.state == tmp_path / ".pcw/.rag"
         assert not (a.engine.root / ".pcw-runtime").exists()
-        assert a.search(query="answer", N=1, d_max=2)["results"][0]["id"] == one["id"]
-        assert a.search(query="answer", categories=["beta"], N=1, d_max=2)["results"][0]["id"] == two["id"]
-        both = a.search(query="answer", all_categories=True, N=100, d_max=2)
+        assert a.search(types=["knowledge"], query="answer", N=1, d_max=2)["results"][0]["id"] == one["id"]
+        assert a.search(types=["knowledge"], query="answer", categories=["beta"], N=1, d_max=2)["results"][0]["id"] == two["id"]
+        both = a.search(types=["knowledge"], query="answer", all_categories=True, N=100, d_max=2)
         assert {r["workspace"] for r in both["results"]} == {"alpha", "beta"}
         assert both["active_workspace"] == "alpha"
         assert a.read(material_id=one["id"], from_id=two["id"])["workspace"] == "alpha"
         assert a.read(material_id=two["id"])["workspace"] == "beta"
         a.engine.reconcile()
-        assert b.search(query="answer", d_max=2)["results"][0]["id"] == two["id"]
+        assert b.search(types=["knowledge"], query="answer", d_max=2)["results"][0]["id"] == two["id"]
         assert a.engine.root.name == "alpha"
         cycle = a.startup("delete")["cycle_id"]
         with pytest.raises(PCWError, match="explicitly update"):
@@ -67,7 +67,7 @@ def test_rename_retains_yaml_id_links_and_embeddings(tmp_path):
     result = runtime.read(material_id=item["id"])
     assert result["path"] == "knowledge/guides/Подключение.md"
     assert result["revision"] == item["revision"] and len(factory.calls) == calls
-    assert runtime.search(query="conditions", d_max=2)["results"][0]["path"] == result["path"]
+    assert runtime.search(types=["knowledge"], query="conditions", d_max=2)["results"][0]["path"] == result["path"]
     runtime.close()
 
 
@@ -115,11 +115,12 @@ def test_migrate_retry_and_real_index(tmp_path, failure):
     actual = runtime.read(material_id=item["id"])
     assert actual["path"] == "knowledge/Known-fact.md" and len(actual["sources"]) == 1
     assert actual["index_status"] == "indexed"
-    assert runtime.search(query="known", d_max=2)["results"][0]["id"] == item["id"]
+    assert runtime.search(types=["knowledge"], query="known", d_max=2)["results"][0]["id"] == item["id"]
     receipt = json.loads(runtime._migration_receipt_path().read_text())
     assert (Path(receipt["backup"]) / item["path"]).read_text() == original
     assert runtime.instructions_read()["content"] == "Custom exact user rules\n"
-    assert (runtime.engine.root / "CURRENT.md").read_text() == "Keep ongoing work"
+    assert not (runtime.engine.root / "CURRENT.md").exists()
+    assert any("Keep ongoing work" in m.content for m in runtime.engine.materials.values() if m.metadata.get("type") == "task")
     assert runtime.upgrade_plan()["compatible"]
     runtime.close()
 
@@ -131,7 +132,7 @@ def test_missing_yaml_or_legacy_sources_detected_with_current_marker(tmp_path):
     path.write_text("# Known\nFact", encoding="utf-8", newline="")
     assert not runtime.workspace_inspect()["compatible"]
     with pytest.raises(PCWError, match="pcw-upgrade"):
-        runtime.search(query="fact")
+        runtime.search(types=["knowledge"], query="fact")
     plan = runtime.upgrade_plan()
     assert runtime.upgrade_apply(plan["revision"], automatic=True)["status"] == "complete"
     assert runtime.read(material_id=item["id"])["content"] == "# Known\nFact"
@@ -145,7 +146,7 @@ def test_old_source_syntax_is_normalized_before_review(tmp_path):
     shown = p["review_changes"][0]["body_changes"][0]["after"]
     assert "sources:" in shown and "reference:" in shown and "instruction:" in shown
     assert "required_sources:" not in shown
-    assert runtime.list()["total"] == 0
+    assert runtime.list()["total"] == 1
     runtime.proposal_apply(cycle, p["proposal_id"], p["revision"])
     assert runtime.read(material_id=p["created_ids"]["a"])["content"] == shown
     runtime.close()
@@ -173,15 +174,15 @@ def test_move_category_and_provider_rebuild_preserve_all_contexts(tmp_path):
         old.rename(b.engine.root / one["path"])
         b.engine.reconcile()
         assert len(factory.calls) == before
-        assert a.search(query="fact", d_max=2)["results"] == []
-        assert {r["id"] for r in b.search(query="fact", d_max=2, N=100)["results"]} == {one["id"], two["id"]}
+        assert a.search(types=["knowledge"], query="fact", d_max=2)["results"] == []
+        assert {r["id"] for r in b.search(types=["knowledge"], query="fact", d_max=2, N=100)["results"]} == {one["id"], two["id"]}
         save(a, "# Three\nFact")
         config = copy.deepcopy(a.engine.active["config"])
         config["profile"]["revision"] = "a-different-model-revision"
         result = a.engine.switch_embeddings(config, a.engine.active["search"])
         assert result["status"] == "ok" and result["reembedded"]
-        assert len(a.search(query="fact", all_categories=True, N=100, d_max=2)["results"]) == 3
-        assert b.search(query="fact", d_max=2)["pending_count"] == 0
+        assert len(a.search(types=["knowledge"], query="fact", all_categories=True, N=100, d_max=2)["results"]) == 3
+        assert b.search(types=["knowledge"], query="fact", d_max=2)["pending_count"] == 0
     finally:
         a.close(); b.close()
 
@@ -192,7 +193,7 @@ def test_concurrent_context_writers_keep_both_categories(tmp_path):
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(save, a, "# One\nFact"), pool.submit(save, b, "# Two\nFact")]
             ids = {f.result(timeout=30)["id"] for f in futures}
-        assert {r["id"] for r in a.search(query="fact", all_categories=True, N=100, d_max=2)["results"]} == ids
+        assert {r["id"] for r in a.search(types=["knowledge"], query="fact", all_categories=True, N=100, d_max=2)["results"]} == ids
     finally:
         a.close(); b.close()
 

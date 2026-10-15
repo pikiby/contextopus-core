@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import argparse
+from importlib.metadata import version
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ def parser():
         prog="contextopus",
         description="Persistent context for people and coding agents",
     )
-    result.add_argument("--version", action="version", version="Contextopus 1.0.0")
+    result.add_argument("--version", action="version", version="Contextopus " + version("contextopus-core"))
     result.add_argument(
         "--root", type=Path, help="Persistent data root (or CONTEXTOPUS_ROOT)"
     )
@@ -26,7 +27,13 @@ def parser():
     )
     root_binding.add_argument("--set", dest="new_root", type=Path)
     service = commands.add_parser("service")
-    service.add_argument("action", choices=("start", "stop", "status"))
+    service.add_argument("action", choices=("start", "stop", "restart", "status", "install"))
+    reconnect = commands.add_parser("reconnect", help="Refresh an existing native client connection")
+    reconnect.add_argument("client", choices=("codex", "claude-code", "opencode", "crush"))
+    reconnect.add_argument("--socket", type=Path)
+    reconnect.add_argument("--thread", dest="thread_id")
+    reconnect.add_argument("--client-url", help="Existing OpenCode server URL")
+    reconnect.add_argument("--directory", type=Path, help="Project in the existing OpenCode server")
     settings = commands.add_parser("settings")
     settings.add_argument(
         "--set", dest="changes", help="JSON object of proposed values"
@@ -169,6 +176,11 @@ def main(argv=None):
 
             emit(getattr(service, args.action)(root))
             return 0
+        if args.command == "reconnect":
+            from contextopus.integrations.reconnect import reconnect
+            emit(reconnect(args.client, root, socket=args.socket, thread_id=args.thread_id,
+                           client_url=args.client_url, directory=args.directory))
+            return 0
         if args.command == "integrate":
             from contextopus.integrations import plan, integrate
 
@@ -184,6 +196,8 @@ def main(argv=None):
             emit(
                 {
                     "client": args.client,
+                    "removals": preview.get("removals", []),
+                    "preserved": preview.get("preserved", []),
                     "files": [
                         {"path": item["path"], "changed": item["changed"]}
                         for item in preview["writes"]
@@ -202,7 +216,8 @@ def main(argv=None):
         from contextopus.integrations.remote import RemoteApplication
 
         if args.command == "init":
-            start(root)
+            from contextopus.integrations.service import install
+            install(root)
         elif (
             args.command in ("status", "doctor") and status(root)["state"] == "stopped"
         ):

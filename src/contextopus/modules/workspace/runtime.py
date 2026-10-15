@@ -696,6 +696,7 @@ class PCWRuntime:
         path = self.control.root / "task-ledger.json"
         self.control.safe(path)
         data = json.loads(read_utf8(path)) if path.exists() else {}
+        from .records import record_revision
         return [
             {
                 "material_id": material.id,
@@ -704,7 +705,7 @@ class PCWRuntime:
             }
             for task in data.get("tasks", {}).values()
             for entry in task.get("assignments", {}).values()
-            if entry.get("affected_materials", {}).get(material.id) == material.revision
+            if entry.get("affected_materials", {}).get(material.id) in (material.revision, record_revision(material))
         ]
 
     def _needs_correction(self):

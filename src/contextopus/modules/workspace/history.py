@@ -13,9 +13,12 @@ import subprocess
 from .runtime import PCWError, _id, _revision
 from .policies import policies
 from .workspaces import encode
+from .history_events import event_from_plan, commit_message
+from .history_queries import HistoryQueriesMixin, excerpt
+from .history_catalog import HistoryCatalogMixin
 
 
-class HistoryMixin:
+class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
     def _history_root(self):
         path = self.control.root / "history"
         self.control.safe(path)
@@ -73,7 +76,7 @@ class HistoryMixin:
             raise PCWError(result.stderr.strip() or "Git history operation failed")
         return result
 
-    def _history_capture(self, operation_id, *, force=False):
+    def _history_capture(self, operation_id, *, force=False, plan=None):
         """Called under the workspace lock immediately after verified file writes."""
         if (
             not force
@@ -95,40 +98,48 @@ class HistoryMixin:
                 "revision": _revision(encode(data)),
                 "status": "pending",
             }
+            event = event_from_plan(operation_id, plan, data)
+            snapshot.update(event=event, event_revision=_revision(encode(event)))
             self.control.write(snapshot_path, encode(snapshot))
+        if snapshot_path.exists() and json.loads(read_utf8(snapshot_path)).get("status") in {"committed", "unchanged"}:
+            return operation_id
         if operation_id not in queue:
             queue.append(operation_id)
             self.control.write(queue_path, encode(queue))
         return operation_id
 
-    def _history_record(self, operation_id, *, force=False):
-        operation = self._history_capture(operation_id, force=force)
+    def _history_record(self, operation_id, *, force=False, plan=None):
+        operation = self._history_capture(operation_id, force=force, plan=plan)
         if operation is None:
             return {"status": "disabled"}
         return self._history_flush(operation)
 
-    def _history_flush(self, requested=None):
+    def _history_flush(self, requested=None, limit=100):
         root = self._history_root()
         queue_path = root / "queue.json"
         self.control.safe(queue_path)
-        if not queue_path.exists():
+        if not queue_path.exists() and requested is None:
             return {"status": "empty"}
-        queue = json.loads(read_utf8(queue_path))
+        queue = json.loads(read_utf8(queue_path)) if queue_path.exists() else []
+        pending = list(queue)
         receipt = {"status": "empty"}
-        for operation_id in queue:
+        for operation_id in queue[:limit]:
             path = root / (_id(operation_id) + ".json")
             self.control.safe(path)
             snapshot = json.loads(read_utf8(path))
-            if snapshot["revision"] != _revision(encode(snapshot["files"])):
+            if "files" in snapshot and snapshot["revision"] != _revision(encode(snapshot["files"])):
                 raise PCWError(
                     "Stored Git snapshot was changed; inspect before retrying"
                 )
+            if "event" in snapshot and snapshot.get("event_revision") != _revision(encode(snapshot["event"])):
+                raise PCWError("Stored Git provenance was changed; inspect before retrying")
             if snapshot["status"] in {"committed", "unchanged"}:
+                self._history_compact_snapshot(path, snapshot)
+                pending.remove(operation_id)
+                self.control.write(queue_path, encode(pending))
+                receipt = {key: snapshot.get(key) for key in ("status", "commit", "operation_id")}
                 if requested == operation_id:
-                    receipt = {
-                        key: snapshot.get(key)
-                        for key in ("status", "commit", "operation_id")
-                    }
+                    receipt["catalog"] = self._history_catalog_receipt(snapshot)
                 continue
             try:
                 if not (self.engine.root / ".git").exists():
@@ -159,7 +170,9 @@ class HistoryMixin:
                     head_result.stdout.strip() if head_result.returncode == 0 else None
                 )
                 # An acknowledgement may be lost after update-ref. Never duplicate that commit.
-                if snapshot.get("commit") and head == snapshot["commit"]:
+                if snapshot.get("commit") and head and self._history_git(
+                    "merge-base", "--is-ancestor", snapshot["commit"], head, check=False
+                ).returncode == 0:
                     snapshot["status"] = "committed"
                 else:
                     index = root / (operation_id + ".index")
@@ -195,7 +208,8 @@ class HistoryMixin:
                             "commit-tree",
                             tree,
                             *parent,
-                            text="PCW permanent data: " + operation_id + "\n",
+                            text=commit_message(snapshot["event"]) if "event" in snapshot
+                            else "PCW permanent data: " + operation_id + "\n",
                         ).stdout.strip()
                         snapshot["commit"] = commit
                         self.control.write(path, encode(snapshot))
@@ -206,11 +220,20 @@ class HistoryMixin:
                 # Keep the workspace's regular index consistent without changing any file.
                 self._history_git("read-tree", "HEAD")
                 self.control.write(path, encode(snapshot))
+                self._history_compact_snapshot(path, snapshot)
+                pending.remove(operation_id)
+                self.control.write(queue_path, encode(pending))
+                catalog = self._history_catalog_receipt(snapshot)
                 receipt = {
                     key: snapshot.get(key)
                     for key in ("status", "commit", "operation_id")
                 }
+                receipt["catalog"] = catalog
             except Exception as exc:
+                if snapshot.get("status") in {"committed", "unchanged"}:
+                    return {**{key: snapshot.get(key) for key in ("status", "commit", "operation_id")},
+                            "cleanup": {"status": "pending", "error": str(exc), "next_action": "history_retry"},
+                            "snapshot_preserved": True}
                 return {
                     "status": "pending",
                     "operation_id": operation_id,
@@ -220,17 +243,53 @@ class HistoryMixin:
                     "snapshot_preserved": True,
                 }
         if requested is not None:
+            if receipt.get("operation_id") == requested and "catalog" in receipt:
+                return receipt
             path = root / (requested + ".json")
             snapshot = json.loads(read_utf8(path))
-            return {
-                key: snapshot.get(key) for key in ("status", "commit", "operation_id")
-            }
+            if snapshot["status"] == "pending":
+                return {"status": "pending", "operation_id": requested,
+                        "remaining_operations": len(pending), "next_action": "history_retry",
+                        "snapshot_preserved": True}
+            self._history_compact_snapshot(path, snapshot)
+            return {**{key: snapshot.get(key) for key in ("status", "commit", "operation_id")},
+                    "catalog": self._history_catalog_receipt(snapshot)}
+        if pending:
+            receipt["remaining_operations"] = len(pending)
+            receipt["next_action"] = "history_retry"
         return receipt
 
-    def history_retry(self):
+    def _history_compact_snapshot(self, path, snapshot):
+        """Drop retry bodies only after checking the complete captured Git tree."""
+        if "files" not in snapshot:
+            return
+        commit = self._history_revision(snapshot["commit"])
+        paths = self._history_git("ls-tree", "-r", "--name-only", "-z", commit,
+                                  "--", "knowledge/", "INSTRUCTIONS.md", "PROJECT.md").stdout.split("\0")
+        if set(filter(None, paths)) != set(snapshot["files"]):
+            raise PCWError("Git snapshot paths differ; retry body preserved")
+        for relative, text in snapshot["files"].items():
+            self._history_paths([relative])
+            if self._history_git("show", commit + ":" + relative).stdout != text:
+                raise PCWError("Git snapshot content differs; retry body preserved")
+        compact = {key: snapshot.get(key) for key in ("status", "commit", "operation_id", "revision")}
+        self.control.write(path, encode(compact))
+
+    def _history_catalog_receipt(self, snapshot):
+        if snapshot.get("status") != "committed":
+            return {"status": "unchanged"}
+        try:
+            self._history_index_commit(snapshot["commit"])
+            return {"status": "indexed"}
+        except Exception as exc:
+            return {"status": "pending", "error": str(exc), "next_action": "history_index"}
+
+    def history_retry(self, limit: int = 100):
         self._require_format()
+        from .history_queries import page
+        page(0, limit)
         with self.control.guard():
-            return self._history_flush()
+            return self._history_flush(limit=limit)
 
     def _history_paths(self, paths):
         if (
@@ -260,41 +319,8 @@ class HistoryMixin:
             "rev-parse", "--verify", "--end-of-options", commit + "^{commit}"
         ).stdout.strip()
 
-    def history_list(self, offset: int = 0, limit: int = 20):
-        self._require_format()
-        if (
-            type(offset) is not int
-            or offset < 0
-            or type(limit) is not int
-            or not 1 <= limit <= 100
-        ):
-            raise PCWError("Use a nonnegative offset and limit between 1 and 100")
-        with self.control.guard():
-            if not (self.engine.root / ".git").exists():
-                return {"versions": [], "status": "no_history"}
-            self.engine._own_git()
-            if self._history_git(
-                "rev-parse", "--verify", "HEAD", check=False
-            ).returncode:
-                return {"versions": [], "status": "no_commits"}
-            lines = self._history_git(
-                "log",
-                f"--skip={offset}",
-                f"--max-count={limit}",
-                "--format=%H%x09%aI%x09%s",
-                "--",
-                "knowledge/",
-                "INSTRUCTIONS.md",
-                "PROJECT.md",
-            ).stdout.splitlines()
-            return {
-                "versions": [
-                    dict(zip(("commit", "time", "subject"), line.split("\t", 2)))
-                    for line in lines
-                ]
-            }
-
-    def history_diff(self, before: str, after: str, paths: list[str] | None = None):
+    def history_diff(self, before: str, after: str, paths: list[str] | None = None,
+                     offset: int = 0, max_chars: int = 16000):
         self._require_format()
         with self.control.guard():
             old, new = self._history_revision(before), self._history_revision(after)
@@ -306,30 +332,41 @@ class HistoryMixin:
             return {
                 "before": old,
                 "after": new,
-                "diff": self._history_git(
-                    "diff", "--no-ext-diff", "--no-textconv", old, new, "--", *selected
-                ).stdout,
+                **self._history_diff_excerpt(old, new, selected, offset, max_chars),
             }
+
+    def _history_diff_excerpt(self, old, new, selected, offset, max_chars):
+        result = excerpt(self._history_git("diff", "--no-ext-diff", "--no-textconv",
+                                          old, new, "--", *selected).stdout, offset, max_chars)
+        result["diff"] = result.pop("text")
+        return result
 
     def history_read(
         self,
         cycle_id: str | None = None,
         commit: str = "HEAD",
         paths: list[str] | None = None,
+        material_id: str | None = None,
+        offset: int = 0,
+        max_chars: int = 16000,
     ):
         self._require_format()
         with self.control.guard():
             if cycle_id is not None:
                 with self._cycle(cycle_id):
                     pass
-            selected = self._history_paths(paths)
             revision = self._history_revision(commit)
+            if material_id is not None and paths is not None:
+                raise PCWError("Select either material_id or paths")
+            selected = self._history_record_paths(revision, material_id) if material_id else self._history_paths(paths)
+            if len(selected) > 10:
+                raise PCWError("Read at most ten exact historical paths per call")
             return {
                 "commit": revision,
                 "materials": [
                     {
                         "path": path,
-                        "text": self._history_git("show", revision + ":" + path).stdout,
+                        **excerpt(self._history_git("show", revision + ":" + path).stdout, offset, max_chars),
                     }
                     for path in selected
                 ],

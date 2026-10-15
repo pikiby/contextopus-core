@@ -39,6 +39,8 @@ class Application:
         from .modules.workspace.operations import register_operations
 
         register_operations(self.registry, provider_factory=self.resources.acquire)
+        from .modules.workspace.discovery import register as register_discovery
+        register_discovery(self)
         self.registry.register_module(
             "workspace", available=True, state="available", open_tui=None
         )
@@ -88,6 +90,7 @@ class Application:
                 "module": (str | None, None),
                 "collection": (str | None, None),
                 "object_type": (str | None, None),
+                "status": (str | None, None),
                 "include_archived": (bool | None, None),
                 "distance": (float | None, None),
                 "limit": (int | None, None),

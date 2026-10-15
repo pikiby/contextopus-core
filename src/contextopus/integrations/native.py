@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from importlib.metadata import version
 import os
 from importlib.resources import files
 from pathlib import Path
@@ -103,7 +104,7 @@ def plan(
         # changed here; removing the old plugin through CLI would delete cache.
         installed = (
             project
-            / ".codex/plugins/cache/contextopus/contextopus/1.0.0/.codex-plugin/plugin.json"
+            / f".codex/plugins/cache/contextopus/contextopus/{version('contextopus-core')}/.codex-plugin/plugin.json"
         )
         if (
             not installed.is_file()
@@ -132,6 +133,7 @@ def plan(
     managed = json.loads(managed_prior) if managed_prior else {"skills": {}}
     hashes = dict(managed.get("skills", {}))
     source = files("contextopus").joinpath("resources", "skills")
+    known = json.loads(files("contextopus").joinpath("resources", "legacy_skill_hashes.json").read_text())
     for skill in (
         sorted(source.iterdir(), key=lambda item: item.name) if install_skills else []
     ):
@@ -150,11 +152,16 @@ def plan(
             prior is not None
             and prior != skill_content
             and managed.get("skills", {}).get(relative) != _digest(prior)
+            and _digest(prior.replace(b"\r\n", b"\n")) not in known.get(skill.name, [])
         ):
             raise IntegrationConflict(f"Skill name collision: {skill.name} at {target}")
         writes.append((target, prior, skill_content))
+    retired, preserved = [], []
+    canonical_names = {item.name for item in source.iterdir() if item.is_dir()}
+    legacy_roots = {skills_root} if install_skills or native_plugin else set()
     if legacy_skills is not None:
-        legacy_root = Path(legacy_skills).expanduser().resolve()
+        legacy_roots.add(Path(legacy_skills).expanduser().resolve())
+    for legacy_root in sorted(legacy_roots):
         if {".codex", "plugins", "cache"} <= set(legacy_root.parts):
             raise IntegrationConflict(
                 "Active plugin caches must be preserved; update through the native plugin manager"
@@ -165,6 +172,8 @@ def plan(
             .read_text()
         )
         for name, accepted in known.items():
+            if install_skills and legacy_root == skills_root and name in canonical_names:
+                continue
             target = legacy_root / name / "SKILL.md"
             if not target.exists():
                 continue
@@ -174,21 +183,14 @@ def plan(
                 if target.is_relative_to(project)
                 else str(target)
             )
-            content = (
-                files("contextopus")
-                .joinpath("resources", "legacy_aliases", name, "SKILL.md")
-                .read_bytes()
-            )
             if (
-                prior != content
-                and _digest(prior.replace(b"\r\n", b"\n")) not in accepted
+                _digest(prior.replace(b"\r\n", b"\n")) not in accepted
                 and managed.get("skills", {}).get(relative) != _digest(prior)
             ):
-                raise IntegrationConflict(
-                    f"User-modified or unrecognized legacy skill: {name}; review it before replacement"
-                )
-            hashes[relative] = _digest(content)
-            writes.append((target, prior, content))
+                preserved.append({"path": str(target), "reason": "user_modified_or_unrecognized"})
+                continue
+            retired.append({"path": str(target), "expected": _digest(prior)})
+            hashes.pop(relative, None)
     managed_content = (
         json.dumps({"skills": hashes}, sort_keys=True, indent=2) + "\n"
     ).encode()
@@ -197,6 +199,8 @@ def plan(
         "client": client,
         "scope": scope,
         "project": str(project),
+        "removals": retired,
+        "preserved": preserved,
         "writes": [
             {
                 "path": str(path),
@@ -211,7 +215,7 @@ def plan(
 
 def integrate(preview: dict) -> dict:
     """Apply an explicitly reviewed plan, rejecting stale inputs before any write."""
-    for item in preview["writes"]:
+    for item in preview["writes"] + preview.get("removals", []):
         path = Path(item["path"])
         current = path.read_bytes() if path.exists() else None
         if _digest(current) != item["expected"]:
@@ -231,4 +235,13 @@ def integrate(preview: dict) -> dict:
             if os.path.exists(temp):
                 os.unlink(temp)
         written.append(str(path))
-    return {"client": preview["client"], "written": written}
+    removed = []
+    for item in preview.get("removals", []):
+        path = Path(item["path"])
+        path.unlink()
+        # Keep supporting/user files; remove the folder only when truly empty.
+        if not any(path.parent.iterdir()):
+            path.parent.rmdir()
+        removed.append(str(path))
+    return {"client": preview["client"], "written": written, "removed": removed,
+            "preserved": preview.get("preserved", [])}

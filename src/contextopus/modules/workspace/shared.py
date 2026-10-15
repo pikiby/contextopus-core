@@ -145,7 +145,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
             self._assert_safe(marker)
             compatible = (
                 marker.is_file()
-                and json.loads(read_utf8(marker)).get("format_version") == 2
+                and json.loads(read_utf8(marker)).get("format_version") in (2, 3)
             )
             if root != self.root and not compatible:
                 self.incompatible.append(root.name)
@@ -220,6 +220,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
                     "chunking_id",
                     "part_index",
                     "part_count",
+                    "metadata",
                 ],
                 self._namespace(),
             ):
@@ -228,7 +229,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
                 material = self.catalog.get(ident)
                 if (
                     material
-                    and any(r["workspace"] != self.owners[ident] for r in rows)
+                    and any(r["workspace"] != self.owners[ident] or json.loads(r.get("metadata") or "{}") != material.metadata for r in rows)
                     and all(
                         r["revision"] == material.revision
                         and r["chunking_id"] == self._chunking_id()
@@ -243,6 +244,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
                         values={
                             "workspace": self.owners[ident],
                             "path": material.path,
+                            "metadata": json.dumps(material.metadata),
                             **(
                                 {
                                     "module": "workspace",
@@ -275,7 +277,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
             material = Material(
                 ident,
                 self.new_path(content, ident),
-                {"id": ident, "links": self._check_links(links or [], ident)},
+                {"id": ident, "type": "knowledge", "links": self._check_links(links or [], ident)},
                 content,
             )
             try:
@@ -353,6 +355,8 @@ class WorkspaceSourceAdapter(PCWRuntime):
                 ident,
             ),
             "description": material.metadata.get("description", ""),
+            "type": material.metadata.get("type", "knowledge"),
+            "status": material.metadata.get("status"),
             "workspace": self.owners.get(ident, self.workspace),
             "path": material.path,
         }
@@ -400,6 +404,8 @@ class WorkspaceSourceAdapter(PCWRuntime):
 
     def _result(self, material, content=False):
         result = super()._result(material, content)
+        from .records import record_revision
+        result["revision"] = record_revision(material)
         if self.owners.get(material.id, self.workspace) != self.workspace:
             result["index_status"] = (
                 "indexed"
@@ -432,6 +438,8 @@ class WorkspaceSourceAdapter(PCWRuntime):
         multiplier=None,
         categories=None,
         all_categories=False,
+        types=None,
+        statuses=None,
     ):
         with self._guard():
             if type(all_categories) is not bool or (
@@ -479,11 +487,16 @@ class WorkspaceSourceAdapter(PCWRuntime):
                 }
             )
             config = SearchConfig(**options)
+            for field, values in (("types", types), ("statuses", statuses)):
+                if values is not None and (not isinstance(values, list) or not values or any(not isinstance(v, str) or not v.strip() for v in values)):
+                    raise PCWError(f"{field} must be a nonempty list of names")
             indexed = self._indexed_ids()
             eligible = {
                 i
                 for i in indexed
                 if self.owners[i] in selected
+                and (types is None or self.catalog[i].metadata.get("type", "knowledge") in types)
+                and (statuses is None or self.catalog[i].metadata.get("status") in statuses)
                 and not self._material_invalidations(self.catalog[i])
                 and matches_location(self.catalog[i].path, settings)
                 and (
@@ -518,13 +531,13 @@ class WorkspaceSourceAdapter(PCWRuntime):
                     self.table,
                     vector,
                     predicate=predicate,
-                    columns=["material_id"],
+                    columns=["material_id", "text"],
                     limit=config.N,
                     metric=config.metric,
                 )
                 results = select_candidates(
                     [
-                        {**self._label(r["material_id"]), "distance": r["_distance"]}
+                        {**self._label(r["material_id"]), "distance": r["_distance"], "excerpt": r["text"]}
                         for r in rows
                     ],
                     config,

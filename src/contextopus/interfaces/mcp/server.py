@@ -3,6 +3,8 @@
 import atexit
 import os
 import threading
+from functools import partial
+import anyio
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -86,24 +88,24 @@ def create_server(root, host="127.0.0.1", port=8765):
         return getattr(app, kind)(operation, arguments)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
-    def contextopus_query(
+    async def contextopus_query(
         operation: str,
         arguments: dict | None = None,
         work_root: str | None = None,
         context: str | None = None,
         workspace: str | None = None,
     ) -> dict:
-        return route("query", operation, arguments, work_root, context, workspace)
+        return await anyio.to_thread.run_sync(partial(route, "query", operation, arguments, work_root, context, workspace))
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=False))
-    def contextopus_execute(
+    async def contextopus_execute(
         operation: str,
         arguments: dict | None = None,
         work_root: str | None = None,
         context: str | None = None,
         workspace: str | None = None,
     ) -> dict:
-        return route("execute", operation, arguments, work_root, context, workspace)
+        return await anyio.to_thread.run_sync(partial(route, "execute", operation, arguments, work_root, context, workspace))
 
     mcp.tool(name="pcw_query", annotations=ToolAnnotations(readOnlyHint=True))(
         contextopus_query
@@ -115,4 +117,14 @@ def create_server(root, host="127.0.0.1", port=8765):
 
 
 def run(root, transport="streamable-http", host="127.0.0.1", port=8765):
-    create_server(root, host=host, port=port).run(transport=transport)
+    import json
+    from contextopus.core import locking
+    from contextopus.core.storage import StorageLayout
+    root = StorageLayout.resolve(root).root
+    runtime = root / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    with (runtime / "mcp-owner.lock").open("a") as owner_lock:
+        # Every launch route, including native OS services, shares one ownership guard.
+        locking.flock(owner_lock, locking.LOCK_EX | locking.LOCK_NB)
+        (runtime / "service.json").write_text(json.dumps({"pid": os.getpid(), "root": str(root)}))
+        create_server(root, host=host, port=port).run(transport=transport)

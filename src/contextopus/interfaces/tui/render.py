@@ -138,12 +138,32 @@ def main(snapshot, width=79, selected=0, histories=None, now=0, message=None):
 
 def action_names(status):
     actions = []
+    state = status.get("service", {}).get("state")
+    if state == "stopped":
+        actions.append("Start MCP")
+    elif state == "running":
+        actions.extend(["Stop MCP", "Restart MCP", "Client connections"])
     if any(
         m["name"] == "session_search" and m.get("state") == "available"
         for m in status.get("modules", [])
     ):
         actions.append("Open Session search")
     return actions + ["Settings", "Error details", "Quit"]
+
+
+def connections(width=79, selected=0, message=None):
+    import textwrap
+    actions = ["Reload Codex (all loaded threads)", "Claude Code recovery",
+               "OpenCode recovery", "Crush recovery", "Back"]
+    lines = [" CONTEXTOPUS · CLIENT CONNECTIONS", "",
+             " Server readiness and client readiness are separate.",
+             " Codex reload refreshes all MCP servers in loaded threads.", ""]
+    for index, action in enumerate(actions):
+        lines.append(("▶ " if index == selected else "  ") + action)
+    if message:
+        lines.extend(["", *textwrap.wrap(message, max(10, width - 2))])
+    lines.extend(["", " ↑↓ Select   Enter Apply   Q Back"])
+    return "\n".join(lines), actions
 
 
 def settings(snapshot, width=79, selected=0, draft=None, preview=None, message=None):

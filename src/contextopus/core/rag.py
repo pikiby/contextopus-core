@@ -292,6 +292,7 @@ class RagIndex:
         module=None,
         collection=None,
         object_type=None,
+        status=None,
         include_archived=False,
         distance=None,
         limit=20,
@@ -338,7 +339,9 @@ class RagIndex:
             if not matches_location(row["path"], filters):
                 continue
             meta = json.loads(row["metadata"] or "{}")
-            if object_type is not None and meta.get("object_type") != object_type:
+            if object_type is not None and meta.get("type", meta.get("object_type")) != object_type:
+                continue
+            if status is not None and meta.get("status") != status:
                 continue
             if not include_archived and meta.get("archived", False):
                 continue
@@ -380,6 +383,7 @@ class RagIndex:
                     "key": json.loads(key.value()),
                     "revision": row["revision"],
                     "location": row["path"],
+                    "excerpt": row["text"],
                     "metadata": json.loads(row["metadata"] or "{}"),
                     "distance": row["_distance"],
                 }

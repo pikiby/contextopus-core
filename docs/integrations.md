@@ -1,6 +1,6 @@
 # Native client integrations
 
-Contextopus runs one loopback MCP owner at `http://127.0.0.1:8765/mcp`. Start it with `contextopus service start`. Native skills contain routing only; full procedures come from the installed service's `procedure` read operation.
+Contextopus runs one loopback MCP owner at `http://127.0.0.1:8765/mcp`. Install its native user service with `contextopus service install`; use `service start|stop|restart|status` afterwards. Native skills contain routing only; full procedures come from the installed service's `procedure` read operation.
 
 Preview `contextopus integrate <client> --project <directory>`, then add `--apply` to merge. Supported project configurations:
 
@@ -24,29 +24,35 @@ Configuration schema support is implemented; live compatibility remains subject 
 
 ## User installation and transition
 
-`--user` selects native user configuration instead of a project file. `--config-only` reuses an already discoverable shared skill copy. `--legacy-skills <directory>` upgrades only recognized unchanged old manually installed skill entrypoints into compatibility aliases; edited/unknown files stop for review, and plugin caches are refused. The retained source/cache 0.14.0 entrypoints are represented by packaged content hashes.
+`--user` selects native user configuration instead of a project file. `--config-only` reuses an already discoverable shared skill copy. `--legacy-skills <directory>` removes only recognized unchanged old manually installed entrypoints; edited/unknown files are preserved and reported, and plugin caches are refused. The retained source/cache 0.14.0 entrypoints are represented by packaged content hashes.
 
-For literal `$w`, `$ws`, `$wi`, `$wc`, `$wu`, `$wa`, `$wr`, `$wx`, use `contextopus integrate codex --user --apply`. This direct native integration installs user skills and one HTTP MCP entry. Keep the Contextopus plugin disabled when using this method to avoid duplicate skills and tools. The rollout selected this direct method.
+For literal `$w`, `$w-search`, `$w-create`, `$w-settings`, `$w-find`, `$w-analyze`, use `contextopus integrate codex --user --apply`. This direct native integration installs user skills and one HTTP MCP entry. Keep the Contextopus plugin disabled when using this method to avoid duplicate skills and tools. The rollout selected this direct method.
 
 Optional Codex plugin users first run `codex plugin marketplace add <checkout>` and `codex plugin add contextopus@contextopus`, then preview/apply `contextopus integrate codex --user --native-plugin`. This cutover requires the installed new cache, disables the exact old plugin flag, removes its obsolete marketplace declaration and an exactly matching duplicate Contextopus manual HTTP entry, and preserves old cache files. Other servers are retained; a conflicting Contextopus definition fails. No plugin uninstall command is used.
 
 Use `contextopus root --set <chosen persistent root>` only for an explicitly selected root; it writes the persistent default binding, creates no data root and never selects/switches a Workspace. `--root` and `CONTEXTOPUS_ROOT` override this default.
 
-The complete repeatable installation/data/skills sequence is fetched with `procedure(name="upgrade")`; the `wu` skill uses that canonical resource.
+The complete repeatable installation/data/skills sequence is fetched with `procedure(name="upgrade")`; `w` routes upgrade requests to that canonical resource.
 
-## Verified native discovery
+## Recovery of an existing client session
 
-The 1.0.0 rollout checked installed Codex 0.162.1, Claude Code 2.1.126,
-OpenCode 1.18.32 and Crush 0.87.0 against the shared HTTP owner. Fresh Codex
-app-server calls listed one Contextopus MCP server, read `core.status` and
-fetched the upgrade procedure. Codex namespaces plugin skills as
-`contextopus:w`, `contextopus:ws`, `contextopus:wi`, `contextopus:wc`,
-`contextopus:wu`, `contextopus:wa`, `contextopus:wr`, `contextopus:wx`.
-The disabled old plugin's skills were absent from fresh discovery. Plugin delivery therefore exposes namespaced skills, not literal bare `$w`. An isolated direct-integration check independently confirmed all eight bare names, enabled with no plugin ID. The live installation then selected that direct method, retaining disabled plugin caches.
+| Client | Mechanism | Checked boundary |
+| --- | --- | --- |
+| Codex 0.162.1 | `contextopus reconnect codex [--thread ID]`, existing app-server proxy and `config/mcpServer/reload` | Queues reload for **all loaded threads and MCP servers**. With a thread ID verifies an actual `core.status` call in that thread. No replacement conversation. |
+| OpenCode 1.18.32 | `contextopus reconnect opencode --client-url URL --directory PROJECT` | Inspects the running client's `/doc`, then disconnects/connects Contextopus in that project. HTTP status is not a model tool-call check. Basic auth uses existing `OPENCODE_SERVER_USERNAME/PASSWORD` environment variables. |
+| Claude Code 2.1.126 | Existing session's `/mcp` menu, Contextopus, Reconnect | Native user action; this release does not remotely control an existing Claude conversation. |
+| Crush 0.87.0 | Native renewal on use of a previously established connection | Initial connection failure has no verified external retry adapter here. Resume the saved session after restarting its workspace if needed. |
 
-Claude's native MCP inspection and OpenCode's native MCP listing reported
-connected. OpenCode's skill listing and Crush's native workspace API both
-found all eight shared skills under `~/.claude/skills`; their integrations
-therefore use `--config-only` without another skill copy. Crush's native MCP
-state reported connected with four tools. These are discovery/connection checks
-without model turns; they do not establish every host's complete task workflow.
+Codex's action affects more than Contextopus; TUI labels its loaded-thread scope. Its existing daemon's proxy carries WebSocket frames, handled with wsproto; JSON-lines stdio is a different transport. A queued action is reported separately from successful discovery and a real call. If the native aggregate status call times out, the result remains unverified; a read call in the existing session can establish recovery. A new native process cannot prove an old session recovered. OpenCode requires the URL of the **existing** client server; the adapter never launches a substitute.
+
+`scripts/verify_client_recovery.py codex|opencode` runs isolated native clients against temporary loopback MCP instances, with no model calls. Codex: two failed initializations → reload → successful tool calls in the same two threads; persisted nonempty history survives, as does subsequent server restart. OpenCode: failed initialization and restart recover through its native API; nonempty messages survive. Its test verifies connection, not tool execution by a model.
+
+Primary contracts: [Codex app-server](https://learn.chatgpt.com/docs/app-server#api-overview), [OpenCode server and live OpenAPI](https://opencode.ai/docs/server/), [Claude MCP](https://code.claude.com/docs/en/mcp), [Crush 0.87.0 renewal implementation](https://github.com/charmbracelet/crush/blob/v0.87.0/internal/agent/tools/mcp/init.go). Client APIs are versioned external dependencies, not guarantees about future releases.
+
+## Native service
+
+Linux uses a user systemd unit, macOS a LaunchAgent, Windows a per-user Scheduled Task. Startup is at user login; explicit stop remains stopped until started or the next login. Restart-on-failure uses the native manager. Definitions run the installed interpreter in the foreground and share an ownership lock. No embedded per-client database owner is started.
+
+`contextopus tui` remains usable when MCP is stopped; Start/Stop/Restart use local service control. Access-denied, unreachable, stopped and connected-server/client-error states are distinct. Native definition tests run cross-platform; the release notes list actual runtime checks.
+
+References: [systemd service restart](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html), [Apple LaunchAgents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html), [Windows task settings](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset).

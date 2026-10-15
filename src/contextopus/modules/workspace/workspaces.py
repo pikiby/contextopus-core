@@ -16,7 +16,7 @@ from .runtime import PCWError, _id, _revision, _parse
 from .policies import policies
 
 
-FORMAT_VERSION = 2  # Workspace format, deliberately independent of plugin releases.
+FORMAT_VERSION = 3  # Workspace format, deliberately independent of plugin releases.
 EMPTY_PROJECT = "# Project\n\nPurpose, goals, requirements and boundaries have not been specified.\n"
 
 
@@ -116,7 +116,7 @@ class WorkspaceMixin:
             raise PCWError(
                 f"Workspace format {version}; required {FORMAT_VERSION}. Use pcw-upgrade; opening does not migrate."
             )
-        required = ["INSTRUCTIONS.md", "PROJECT.md", "current"]
+        required = ["INSTRUCTIONS.md"]
         if storage:
             required += ["knowledge"]
         for relative in required:
@@ -193,9 +193,11 @@ class WorkspaceMixin:
             self.engine._assert_safe(self.engine.knowledge)
             self.engine.knowledge.mkdir(parents=True, exist_ok=True)
             self.engine.state.mkdir(parents=True, exist_ok=True)
+            from .records import project_record
+            project_id, project_text = project_record(self.engine.workspace, project_content)
             for relative, content in {
                 "INSTRUCTIONS.md": instructions_content,
-                "PROJECT.md": project_content,
+                "knowledge/Project.md": project_text,
             }.items():
                 path = self.engine.root / relative
                 self.engine._assert_safe(path)
@@ -205,10 +207,11 @@ class WorkspaceMixin:
                     )
                 if not path.exists():
                     self.engine._write(path, content)
-            self.engine._assert_safe(self.engine.root / "current")
-            (self.engine.root / "current").mkdir(exist_ok=True)
             with self.engine._guard():
                 self._instructions(initialize=True)
+                index = self.engine.reconcile()
+                if index["pending_count"]:
+                    return {"status": "index_pending", "index": index, "request_id": request_id}
             self.control.write(
                 self._format_path(), encode({"format_version": FORMAT_VERSION})
             )
@@ -386,21 +389,23 @@ class WorkspaceMixin:
         return work, blockers
 
     def _project_description_status(self):
-        path = self.engine.root / "PROJECT.md"
-        self.engine._assert_safe(path)
-        if not path.exists():
-            status = "missing"
-        else:
-            text = path.read_text(encoding="utf-8").strip()
-            status = (
-                "empty"
-                if not text
-                else "placeholder"
-                if text == EMPTY_PROJECT.strip()
-                else "present"
-            )
-        # Presence is a structural observation, not a review of accuracy or completeness.
-        return {"path": "PROJECT.md", "status": status, "content_reviewed": False}
+        candidates = []
+        for path in self.engine.knowledge.rglob("*.md"):
+            self.engine._assert_safe(path)
+            metadata, body = _parse(read_utf8(path))
+            if metadata.get("type") == "project":
+                candidates.append((path, body))
+        legacy = self.engine.root / "PROJECT.md"
+        self.engine._assert_safe(legacy)
+        if not candidates and legacy.is_file():
+            candidates = [(legacy, read_utf8(legacy))]
+        if not candidates:
+            return {"status": "missing", "content_reviewed": False}
+        if len(candidates) > 1:
+            return {"status": "ambiguous", "content_reviewed": False}
+        path, body = candidates[0]
+        status = "empty" if not body.strip() else "placeholder" if body.strip() == EMPTY_PROJECT.strip() else "present"
+        return {"path": path.relative_to(self.engine.root).as_posix(), "status": status, "content_reviewed": False}
 
     def _migration_copy(self, source, destination, manifest):
         """Resume one immutable snapshot; never overwrite a completed snapshot file."""

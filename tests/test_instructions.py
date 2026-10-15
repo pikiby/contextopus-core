@@ -19,13 +19,14 @@ def apply(r, c, p):
 def test_startup_delivers_defaults_without_current_or_embeddings(workspace):
     r, f = workspace
     opened = r.startup("first")
-    text = files("pcw_runtime").joinpath("default_instructions.md").read_text(encoding="utf-8")
+    text = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text(encoding="utf-8")
     assert opened["instructions"]["content"] == text
     assert opened["instructions"] == r.instructions_read(opened["cycle_id"])
     assert "current" not in opened and not hasattr(r, "current_set")
     assert not (r._tmp(opened["cycle_id"]) / "current.md").exists()
-    assert opened["materials"] == 0 and f.instances == []
-    assert r.search(opened["cycle_id"], "principles")["results"] == []
+    assert opened["materials"] == 1 and len(f.instances) == 1
+    assert f.calls == []  # Startup does not load or embed anything after creation.
+    assert r.search(opened["cycle_id"], "principles", types=["knowledge"])["results"] == []
 
 
 def test_custom_instructions_survive_closure_restart_and_reopening(workspace):
@@ -64,7 +65,7 @@ def test_prepare_waits_for_approval_and_keeps_arbitrary_markdown_exact(workspace
     assert (r.engine.root / "INSTRUCTIONS.md").read_bytes() == text.encode()
     assert r.instructions_read(c)["content"] == text
     assert apply(r, c, p)["replayed"]
-    assert f.calls == [] and r.status(c)["materials"] == 0
+    assert f.calls == [] and r.status(c)["materials"] == 1
     assert r.finish(c)["tmp_cleared"]
     assert not r._tmp(c).exists()
     assert "arbitrary user text" not in r.record_path.read_text()
@@ -150,7 +151,7 @@ def test_changed_instructions_block_pending_knowledge_proposal(workspace):
     apply(r, c, edit(r, c, "New policy"))
     with pytest.raises(PCWError, match="Instructions changed"):
         r.proposal_apply(c, p["proposal_id"], p["revision"], "yes")
-    assert r.status(c)["materials"] == 0
+    assert r.status(c)["materials"] == 1
 
 
 def test_partial_write_can_retry_but_cannot_overwrite_a_later_edit(workspace):
