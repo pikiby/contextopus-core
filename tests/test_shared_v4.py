@@ -59,7 +59,7 @@ def test_rename_retains_yaml_id_links_and_embeddings(tmp_path):
     runtime = context(tmp_path, "one", factory)
     item = save(runtime, "# Порядок подключения\nТочные условия.")
     assert item["path"] == "knowledge/Порядок-подключения.md"
-    assert _parse((runtime.engine.root / item["path"]).read_text())[0]["id"] == item["id"]
+    assert _parse((runtime.engine.root / item["path"]).read_text(encoding="utf-8"))[0]["id"] == item["id"]
     calls = len(factory.calls)
     cycle = runtime.startup("rename")["cycle_id"]
     p = runtime.proposal_prepare(cycle, [{"material_id": item["id"], "expected_revision": item["revision"], "path": "guides/Подключение.md"}])

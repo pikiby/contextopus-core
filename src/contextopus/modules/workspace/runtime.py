@@ -6,6 +6,8 @@ push, background service, or hidden embedding fallback in this module.
 
 from __future__ import annotations
 
+from .text_io import read_utf8
+
 import contextlib
 import copy
 import dataclasses
@@ -693,7 +695,7 @@ class PCWRuntime:
         # from 0.7.x, and never resume its task/environment/assignment controller.
         path = self.control.root / "task-ledger.json"
         self.control.safe(path)
-        data = json.loads(path.read_text()) if path.exists() else {}
+        data = json.loads(read_utf8(path)) if path.exists() else {}
         return [
             {
                 "material_id": material.id,
@@ -1321,7 +1323,7 @@ class PCWRuntime:
             self._chunking_id(),
         )
         self._check_saved_revision(material, revision)
-        if json.loads((self.state / "active.json").read_text()) != active:
+        if json.loads(read_utf8(self.state / "active.json")) != active:
             raise PCWError(
                 "Index settings changed during embedding; retry using current settings"
             )
@@ -1474,9 +1476,7 @@ class PCWRuntime:
                 chunking=chunking,
                 documents=source.documents(),
                 validate_snapshot=lambda: source.validate(signature),
-                read_active=lambda: json.loads(
-                    (self.state / "active.json").read_text()
-                ),
+                read_active=lambda: json.loads(read_utf8(self.state / "active.json")),
                 write_active=self._write_active,
                 factory=self._factory,
                 schema=self._schema(config["profile"]["dimensions"]),

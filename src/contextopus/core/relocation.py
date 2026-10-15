@@ -7,13 +7,14 @@ resolved using the checked relocation receipt, rather than text substitution.
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
 import tempfile
 from contextlib import ExitStack, closing
-from .storage import StorageLayout
+from pathlib import Path, PurePosixPath
+
 from . import locking
+from .storage import StorageLayout
 
 _INTERNAL = {
     ".contextopus.lock",
@@ -22,11 +23,74 @@ _INTERNAL = {
     ".contextopus-receipt.json",
     ".contextopus-relocation-owner.json",
     ".contextopus-retained",
+    ".contextopus-relocation-plans",
 }
+_WINDOWS = os.name == "nt"
+
+
+def _runtime_lock(relative):
+    """Known advisory lock bytes are runtime state, not authoring data."""
+    parts = PurePosixPath(relative).parts
+    return (
+        parts in {(".pcw", ".rag", "lock"), ("core", "rag", "lock")}
+        or len(parts) == 4
+        and (
+            parts[:2] == (".pcw", ".control")
+            and parts[-1] == "lock"
+            or parts[0] == ".pcw"
+            and parts[2:] == (".pcw-runtime", "lock")
+        )
+        or len(parts) == 5
+        and parts[:3] == ("modules", "workspace", "control")
+        and parts[-1] == "lock"
+    )
 
 
 def _transient(relative):
-    return str(relative) in {"runtime", "runtime/service.json", "runtime/service.log"}
+    return str(relative) in {
+        "runtime",
+        "runtime/service.json",
+        "runtime/service.log",
+    } or (_WINDOWS and _runtime_lock(relative))
+
+
+def _legacy_lock_stream(path):
+    """Keep exclusion during a Windows directory rename using delete sharing."""
+    if not _WINDOWS:
+        return path.open("a+b")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    # READ|WRITE access; share READ|WRITE|DELETE; OPEN_EXISTING.
+    handle = create(str(path), 0xC0000000, 0x7, None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
+    except BaseException:
+        close(handle)
+        raise
+    try:
+        return os.fdopen(fd, "r+b")
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def _digest(path):
@@ -292,7 +356,9 @@ def _verify_source(source, proposal):
             if path.is_symlink():
                 raise ValueError("Retained source contains a symlink")
             if path.is_file():
-                actual.add(".pcw/" + path.relative_to(retained).as_posix())
+                relative = ".pcw/" + path.relative_to(retained).as_posix()
+                if not _transient(relative):
+                    actual.add(relative)
     actual = {path for path in actual if not _observer_path(path)}
     expected = {
         entry["path"]
@@ -346,9 +412,9 @@ def apply(proposal):
     revision = proposal["revision"]
     receipt = destination / ".contextopus-receipt.json"
     if receipt.exists():
-        if json.loads(receipt.read_text()).get("revision") != revision:
+        if json.loads(receipt.read_text(encoding="utf-8")).get("revision") != revision:
             raise ValueError("Destination belongs to another relocation")
-        _verify_target(destination, json.loads(receipt.read_text()))
+        _verify_target(destination, json.loads(receipt.read_text(encoding="utf-8")))
         _write(
             source / ".contextopus-redirect.json",
             {"destination": str(destination), "revision": revision},
@@ -360,7 +426,10 @@ def apply(proposal):
         }
     owner = destination / ".contextopus-relocation-owner.json"
     freeze = source / ".contextopus-freeze.json"
-    if freeze.exists() and json.loads(freeze.read_text()).get("revision") != revision:
+    if (
+        freeze.exists()
+        and json.loads(freeze.read_text(encoding="utf-8")).get("revision") != revision
+    ):
         raise ValueError("Another relocation is pending")
     with ExitStack() as locks:
         locks.enter_context(StorageLayout(source).guard(frozen_revision=revision))
@@ -377,7 +446,7 @@ def apply(proposal):
             ]
             for path in candidates:
                 if path.is_file():
-                    stream = locks.enter_context(path.open("a+b"))
+                    stream = locks.enter_context(_legacy_lock_stream(path))
                     locking.flock(stream.fileno(), locking.LOCK_EX | locking.LOCK_NB)
             if not freeze.exists():
                 _write(freeze, {"revision": revision, "destination": str(destination)})
@@ -411,12 +480,15 @@ def apply(proposal):
         if destination.exists() and any(destination.iterdir()):
             if (
                 not owner.exists()
-                or json.loads(owner.read_text()).get("revision") != revision
+                or json.loads(owner.read_text(encoding="utf-8")).get("revision")
+                != revision
             ):
                 raise ValueError("Destination has no matching relocation ownership")
         destination.mkdir(parents=True, exist_ok=True)
         ownership = (
-            json.loads(owner.read_text()) if owner.exists() else {"revision": revision}
+            json.loads(owner.read_text(encoding="utf-8"))
+            if owner.exists()
+            else {"revision": revision}
         )
         accepted = ownership.setdefault("observer_hashes", {})
         for entry in proposal["files"]:
@@ -500,7 +572,10 @@ def rollback(proposal):
         raise ValueError("Published relocation cannot be rolled back")
     freeze = source / ".contextopus-freeze.json"
     if freeze.exists():
-        if json.loads(freeze.read_text()).get("revision") != proposal["revision"]:
+        if (
+            json.loads(freeze.read_text(encoding="utf-8")).get("revision")
+            != proposal["revision"]
+        ):
             raise ValueError("Freeze revision mismatch")
         _verify_source(source, proposal)
         retained = source / ".contextopus-retained" / proposal["revision"] / ".pcw"
@@ -509,7 +584,7 @@ def rollback(proposal):
             if tombstone.exists():
                 if (
                     not tombstone.is_file()
-                    or json.loads(tombstone.read_text()).get("revision")
+                    or json.loads(tombstone.read_text(encoding="utf-8")).get("revision")
                     != proposal["revision"]
                 ):
                     raise ValueError("Legacy tombstone changed")
@@ -531,7 +606,7 @@ def checked_alias(layout, path):
     receipt = layout.root / ".contextopus-receipt.json"
     if not receipt.is_file():
         raise ValueError("Path is outside this root")
-    record = json.loads(receipt.read_text())
+    record = json.loads(receipt.read_text(encoding="utf-8"))
     source = Path(record["source"])
     try:
         relative = path.relative_to(source).as_posix()
@@ -547,3 +622,109 @@ def checked_alias(layout, path):
     if mapped.is_symlink() or not mapped.resolve().is_relative_to(layout.root):
         raise ValueError("Relocated alias escapes root")
     return mapped
+
+
+class RelocationPlans:
+    """Durable owned review artifacts; large manifests never need an RPC echo."""
+
+    directory = ".contextopus-relocation-plans"
+
+    def __init__(self, root):
+        self.root = Path(root).resolve()
+
+    def _path(self, revision):
+        import re
+
+        if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{64}", revision):
+            raise ValueError("Invalid relocation plan revision")
+        return _safe(self.root, self.directory + "/" + revision + ".json")
+
+    def load(self, revision):
+        path = self._path(revision)
+        if path.is_file():
+            value = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            receipt = self.root / ".contextopus-receipt.json"
+            if not receipt.is_file():
+                raise ValueError(
+                    "Reviewed relocation plan is absent; obtain a plan first"
+                )
+            value = json.loads(receipt.read_text(encoding="utf-8"))
+        source, destination = _validate(value)
+        if value["revision"] != revision or self.root not in {source, destination}:
+            raise ValueError("Relocation plan belongs to another root or revision")
+        return value
+
+    def review(self, destination, include_manifest=False):
+        destination = Path(destination).resolve()
+        frozen = self.root / ".contextopus-freeze.json"
+        if frozen.is_file():
+            record = json.loads(frozen.read_text(encoding="utf-8"))
+            if Path(record["destination"]) != destination:
+                raise ValueError("Another relocation is pending")
+            value = self.load(record["revision"])
+        else:
+            value = plan(self.root, destination)
+            path = self._path(value["revision"])
+            if path.is_file():
+                value = self.load(value["revision"])
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                _write(path, value)
+        return value if include_manifest else self.summary(value)
+
+    def summary(self, value):
+        source = Path(value["source"])
+        artifact = RelocationPlans(source)._path(value["revision"])
+        contexts = set()
+        for entry in value["directories"]:
+            parts = PurePosixPath(entry["path"]).parts
+            if len(parts) == 2 and parts[0] == ".pcw" and not parts[1].startswith("."):
+                contexts.add(parts[1])
+            elif len(parts) == 4 and parts[:3] == (
+                "modules",
+                "workspace",
+                "workspace_contexts",
+            ):
+                contexts.add(parts[3])
+        contexts = sorted(contexts)
+        return {
+            "revision": value["revision"],
+            "source": value["source"],
+            "destination": value["destination"],
+            "files": len(value["files"]),
+            "directories": len(value["directories"]),
+            "source_bytes": sum(entry["size"] for entry in value["files"]),
+            "contexts": contexts[:100],
+            "context_count": len(contexts),
+            "contexts_truncated": len(contexts) > 100,
+            "manifest": {
+                "path": str(artifact),
+                "sha256": _digest(artifact),
+                "bytes": artifact.stat().st_size,
+            },
+            "effects": {
+                "source_preserved": True,
+                "legacy_writes_disabled": True,
+                "active_cycles_preserved": True,
+                "approval_revisions_preserved": True,
+                "initializes_missing_instructions": False,
+                "source_delete": False,
+            },
+            "next_action": "core.relocation_apply(plan_revision=revision)",
+        }
+
+    def resolve(self, value=None, revision=None):
+        if (value is None) == (revision is None):
+            raise ValueError("Supply exactly one plan or plan_revision")
+        if revision is not None:
+            return self.load(revision)
+        if "version" in value and isinstance(value.get("files"), list):
+            source, destination = _validate(value)
+            if self.root not in {source, destination}:
+                raise ValueError("Plan belongs to another root")
+            return value
+        stored = self.load(value.get("revision"))
+        if value != self.summary(stored):
+            raise ValueError("Reviewed relocation summary changed")
+        return stored

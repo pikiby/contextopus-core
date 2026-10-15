@@ -407,7 +407,7 @@ def test_filename_is_id_plain_markdown_is_readable_and_duplicate_basenames_fail(
     with pytest.raises(PCWError, match="filename ID"):
         named(runtime, "other/context.md", "must not create")
     plain = runtime.knowledge / "plain.md"
-    plain.write_text("# Plain Markdown\n")
+    plain.write_text("# Plain Markdown\n", encoding="utf-8", newline="")
     assert runtime.read("plain.md")["content"] == "# Plain Markdown\n"
     duplicate = runtime.knowledge / "duplicate" / "plain.md"
     duplicate.parent.mkdir()
@@ -420,8 +420,8 @@ def test_explicit_legacy_id_migration_preserves_body_links_and_existing_index(me
     runtime, factory = memory
     a_body = "# A\n\n| k | v |\n|---|---|\n| one | 1 |\n\n```py\nprint(1)\n```\n"
     b_body = "# B\n"
-    (runtime.knowledge / "a.md").write_text(f"---\nid: old-a\nkind: evidence\nlinks: [old-b]\n---\n{a_body}")
-    (runtime.knowledge / "b.md").write_text(f"---\nid: old-b\nlinks: []\n---\n{b_body}")
+    (runtime.knowledge / "a.md").write_text(f"---\nid: old-a\nkind: evidence\nlinks: [old-b]\n---\n{a_body}", encoding="utf-8", newline="")
+    (runtime.knowledge / "b.md").write_text(f"---\nid: old-b\nlinks: []\n---\n{b_body}", encoding="utf-8", newline="")
     runtime.status()
     dimensions = runtime.active["config"]["profile"]["dimensions"]
     runtime.table.add([
@@ -498,7 +498,7 @@ def test_adopt_removes_legacy_id_preserves_extra_metadata_body_and_crlf(memory):
     assert "kind: rule" in path.read_text()
     assert "id: legacy-id" not in path.read_text()
     path = runtime.knowledge / "index.md"
-    path.write_text("# Existing index\n")
+    path.write_text("# Existing index\n", encoding="utf-8", newline="")
     adopted = runtime.adopt("index.md")
     assert adopted["id"] == "index.md"
     assert runtime.read(adopted["id"])["content"] == "# Existing index\n"

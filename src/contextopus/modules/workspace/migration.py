@@ -1,5 +1,7 @@
 """Recoverable file-and-index migration. Approval records remain immutable."""
 
+from .text_io import read_utf8
+
 import copy
 import json
 import os
@@ -54,7 +56,7 @@ class FormatTwoMixin:
         self.control.safe(path)
         if not path.exists():
             return
-        previous = json.loads(path.read_text())
+        previous = json.loads(read_utf8(path))
         if previous.get("status") == "complete":
             return
         if not {"workspace_snapshot", "control_sources", "sources"} <= previous.keys():
@@ -122,7 +124,7 @@ class FormatTwoMixin:
                         active_path.is_file()
                         and (self.engine.state / "lancedb").is_dir()
                     ):
-                        active = json.loads(active_path.read_text())
+                        active = json.loads(read_utf8(active_path))
                         table = lancedb.connect(
                             str(self.engine.state / "lancedb")
                         ).open_table(active["table"])
@@ -270,7 +272,7 @@ class FormatTwoMixin:
         receipt = self._migration_receipt_path()
         if not receipt.exists():
             return plan
-        operation = json.loads(receipt.read_text())
+        operation = json.loads(read_utf8(receipt))
         item = operation.get("overlays", {}).get(
             plan["cycle_id"] + "/" + plan["proposal_id"]
         )
@@ -289,7 +291,7 @@ class FormatTwoMixin:
         if initialization.get("required"):
             managed.add("INSTRUCTIONS.md")
             rules = self.engine.root / "INSTRUCTIONS.md"
-            if rules.exists() and rules.read_text() != initialization["content"]:
+            if rules.exists() and read_utf8(rules) != initialization["content"]:
                 raise PCWError("Reviewed instructions changed during migration")
         if {k: v for k, v in current.items() if k not in managed} != {
             k: v for k, v in expected.items() if k not in managed
@@ -316,7 +318,7 @@ class FormatTwoMixin:
         if "PROJECT.md" in expected:
             if not project.is_file() or file_hash(project) != expected["PROJECT.md"]:
                 raise PCWError("PROJECT changed during migration")
-        elif project.exists() and project.read_text() != EMPTY_PROJECT:
+        elif project.exists() and read_utf8(project) != EMPTY_PROJECT:
             raise PCWError("New PROJECT changed during migration")
         ignored = {"format.json", "workspace-opened.json"}
         if {k: v for k, v in self._v2_control().items() if k not in ignored} != {
@@ -330,7 +332,7 @@ class FormatTwoMixin:
             if version not in (0, 1, 2):
                 raise PCWError("Unsupported future workspace format")
             previous = self._migration_receipt_path()
-            operation = json.loads(previous.read_text()) if previous.exists() else None
+            operation = json.loads(read_utf8(previous)) if previous.exists() else None
             pending = (
                 operation if operation and operation["status"] != "complete" else None
             )
@@ -425,7 +427,7 @@ class FormatTwoMixin:
             )
         with self.control.guard():
             receipt = self._migration_receipt_path()
-            operation = json.loads(receipt.read_text()) if receipt.exists() else None
+            operation = json.loads(read_utf8(receipt)) if receipt.exists() else None
             if (
                 operation
                 and operation["revision"] == expected_revision

@@ -1,5 +1,7 @@
 """Format 2: separate source folders, one category-filtered index per memory root."""
 
+from .text_io import read_utf8
+
 import copy
 import dataclasses
 import json
@@ -97,7 +99,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
         source = self.legacy_state / "active.json"
         self._assert_safe(source)
         if source.is_file():
-            old = json.loads(source.read_text())
+            old = json.loads(read_utf8(source))
             defaults = super()._initial_settings()
             return {key: old.get(key, defaults[key]) for key in defaults}
         return super()._initial_settings()
@@ -105,12 +107,12 @@ class WorkspaceSourceAdapter(PCWRuntime):
     def _allocate_material_id(self):
         path = self.state / "material-ids.json"
         self._assert_safe(path)
-        reserved = json.loads(path.read_text()) if path.is_file() else {}
+        reserved = json.loads(read_utf8(path)) if path.is_file() else {}
         for directory in self.control.root.parent.iterdir():
             previous = directory / "material-ids.json"
             self._assert_safe(previous)
             if previous.is_file():
-                reserved.update(json.loads(previous.read_text()))
+                reserved.update(json.loads(read_utf8(previous)))
         reserved.update({ident: {} for ident in self.catalog})
         while True:
             ident = uuid.uuid4().hex + ".md"
@@ -143,7 +145,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
             self._assert_safe(marker)
             compatible = (
                 marker.is_file()
-                and json.loads(marker.read_text()).get("format_version") == 2
+                and json.loads(read_utf8(marker)).get("format_version") == 2
             )
             if root != self.root and not compatible:
                 self.incompatible.append(root.name)

@@ -262,7 +262,12 @@ def main(argv=None):
                 )
                 emit(preview)
                 if args.apply:
-                    emit(app.execute("core.relocation_apply", {"plan": preview}))
+                    emit(
+                        app.execute(
+                            "core.relocation_apply",
+                            {"plan_revision": preview["revision"]},
+                        )
+                    )
             elif args.command == "modules":
                 emit(app.services.status()["modules"])
             elif args.command in ("init", "doctor"):

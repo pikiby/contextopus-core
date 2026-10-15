@@ -2,13 +2,15 @@
 
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
+
 import pytest
+
 from contextopus.integrations.remote import RemoteApplication
 
 
@@ -133,15 +135,23 @@ def test_managed_http_relocation_excludes_runtime_artifacts_and_updates_identity
                 try:
                     with urllib.request.urlopen(
                         f"http://127.0.0.1:{port}/health", timeout=0.2
-                    ):
+                    ) as response:
+                        initial_identity = json.loads(response.read())
                         break
                 except OSError:
                     time.sleep(0.05)
             else:
                 pytest.fail("isolated managed owner did not start")
+            # On Windows a venv launcher may spawn the actual Python owner.
+            # Bind managed metadata to the health-confirmed owner, not its launcher.
+            owner_pid = initial_identity["pid"]
+            (runtime / "service.json").write_text(
+                json.dumps({"pid": owner_pid, "root": str(source)})
+            )
             remote = RemoteApplication(source, endpoint=f"http://127.0.0.1:{port}/mcp")
             plan = remote.query(
-                "core.relocation_plan", {"destination": str(destination)}
+                "core.relocation_plan",
+                {"destination": str(destination), "include_manifest": True},
             )
             assert not any(
                 entry["path"] in {"runtime/service.log", "runtime/service.json"}
@@ -153,9 +163,9 @@ def test_managed_http_relocation_excludes_runtime_artifacts_and_updates_identity
             assert result["status"] == "complete"
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/health") as response:
                 identity = json.loads(response.read())
-            assert identity == {"root": str(destination), "pid": process.pid}
+            assert identity == {"root": str(destination), "pid": owner_pid}
             assert json.loads((destination / "runtime/service.json").read_text()) == {
-                "pid": process.pid,
+                "pid": owner_pid,
                 "root": str(destination),
             }
             assert not (destination / "runtime/service.log").exists()
@@ -170,3 +180,84 @@ def test_managed_http_relocation_excludes_runtime_artifacts_and_updates_identity
                 remote.close()
             process.terminate()
             process.wait(timeout=10)
+
+
+def test_large_public_plan_handle_survives_real_http_owner_restart(tmp_path):
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    material = source / ".pcw/alpha/knowledge/topic.md"
+    material.parent.mkdir(parents=True)
+    material.write_text("original source")
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    repo = Path(__file__).resolve().parents[1]
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            map(str, [repo / "src", repo / "plugins/persistent-context-workspace"])
+        ),
+    }
+    code = """
+import sys
+from contextopus.core import relocation
+from contextopus.interfaces.mcp.server import run
+if sys.argv[3] == 'large':
+    original=relocation.plan
+    def large(*args):
+        value=original(*args)
+        value['files'][0]['review_metadata']='x'*(6*1024*1024)
+        value['revision']=relocation._revision(value)
+        return value
+    relocation.plan=large
+run(sys.argv[1],port=int(sys.argv[2]))
+"""
+    review = None
+    for mode in ("large", "restart"):
+        remote = None
+        with (tmp_path / (mode + ".log")).open("w") as log:
+            process = subprocess.Popen(
+                [sys.executable, "-c", code, str(source), str(port), mode],
+                env=env,
+                stdout=log,
+                stderr=log,
+            )
+            try:
+                for _ in range(100):
+                    if process.poll() is not None:
+                        pytest.fail((tmp_path / (mode + ".log")).read_text())
+                    try:
+                        with urllib.request.urlopen(
+                            f"http://127.0.0.1:{port}/health", timeout=0.2
+                        ):
+                            break
+                    except OSError:
+                        time.sleep(0.05)
+                else:
+                    pytest.fail("HTTP owner did not start")
+                remote = RemoteApplication(
+                    source, endpoint=f"http://127.0.0.1:{port}/mcp"
+                )
+                if mode == "large":
+                    review = remote.query(
+                        "core.relocation_plan",
+                        {"destination": str(destination)},
+                    )
+                    assert len(json.dumps(review)) < 4096
+                    assert review["manifest"]["bytes"] > 6 * 1024 * 1024
+                else:
+                    assert (
+                        remote.execute(
+                            "core.relocation_apply",
+                            {"plan_revision": review["revision"]},
+                        )["status"]
+                        == "complete"
+                    )
+            finally:
+                if remote:
+                    remote.close()
+                process.terminate()
+                process.wait(timeout=10)
+    assert (
+        destination / "modules/workspace/workspace_contexts/alpha/knowledge/topic.md"
+    ).read_text() == "original source"

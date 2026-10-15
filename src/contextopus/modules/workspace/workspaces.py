@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .text_io import read_utf8
+
 import hashlib
 import json
 import os
@@ -59,7 +61,7 @@ class WorkspaceMixin:
         if self.engine.knowledge.is_dir():
             profile = state / "active.json"
             if profile.is_file():
-                active = json.loads(profile.read_text())
+                active = json.loads(read_utf8(profile))
                 if (
                     type(active.get("index_format", 1)) is int
                     and active.get("index_format", 1) in (1, 2)
@@ -82,7 +84,7 @@ class WorkspaceMixin:
         self.engine._assert_safe(path)
         marker = self.control.root / "instructions-initialized.json"
         if path.is_file():
-            if content is not None and path.read_text() != content:
+            if content is not None and read_utf8(path) != content:
                 raise PCWError(
                     "Existing instructions must be preserved; use the instructions proposal procedure to edit them"
                 )
@@ -167,7 +169,7 @@ class WorkspaceMixin:
         with self.control.guard():
             record = self.control.root / "creation.json"
             self.control.safe(record)
-            previous = json.loads(record.read_text()) if record.exists() else None
+            previous = json.loads(read_utf8(record)) if record.exists() else None
             if previous:
                 if previous["signature"] != signature:
                     raise PCWError("Workspace already has a different creation request")
@@ -237,7 +239,7 @@ class WorkspaceMixin:
         active = self.engine.state / "active.json"
         self.engine._assert_safe(active)
         if active.is_file():
-            result[".pcw-runtime/active.json"] = _revision(active.read_text())
+            result[".pcw-runtime/active.json"] = _revision(read_utf8(active))
         return result
 
     def _migration_tree(self, root, *, control=False):
@@ -421,12 +423,15 @@ class WorkspaceMixin:
                     dir=target.parent, prefix=".snapshot-", delete=False
                 ) as stream:
                     temporary = Path(stream.name)
-                shutil.copy2(source / relative, temporary)
-                if file_hash(temporary) != digest:
-                    raise PCWError(
-                        f"Source changed while taking backup: {source / relative}"
-                    )
-                with temporary.open("rb") as stream:
+                    shutil.copy2(source / relative, temporary)
+                    if file_hash(temporary) != digest:
+                        raise PCWError(
+                            f"Source changed while taking backup: {source / relative}"
+                        )
+                    # Keep the original writable descriptor: Windows cannot
+                    # FlushFileBuffers through a reopened read-only handle.
+                    # copy2 may retain read-only metadata, so do not reopen it.
+                    stream.flush()
                     os.fsync(stream.fileno())
                 os.replace(temporary, target)
             finally:

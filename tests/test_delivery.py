@@ -286,3 +286,41 @@ def test_service_records_actual_owner_pid_after_venv_redirector(tmp_path, monkey
     monkeypatch.setattr(service.os, "kill", lambda pid, signal: signalled.append(pid))
     assert service.stop(tmp_path)["pid"] == 111
     assert signalled == [111]
+
+
+def test_cli_relocation_applies_bounded_durable_revision(tmp_path, monkeypatch, capsys):
+    from contextopus.interfaces.cli.main import main
+    from contextopus.integrations import remote
+
+    calls = []
+
+    class App:
+        def query(self, operation, arguments):
+            assert operation == "core.relocation_plan"
+            return {
+                "revision": "durable-revision",
+                "files_count": 20926,
+                "manifest_sha256": "known",
+            }
+
+        def execute(self, operation, arguments):
+            calls.append((operation, arguments))
+            return {"status": "complete"}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(remote, "RemoteApplication", lambda *args, **kwargs: App())
+    assert (
+        main(
+            [
+                "--root",
+                str(tmp_path),
+                "relocation",
+                str(tmp_path / "destination"),
+                "--apply",
+            ]
+        )
+        == 0
+    )
+    assert calls == [("core.relocation_apply", {"plan_revision": "durable-revision"})]

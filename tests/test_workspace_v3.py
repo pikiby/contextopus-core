@@ -462,7 +462,7 @@ def test_audit_reports_evidence_and_preserves_all_files(workspace):
     a = workspace.engine.create("# Same\nBody")
     b = workspace.engine.create("# Same\nBody")
     path = workspace.engine.root / a["path"]
-    path.write_text(path.read_text().replace("links: []", "links: [missing.md]"))
+    path.write_text(path.read_text(encoding="utf-8").replace("links: []", "links: [missing.md]"), encoding="utf-8", newline="")
     before = {p: p.read_bytes() for p in workspace.engine.knowledge.rglob("*.md")}
     result = workspace.audit()
     problems = [issue for row in result["materials"] for issue in row["issues"]]

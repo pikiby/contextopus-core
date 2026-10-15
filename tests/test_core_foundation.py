@@ -279,7 +279,10 @@ def test_application_relocation_observer_polling_preserved_and_source_change_sta
     path.parent.mkdir(parents=True)
     path.write_text("authoritative")
     with Application(source, discover=False) as app:
-        proposal = app.query("core.relocation_plan", {"destination": str(destination)})
+        proposal = app.query(
+            "core.relocation_plan",
+            {"destination": str(destination), "include_manifest": True},
+        )
         app.query("core.doctor")
         app.query("core.settings")
         result = app.execute("core.relocation_apply", {"plan": proposal})

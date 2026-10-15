@@ -142,19 +142,19 @@ class Application:
             "core.relocation_plan",
             "query",
             self.relocation_plan,
-            {"destination": (str, ...)},
+            {"destination": (str, ...), "include_manifest": (bool, False)},
         )
         self._operation(
             "core.relocation_apply",
             "execute",
             self.relocation_apply,
-            {"plan": (dict, ...)},
+            {"plan": (dict | None, None), "plan_revision": (str | None, None)},
         )
         self._operation(
             "core.relocation_rollback",
             "execute",
             self.relocation_rollback,
-            {"plan": (dict, ...)},
+            {"plan": (dict | None, None), "plan_revision": (str | None, None)},
         )
 
     def settings(self, module=None, context=None, request=None):
@@ -362,16 +362,15 @@ class Application:
             "model_loaded": bool(self.resources.providers._entries),
         }
 
-    def relocation_plan(self, destination):
-        from .core.relocation import plan
+    def relocation_plan(self, destination, include_manifest=False):
+        from .core.relocation import RelocationPlans
 
-        return plan(self.layout.root, destination)
+        return RelocationPlans(self.layout.root).review(destination, include_manifest)
 
-    def relocation_apply(self, plan):
-        from .core.relocation import apply
+    def relocation_apply(self, plan=None, plan_revision=None):
+        from .core.relocation import apply, RelocationPlans
 
-        if Path(plan["source"]).resolve() != self.layout.root:
-            raise ValueError("Plan belongs to another root")
+        plan = RelocationPlans(self.layout.root).resolve(plan, plan_revision)
         from .modules.workspace.server import _runtimes, _cache_lock
 
         with _cache_lock:
@@ -382,9 +381,10 @@ class Application:
         self.journal.rebind(StorageLayout(result["destination"]))
         return result
 
-    def relocation_rollback(self, plan):
-        from .core.relocation import rollback
+    def relocation_rollback(self, plan=None, plan_revision=None):
+        from .core.relocation import rollback, RelocationPlans
 
+        plan = RelocationPlans(self.layout.root).resolve(plan, plan_revision)
         result = rollback(plan)
         return result
 

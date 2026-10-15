@@ -1,11 +1,11 @@
 import json
 import os
-from pathlib import Path
 import shutil
 import socket
 import sys
 import tempfile
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -71,7 +71,8 @@ def test_separate_venv_discovers_installed_executable(tmp_path, monkeypatch):
     module = SessionSearch(tmp_path / "absent.sock")
     assert module.available()
     descriptor = module.launch_tui()
-    assert descriptor["argv"] == [str(command), "tui"]
+    assert Path(descriptor["argv"][0]).samefile(command)
+    assert descriptor["argv"][1:] == ["tui"]
     assert descriptor["terminal_owner"] == "client"
 
 
@@ -79,7 +80,9 @@ def test_declared_command_is_argv_without_shell_interpolation(tmp_path):
     command = executable_fixture(tmp_path, "launcher with spaces")
     payload = "$(touch /tmp/should-not-exist); echo surprise"
     module = SessionSearch(command=[str(command), payload])
-    assert module.launch_tui()["argv"] == [str(command), payload]
+    argv = module.launch_tui()["argv"]
+    assert Path(argv[0]).samefile(command)
+    assert argv[1:] == [payload]
     with pytest.raises(ValueError):
         SessionSearch(command="session-search tui; echo surprise")
 

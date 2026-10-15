@@ -8,6 +8,8 @@ Only cycle metadata survives cleanup. Drafts, returns and proposal bodies do not
 
 from __future__ import annotations
 
+from .text_io import read_utf8
+
 import contextlib
 import copy
 import difflib
@@ -80,7 +82,7 @@ class CycleRuntime(
     def _records(self):
         self.control.safe(self.record_path)
         return (
-            json.loads(self.record_path.read_text())
+            json.loads(read_utf8(self.record_path))
             if self.record_path.exists()
             else {"starts": {}, "cycles": {}}
         )
@@ -427,14 +429,14 @@ class CycleRuntime(
         return path
 
     def _load_plan(self, cycle_id, proposal_id, entry):
-        plan = json.loads(self._plan_path(cycle_id, proposal_id).read_text())
+        plan = json.loads(read_utf8(self._plan_path(cycle_id, proposal_id)))
         if _revision(_json(plan)) != entry["revision"]:
             raise PCWError(
                 "Prepared proposal was changed; prepare and present it again"
             )
         review = self._plan_path(cycle_id, proposal_id).with_suffix(".md")
         self.engine._assert_safe(review)
-        if review.read_text() != self._review(plan):
+        if read_utf8(review) != self._review(plan):
             raise PCWError("Prepared review was changed; prepare and present it again")
         return plan
 
@@ -460,8 +462,8 @@ class CycleRuntime(
         self.engine._write(path, _json(plan))
         self.engine._write(path.with_suffix(".md"), review)
         if (
-            json.loads(path.read_text()) != plan
-            or path.with_suffix(".md").read_text() != review
+            json.loads(read_utf8(path)) != plan
+            or read_utf8(path.with_suffix(".md")) != review
         ):
             raise PCWError("Proposal write verification failed")
         cycle["proposals"][plan["proposal_id"]] = {"revision": revision, "state": state}
