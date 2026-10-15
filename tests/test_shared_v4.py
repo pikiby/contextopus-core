@@ -88,7 +88,7 @@ def legacy(root):
     item = old.create('# Known fact\n```yaml\nrequired_sources:\n- url: https://example.com\n  extract: Current number\n```\n')
     (old.root / "INSTRUCTIONS.md").write_text("Custom exact user rules\n")
     (old.root / "CURRENT.md").write_text("Keep ongoing work")
-    original = (old.root / item["path"]).read_text()
+    original = (old.root / item["path"]).read_bytes().decode("utf-8")
     old.close()
     return item, original
 
@@ -128,7 +128,7 @@ def test_missing_yaml_or_legacy_sources_detected_with_current_marker(tmp_path):
     runtime = context(tmp_path, "one")
     item = save(runtime, "# Known\nFact")
     path = runtime.engine.root / item["path"]
-    path.write_text("# Known\nFact")
+    path.write_text("# Known\nFact", encoding="utf-8", newline="")
     assert not runtime.workspace_inspect()["compatible"]
     with pytest.raises(PCWError, match="pcw-upgrade"):
         runtime.search(query="fact")

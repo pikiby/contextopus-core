@@ -324,3 +324,26 @@ def test_cli_relocation_applies_bounded_durable_revision(tmp_path, monkeypatch, 
         == 0
     )
     assert calls == [("core.relocation_apply", {"plan_revision": "durable-revision"})]
+
+
+def test_codex_plugin_effective_manifest_wires_native_mcp():
+    import json
+    from pathlib import Path
+
+    plugin = Path(__file__).resolve().parents[1] / "plugins/contextopus"
+    portable = json.loads((plugin / "plugin.json").read_text(encoding="utf-8"))
+    overlay = portable["extensions"]["com.openai"]
+    compatibility = json.loads(
+        (plugin / ".codex-plugin/plugin.json").read_text(encoding="utf-8")
+    )
+    assert overlay["mcpServers"] == compatibility["mcpServers"] == "./.mcp.json"
+    native = json.loads((plugin / overlay["mcpServers"]).read_text(encoding="utf-8"))
+    servers = native["mcpServers"]
+    assert set(servers) == {"contextopus"}
+    assert servers["contextopus"]["url"] == "http://127.0.0.1:8765/mcp"
+    agent_plugin = json.loads((plugin / "mcp.json").read_text(encoding="utf-8"))
+    assert agent_plugin["mcpServers"]["contextopus"]["type"] == "streamable-http"
+    assert (
+        agent_plugin["mcpServers"]["contextopus"]["url"]
+        == servers["contextopus"]["url"]
+    )

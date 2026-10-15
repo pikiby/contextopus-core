@@ -82,3 +82,24 @@ def test_unicode_root_upgrade_receipt_replays_after_reopen(tmp_path):
         assert reopened.upgrade_plan()["from_version"] == 2
     finally:
         reopened.close()
+
+
+def test_windows_migration_transforms_match_posix_manifest_keys(tmp_path, monkeypatch):
+    from pathlib import PureWindowsPath
+    from test_legacy_adoption import sparse
+    from test_runtime import Factory
+    from contextopus.modules.workspace.cycles import CycleRuntime
+    from contextopus.modules.workspace import migration
+
+    sparse(tmp_path)
+    runtime = CycleRuntime(tmp_path, "old", provider_factory=Factory())
+    try:
+        monkeypatch.setattr(migration, "Path", PureWindowsPath)
+        transforms, _ = runtime._v2_transforms(0)
+        assert transforms
+        assert all("\\" not in item["path"] for item in transforms.values())
+        assert all(
+            item["path"].startswith("knowledge/") for item in transforms.values()
+        )
+    finally:
+        runtime.close()

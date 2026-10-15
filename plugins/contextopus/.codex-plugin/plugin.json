@@ -11,5 +11,6 @@
   "interface": {
     "displayName": "Contextopus",
     "shortDescription": "Persistent context for people and coding agents."
-  }
+  },
+  "mcpServers": "./.mcp.json"
 }

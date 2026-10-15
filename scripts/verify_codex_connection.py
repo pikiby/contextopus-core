@@ -116,17 +116,51 @@ def verify(cwd, expected_root):
                 },
             )
             thread = started["thread"]["id"]
-            inventory = request(
-                "mcpServerStatus/list",
-                {"threadId": thread, "detail": "toolsAndAuthOnly", "limit": 100},
+            skills_result = request(
+                "skills/list", {"cwds": [str(Path(cwd).resolve())], "forceReload": True}
             )
-            servers = [
-                item for item in inventory["data"] if "contextopus" in item["name"]
+            skills = [
+                item
+                for entry in skills_result["data"]
+                for item in entry["skills"]
+                if item.get("pluginId") == "contextopus@contextopus"
+                and item.get("enabled")
             ]
-            if len(servers) != 1:
+            expected_skills = {
+                "contextopus:" + name
+                for name in ("w", "ws", "wi", "wc", "wu", "wa", "wr", "wx")
+            }
+            if {item["name"] for item in skills} != expected_skills:
                 raise RuntimeError(
-                    "Expected exactly one fresh Contextopus MCP connection"
+                    "Fresh Codex did not discover all eight namespaced short skills"
                 )
+            if any(
+                item.get("pluginId")
+                == "persistent-context-workspace@persistent-context-workspace"
+                and item.get("enabled")
+                for entry in skills_result["data"]
+                for item in entry["skills"]
+            ):
+                raise RuntimeError(
+                    "Old plugin remains enabled in fresh Codex discovery"
+                )
+            deadline = time.monotonic() + 60
+            while True:
+                inventory = request(
+                    "mcpServerStatus/list",
+                    {"threadId": thread, "detail": "toolsAndAuthOnly", "limit": 100},
+                )
+                servers = [
+                    item for item in inventory["data"] if "contextopus" in item["name"]
+                ]
+                if len(servers) == 1 and servers[0].get("tools"):
+                    break
+                if time.monotonic() >= deadline:
+                    names = [item["name"] for item in inventory["data"]]
+                    raise RuntimeError(
+                        f"Expected one ready Contextopus MCP connection; observed {names}"
+                    )
+                time.sleep(1)
             server = servers[0]
             tool = next(
                 (
@@ -175,6 +209,7 @@ def verify(cwd, expected_root):
                         "runtime_status": server.get("runtimeStatus"),
                         "scope": status["scope"],
                         "tools": len(server["tools"]),
+                        "skills": sorted(item["name"] for item in skills),
                         "upgrade_procedure_sha256": hashlib.sha256(
                             procedure["content"].encode()
                         ).hexdigest(),

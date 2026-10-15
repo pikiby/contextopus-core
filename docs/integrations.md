@@ -15,7 +15,7 @@ Existing unrelated values survive. A differing `contextopus` server or short ski
 
 Primary references checked during implementation:
 
-- [Codex MCP](https://developers.openai.com/codex/mcp/) and [Agent Skills](https://developers.openai.com/codex/skills/).
+- [Codex MCP](https://developers.openai.com/codex/mcp/), [Agent Skills](https://developers.openai.com/codex/skills/) and [plugin packaging](https://developers.openai.com/plugins/build/plugins).
 - [Claude Code MCP and project configuration](https://code.claude.com/docs/en/mcp).
 - [OpenCode local and remote MCP](https://opencode.ai/docs/mcp-servers/) and [skills](https://opencode.ai/docs/skills/).
 - [Crush MCP and skill configuration](https://github.com/charmbracelet/crush/blob/main/README.md).
@@ -31,3 +31,20 @@ Codex plugin users first run `codex plugin marketplace add <checkout>` and `code
 Use `contextopus root --set <chosen persistent root>` only for an explicitly selected root; it writes the persistent default binding, creates no data root and never selects/switches a Workspace. `--root` and `CONTEXTOPUS_ROOT` override this default.
 
 The complete repeatable installation/data/skills sequence is fetched with `procedure(name="upgrade")`; the `wu` skill uses that canonical resource.
+
+## Verified native discovery
+
+The 1.0.0 rollout checked installed Codex 0.162.1, Claude Code 2.1.126,
+OpenCode 1.18.32 and Crush 0.87.0 against the shared HTTP owner. Fresh Codex
+app-server calls listed one Contextopus MCP server, read `core.status` and
+fetched the upgrade procedure. Codex namespaces plugin skills as
+`contextopus:w`, `contextopus:ws`, `contextopus:wi`, `contextopus:wc`,
+`contextopus:wu`, `contextopus:wa`, `contextopus:wr`, `contextopus:wx`.
+The disabled old plugin's skills were absent from fresh discovery.
+
+Claude's native MCP inspection and OpenCode's native MCP listing reported
+connected. OpenCode's skill listing and Crush's native workspace API both
+found all eight shared skills under `~/.claude/skills`; their integrations
+therefore use `--config-only` without another skill copy. Crush's native MCP
+state reported connected with four tools. These are discovery/connection checks
+without model turns; they do not establish every host's complete task workflow.

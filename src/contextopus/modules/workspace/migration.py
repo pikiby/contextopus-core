@@ -180,14 +180,14 @@ class FormatTwoMixin:
             ident = item["id"]
             after_path = relative
             if version < 2 or Path(relative).name == ident:
-                after_path = str(
+                after_path = (
                     Path(relative).parent / topic_name(item["content"], ident)
-                )
+                ).as_posix()
             if after_path in occupied or (
                 after_path != relative and after_path in files
             ):
                 after_path = (
-                    str(Path(after_path).with_suffix(""))
+                    Path(after_path).with_suffix("").as_posix()
                     + "-"
                     + ident.removesuffix(".md")
                     + ".md"

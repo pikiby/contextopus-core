@@ -54,45 +54,6 @@ def _transient(relative):
     } or (_WINDOWS and _runtime_lock(relative))
 
 
-def _legacy_lock_stream(path):
-    """Keep exclusion during a Windows directory rename using delete sharing."""
-    if not _WINDOWS:
-        return path.open("a+b")
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
-
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    create = kernel.CreateFileW
-    create.argtypes = [
-        wintypes.LPCWSTR,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.LPVOID,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.HANDLE,
-    ]
-    create.restype = wintypes.HANDLE
-    close = kernel.CloseHandle
-    close.argtypes = [wintypes.HANDLE]
-    close.restype = wintypes.BOOL
-    # READ|WRITE access; share READ|WRITE|DELETE; OPEN_EXISTING.
-    handle = create(str(path), 0xC0000000, 0x7, None, 3, 0x80, None)
-    if handle == wintypes.HANDLE(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        fd = msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
-    except BaseException:
-        close(handle)
-        raise
-    try:
-        return os.fdopen(fd, "r+b")
-    except BaseException:
-        os.close(fd)
-        raise
-
-
 def _digest(path):
     h = hashlib.sha256()
     with path.open("rb") as stream:
@@ -274,6 +235,8 @@ def plan(source, destination):
         "version": 1,
         "observer_snapshot": "Known analytics directories are refreshed under the apply freeze; authoring and index bytes remain revision-bound.",
     }
+    if os.name != "nt":
+        value["source_mode"] = source.stat().st_mode & 0o7777
     value["revision"] = _revision(value)
     return value
 
@@ -302,6 +265,11 @@ def _refresh_observers(source, proposal):
 def _validate(proposal):
     if proposal.get("version") != 1 or proposal.get("revision") != _revision(proposal):
         raise ValueError("Relocation plan revision mismatch")
+    if "source_mode" in proposal and (
+        type(proposal["source_mode"]) is not int
+        or not 0 <= proposal["source_mode"] <= 0o7777
+    ):
+        raise ValueError("Invalid relocation source mode")
     source, destination = Path(proposal["source"]), Path(proposal["destination"])
     if (
         not source.is_absolute()
@@ -347,6 +315,9 @@ def _source_path(source, entry, revision):
 
 
 def _verify_source(source, proposal):
+    if os.name != "nt" and "source_mode" in proposal:
+        if source.stat().st_mode & 0o7777 != proposal["source_mode"]:
+            raise ValueError("Source root mode changed after relocation preview")
     revision = proposal["revision"]
     retained = source / ".contextopus-retained" / revision / ".pcw"
     actual = {path.relative_to(source).as_posix() for path in _files(source)}
@@ -444,9 +415,10 @@ def apply(proposal):
                 *sorted((source / ".pcw/.control").glob("*/lock")),
                 *sorted((source / ".pcw").glob("*/.pcw-runtime/lock")),
             ]
+            legacy_locks = locks.enter_context(ExitStack())
             for path in candidates:
                 if path.is_file():
-                    stream = locks.enter_context(_legacy_lock_stream(path))
+                    stream = legacy_locks.enter_context(path.open("a+b"))
                     locking.flock(stream.fileno(), locking.LOCK_EX | locking.LOCK_NB)
             if not freeze.exists():
                 _write(freeze, {"revision": revision, "destination": str(destination)})
@@ -454,6 +426,11 @@ def apply(proposal):
             if legacy.is_dir():
                 retained = source / ".contextopus-retained" / revision
                 retained.mkdir(parents=True, exist_ok=True)
+                if _WINDOWS:
+                    # Windows cannot rename a directory with open child files.
+                    # The root guard remains held and freeze is already durable:
+                    # supported engines cannot enter while these handles close.
+                    legacy_locks.close()
                 os.replace(legacy, retained / ".pcw")
                 _write(
                     legacy,
@@ -485,6 +462,11 @@ def apply(proposal):
             ):
                 raise ValueError("Destination has no matching relocation ownership")
         destination.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            # Old reviewed plans have no mode field; retain retry compatibility.
+            os.chmod(
+                destination, proposal.get("source_mode", source.stat().st_mode & 0o7777)
+            )
         ownership = (
             json.loads(owner.read_text(encoding="utf-8"))
             if owner.exists()
