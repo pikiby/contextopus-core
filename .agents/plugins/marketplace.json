@@ -1,14 +1,14 @@
 {
-  "name": "persistent-context-workspace",
+  "name": "contextopus",
   "interface": {
-    "displayName": "Persistent Context Workspace"
+    "displayName": "Contextopus"
   },
   "plugins": [
     {
-      "name": "persistent-context-workspace",
+      "name": "contextopus",
       "source": {
         "source": "local",
-        "path": "./plugins/persistent-context-workspace"
+        "path": "./plugins/contextopus"
       },
       "policy": {
         "installation": "AVAILABLE",

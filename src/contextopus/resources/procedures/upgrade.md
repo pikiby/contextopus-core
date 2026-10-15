@@ -1,0 +1,54 @@
+# Upgrade PCW installation, data and skills
+
+This is the canonical `wu` upgrade procedure. It covers the old installation, selected data roots, context formats and host skills. Fetch referenced procedures through `procedure`; use `describe` only for unknown signatures. An upgrade does not authorize substantive changes to project knowledge or instructions.
+
+## Resolve scope and preserve state
+
+Establish the exact old installation, old common memory root, selected contexts, new persistent root and installed client scopes from the user's request and current configuration. A repository rename or current working directory does not select a Workspace. Enumerate only the named roots. Detect existing short-name skill collisions before changing a host.
+
+Record versions, root paths and current context IDs. Inspect `workspace.upgrade_plan` for every selected existing context, including apparently current ones, and report unfinished Current tasks, tmp, pending proposals and approval state. Preserve material IDs, links, custom INSTRUCTIONS, PROJECT, Current, tmp, pending immutable proposals, approval records, control backups and Git history. Unknown/missing structures are blockers for inspection, never authority to create replacement contexts. Do not apply, discard or cancel somebody else's pending work.
+
+## Install the standalone runtime
+
+Obtain the exact verified wheel and SHA256SUMS from the authorized local build or authenticated private GitHub Release. Install with `uv tool install --python 3.12 <verified-wheel.whl>`; install the optional `local` extra only when local inference is required and authorized. Python is managed by uv. No PyPI package availability is assumed.
+
+Keep the old plugin cache intact for existing sessions. Do not uninstall the old Codex plugin or remove its marketplace with commands that delete caches. Stop writes to the old data root while conversion/copy runs; no source deletion is part of this procedure. Use the new Contextopus service bound explicitly to the existing old root for format inspection and upgrade. Do not run `init` on an old root to create a second empty layout. An existing running service must be verified to own the selected root before use.
+
+## Convert context formats, then relocate the root
+
+Apply the context-format procedure below for each incompatible recognized context. Preserve the returned revision and original snapshots. Already compatible contexts require no rewrite. Resolve blockers and index repair before treating format conversion as complete.
+
+Then call `core.relocation_plan(destination=<explicit new root>)` against the old root. Show its actual source/destination, preserved data and planned effects. Use `core.relocation_apply(plan=<returned plan>)`; never reconstruct a plan from memory. Core freezes writes, checks the source snapshot, copies and verifies persistent files, captures the latest known volatile observer databases coherently, and publishes receipt/redirect metadata. Validate the returned receipt, destination manifest and preserved pending work before cutover. Retry an interrupted relocation with the exact retained plan. Before publication, `core.relocation_rollback(plan=...)` unfreezes the retained source without deleting partial destination files. After publication, rollback means a new verified relocation from the active root; do not simply delete the redirect or reactivate two writable roots.
+
+Use the destination explicitly for subsequent requests and run `core.index_upgrade` to add generic namespace columns to an existing index without embeddings. Verify the selected Workspace's full instructions, stable IDs/links, Current/tmp, pending approval revisions and history at the destination. Compare actual counts and representative preserved records with the source snapshot; a readable directory or health check alone is insufficient. Leave retained source/snapshots in place. Source deletion requires separate authorization.
+
+## Update native clients and old skill entrypoints
+
+Start/verify one owner with `contextopus --root <new root> service start`. Bind the persistent default with `contextopus root --set <new root>`; also pass the exact destination during rollout verification. Do not infer a shared Workspace selection from a process/session ID.
+
+For Codex plugin installations, use supported native commands after checking the installed CLI's help:
+
+```console
+codex plugin marketplace add <new source checkout>
+codex plugin add contextopus@contextopus
+contextopus integrate codex --user --native-plugin
+contextopus integrate codex --user --native-plugin --apply
+```
+
+The final step disables the old plugin declaration for fresh sessions, removes its obsolete marketplace declaration and any matching duplicate manual Contextopus MCP entry, enables the installed native Contextopus plugin, and preserves both old cache files and unrelated configuration. It refuses cutover until the new plugin cache exists. Existing loaded skills/session tools may remain old until a fresh session; do not claim those were replaced in place.
+
+For manually installed native skills/configuration, preview `contextopus integrate <client> --user --legacy-skills <explicit old skill directory>` (or `--project <directory>`), inspect affected paths, then repeat with `--apply`. Existing recognized unchanged old skill files become thin compatibility aliases that fetch the new canonical procedure; short names are installed alongside them. User-modified/unrecognized legacy skills stop the operation for review; merge their requested custom behavior explicitly rather than silently overwriting it. Previously managed unchanged skills can be updated through their recorded hashes; stale previews are refused. Plugin caches are never edited through this option.
+
+Avoid duplicate skill copies across roots a client already discovers. For example, Claude's user skills are also discoverable by OpenCode and Crush: after installing that shared copy, use `--config-only` for those clients. Codex's native plugin supplies its own skills; do not additionally install identical user skills there. Genuine JSONC comments/trailing commas require the client's supported editor rather than destructive rewriting. Preserve unrelated MCP servers, settings and credentials, and never print whole configurations.
+
+Verify each actual fresh client connection: tools/list and a read such as `procedure(name="upgrade")` or `core.status` through that client. File presence, direct Python checks and the old session's working tools are not this proof. Verify that new requests reach the destination root and new process, while the old cache remains available. Report per-client verification separately and list remaining blockers honestly.
+
+## Context format procedure
+
+1. Resolve the user's exact context, list of contexts or bounded directories. Follow [context selection](procedure:workspace#context-selection). Enumerate only those directories, never the whole computer.
+2. Call `upgrade_plan` for each selected existing context. It returns compatibility, the source revision, technical changes, saved unfinished work, blockers and `project_description`. If a recognized never-initialized legacy context lacks INSTRUCTIONS, provide the exact human-reviewed full `instructions_content` to both plan and apply, together with the actual `instructions_confirmation` on apply. Never infer missing rules from old goals or substitute bundled defaults without approval. Lost rules from an initialized context remain a restoration blocker. Inspect these even when the format is already current; compatibility does not mean that work is finished or project content is complete. Explain each unfinished work item using its request/task and material titles; distinguish prepared proposals from applied changes awaiting closure. An open record does not prove that an agent is running. An unknown structure requires inspection/restoration; do not guess its version. An already compatible format requires no rewrite merely because the plugin was updated.
+3. Show affected paths and explain that the snapshot retains the entire workspace, including tmp, plus its control state. Format 2 places stable IDs in YAML, gives knowledge files descriptive names, converts legacy source blocks, and indexes them in the common category-aware RAG. Compatible unfinished work keeps its IDs, immutable proposals and approval states; the migration retains technical path/format mappings for later application. Do not apply, discard or cancel that work. If `ready` is false, describe the exact blocker and affected work. Otherwise call `upgrade_apply(expected_revision, user_request)` for a direct request, or `upgrade_apply(expected_revision, automatic=true)` for detected incompatibility. Do not invent a user request or approval. Use `resume_revision` for a pending migration.
+4. Report verified format, backup paths, preservation of unfinished work, project-description status and any pending index repair. `missing`, `empty` or `placeholder` means PROJECT still needs content; state that explicitly. `present` does not establish accuracy or completeness. Retry interrupted migration using its original revision and retained snapshot. Source conflicts require inspection. Format completion requires both file conversion and successful shared indexing; `index_pending` is not completion. Resume the original Contextopus operation after success, under its original active context's instructions.
+5. Preserve custom INSTRUCTIONS verbatim. A new default template does not authorize replacement. Reclassifying old goals, splitting mixed knowledge and revising instructions are separate requested rework/instructions procedures. Do not turn format migration into substantive editing.
+
+If the user also requested filling PROJECT, follow the [work cycle](procedure:workspace#work-cycle): read workspace instructions and relevant existing knowledge, verify missing facts from permitted project sources, then prepare the supported description with `project_update`. Show its actual text and apply through `project_apply` under the workspace approval policy. Do not invent goals or apply another task's pending proposal. Otherwise report the unfilled description as remaining content work.

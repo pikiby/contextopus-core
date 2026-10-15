@@ -1,0 +1,15 @@
+{
+  "name": "contextopus",
+  "version": "1.0.0",
+  "description": "Persistent context through one local Contextopus application",
+  "author": {
+    "name": "pikiby"
+  },
+  "homepage": "https://github.com/pikiby/contextopus-core",
+  "repository": "https://github.com/pikiby/contextopus-core",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Contextopus",
+    "shortDescription": "Persistent context for people and coding agents."
+  }
+}

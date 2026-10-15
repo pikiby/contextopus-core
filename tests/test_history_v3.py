@@ -48,14 +48,15 @@ def test_git_retry_uses_old_snapshot_and_commits_in_order(tmp_path):
         second, saved_later = apply(runtime, cycle, [{"key": "second", "content": "Later independent state"}])
         assert saved_later["history"]["status"] == "pending"
     # Uncommitted external change must not enter either captured operation.
-    first_path = runtime.engine.knowledge / first["created_ids"]["first"]
+    first_relative = runtime.read(material_id=first["created_ids"]["first"])["path"]
+    first_path = runtime.engine.root / first_relative
     first_path.write_text(first_path.read_text().replace("First captured state", "External later edit"))
     assert runtime.history_retry()["status"] == "committed"
     versions = runtime.history_list()["versions"]
     assert len(versions) == 3
     assert second["proposal_id"] in versions[0]["subject"]
     assert first["proposal_id"] in versions[1]["subject"]
-    blob = runtime.history_read(commit=versions[1]["commit"], paths=["knowledge/" + first["created_ids"]["first"]])["materials"][0]["text"]
+    blob = runtime.history_read(commit=versions[1]["commit"], paths=[first_relative])["materials"][0]["text"]
     assert "First captured state" in blob
     assert "External later edit" not in blob
     assert "External later edit" in first_path.read_text()

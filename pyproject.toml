@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "contextopus-core"
+version = "1.0.0"
+description = "Standalone persistent context for people and coding agents"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["lancedb>=0.20,<1", "mcp>=1.10,<2", "PyYAML>=6,<7", "pydantic>=2.11,<3", "textual==8.2.8", "platformdirs>=4,<5", "tomlkit>=0.13,<1", "jsonschema>=4,<5"]
+
+[project.optional-dependencies]
+local = ["sentence-transformers>=3,<6"]
+tokenizers = ["transformers>=4.51,<5", "tiktoken>=0.7,<1"]
+test = ["pytest>=8", "pytest-asyncio>=0.24", "build>=1.2"]
+
+[project.scripts]
+contextopus = "contextopus.interfaces.cli.main:main"
+
+[project.urls]
+Repository = "https://github.com/pikiby/contextopus-core"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["contextopus*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+contextopus = ["resources/**/*.md", "resources/**/*.yaml", "resources/**/*.json", "modules/workspace/default_instructions.md"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "plugins/persistent-context-workspace"]

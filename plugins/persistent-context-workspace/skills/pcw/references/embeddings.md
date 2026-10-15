@@ -2,6 +2,8 @@
 
 Read for explicit connection or profile changes, search settings, or embedding failures. Use the active configuration returned by `status` and the `switch_embeddings` schema. A user request for ordinary memory work does not select a paid service.
 
+The profile belongs to the common memory root, not one category. A profile change rebuilds all compatible categories in its shared RAG. Establish that scope before switching. The first migrated context supplies its existing profile when no shared profile exists; subsequent contexts use the established shared profile and rebuild incompatible vectors.
+
 ## Local default
 
 The default provider is `sentence-transformers` on CPU, with `local_files_only: false`. The profile uses `Qwen/Qwen3-Embedding-0.6B`, revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`, 1024 dimensions, `float32` precision, `l2` normalization, `qwen3` input format, and a 32768-token configured input ceiling. The model is loaded lazily on the first embedding request and reused by the running MCP process. Before first use, follow [Runtime setup](setup.md) to distinguish local dependency readiness from cached model availability and obtain any still-missing download permission. The initial model load may download weights; later calls can use its cache. For an offline installation, explicitly configure `local_files_only: true` after provisioning the cache. Missing dependencies or weights return an error; no remote fallback is selected.

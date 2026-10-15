@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from importlib import metadata
 import os
 import re
 import select
@@ -60,18 +61,29 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn("mcpServers", manifest)
         self.assertNotIn("mcpServers", portable["extensions"]["com.openai"])
         self.assertFalse((PLUGIN / ".mcp.json").exists())
-        for document in ("README.md", "PLAN.md"):
-            self.assertIn(f"Version {manifest['version']}", (ROOT / document).read_text())
+        # The retained legacy plugin keeps its own metadata. The standalone
+        # distribution and new client plugin share the current release version.
+        current = tomllib.loads((ROOT / "pyproject.toml").read_text())
+        native = json.loads((ROOT / "plugins/contextopus/.codex-plugin/plugin.json").read_text())
+        self.assertEqual("contextopus-core", current["project"]["name"])
+        self.assertEqual("contextopus", native["name"])
+        self.assertEqual(current["project"]["version"], native["version"])
+        self.assertEqual("contextopus.interfaces.cli.main:main", current["project"]["scripts"]["contextopus"])
+        self.assertIn("# Contextopus", (ROOT / "README.md").read_text())
+        self.assertTrue((ROOT / "docs/releases" / (native["version"] + ".md")).is_file())
         self.assertTrue((PLUGIN / "pcw_runtime" / "__main__.py").is_file())
         self.assertTrue(LAUNCHER.is_file())
         self.assertTrue(SHELL_LAUNCHER.is_file())
 
     def test_existing_marketplace_resolves_same_plugin(self):
         marketplace = json.loads((ROOT / ".agents" / "plugins" / "marketplace.json").read_text())
-        entries = [entry for entry in marketplace["plugins"] if entry["name"] == PLUGIN.name]
+        entries = [entry for entry in marketplace["plugins"] if entry["name"] == "contextopus"]
         self.assertEqual(1, len(entries))
         self.assertEqual("local", entries[0]["source"]["source"])
-        self.assertEqual(PLUGIN.resolve(), (ROOT / entries[0]["source"]["path"]).resolve())
+        target = (ROOT / entries[0]["source"]["path"]).resolve()
+        self.assertEqual((ROOT / "plugins/contextopus").resolve(), target)
+        self.assertEqual(entries[0]["name"], json.loads((target / ".codex-plugin/plugin.json").read_text())["name"])
+        self.assertTrue(PLUGIN.is_dir(), "Legacy plugin remains available during transition")
 
     def test_explicit_skills_are_packaged(self):
         expected = {PLUGIN / "skills" / name / "SKILL.md"
@@ -125,7 +137,14 @@ class PluginContractTests(unittest.TestCase):
             self.assertIsNone(re.search(r"[\u0400-\u04FF]", text), str(path))
 
 
+legacy_posix_launcher = unittest.skipUnless(
+    os.name == "posix" and Path("/bin/sh").is_file(),
+    "Legacy 0.14 POSIX shell launcher; Contextopus HTTP transport is tested on every platform",
+)
+
+
 class LauncherTests(unittest.TestCase):
+    @legacy_posix_launcher
     def test_missing_interpreter_fails_without_creating_environment(self):
         with tempfile.TemporaryDirectory() as directory:
             missing = Path(directory) / "not-installed" / "bin" / "python"
@@ -148,6 +167,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(["${PLUGIN_ROOT}/scripts/launch.sh"], config["args"])
         self.assertNotIn("env", config)
 
+    @legacy_posix_launcher
     def test_missing_dependencies_fail_with_installation_guidance(self):
         with tempfile.TemporaryDirectory() as directory:
             isolated = Path(directory) / "isolated"
@@ -163,7 +183,17 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual("", result.stdout)
             self.assertFalse((Path(directory) / "packages").exists())
 
+    @legacy_posix_launcher
     def test_launcher_stdio_initializes_and_lists_tools(self):
+        # The retained source plugin now contains compatibility imports rather
+        # than a second implementation. A copied shim needs the standalone
+        # distribution in the selected interpreter, as installed by uv sync.
+        try:
+            installed = metadata.version("contextopus-core")
+        except metadata.PackageNotFoundError:
+            self.fail("Install the standalone project in the test interpreter first (uv sync --locked --extra test); copied compatibility shims require contextopus-core")
+        expected = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+        self.assertEqual(expected, installed)
         check = subprocess.run(
             ["/bin/sh", str(SHELL_LAUNCHER), "--check"],
             env={**os.environ, "PCW_PYTHON": sys.executable},
@@ -214,7 +244,10 @@ class LauncherTests(unittest.TestCase):
                         ready, _, _ = select.select([process.stdout], [], [], max(0, deadline - time.monotonic()))
                         self.assertTrue(ready, "stdio response timed out")
                         line = process.stdout.readline()
-                        self.assertTrue(line, "stdio closed before returning a response")
+                        if not line:
+                            error_log.flush()
+                            error_log.seek(0)
+                            self.fail("stdio closed before returning a response; stderr: " + error_log.read()[-4000:])
                         message = json.loads(line)
                         if message.get("id") == request_id:
                             self.assertNotIn("error", message)
@@ -319,7 +352,7 @@ class LauncherTests(unittest.TestCase):
                                      expected_revision=edit["revision"], confirmation="Apply the shown rules")["status"])
                     self.assertEqual("# Project rules\nTest-specific instructions.\n", call("instructions_read")["content"])
                     self.assertEqual("Protocol fixture content", call("tmp_read", material_id=pending["id"])["content"])
-                    shutil.rmtree(Path(directory) / ".pcw/protocol/.pcw-runtime")
+                    shutil.rmtree(Path(directory) / ".pcw/.rag")
                     self.assertEqual("recovery_required", call("status")["status"])
                     self.assertEqual("recovered", call("recover_workspace")["status"])
                     self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])

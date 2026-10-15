@@ -235,6 +235,17 @@ class CodexHostTests(unittest.TestCase):
             "cwd": cls.work, "ephemeral": True, "approvalPolicy": "never", "sandbox": "workspace-write",
         })
         cls.thread_id = thread["thread"]["id"]
+        if cls.source_mode:
+            inventory = cls.host.call("skills/list", {"cwds": [cls.work], "forceReload": True})
+            expected_path = cls.skill_root / "pcw/SKILL.md"
+            selected = [skill for entry in inventory["data"] for skill in entry["skills"]
+                        if Path(skill["path"]) == expected_path]
+            assert len(selected) == 1, {"expected_path": str(expected_path), "matches": selected}
+            # Hosts that recognize the copied plugin manifest namespace even
+            # repo-scoped skills. Bind to the actual candidate path, not an
+            # installed skill that happens to have the same short name.
+            assert selected[0]["name"] in {"pcw", "persistent-context-workspace:pcw"}
+            cls.skill_prefix = selected[0]["name"][:-len("pcw")]
         described = cls.host.call("mcpServer/tool/call", {
             "threadId": cls.thread_id, "server": "pcw", "tool": "pcw_query",
             "arguments": {"operation": "describe"},
@@ -334,8 +345,9 @@ class CodexHostTests(unittest.TestCase):
         for short_name in ("pcw", "pcw-edit-instructions", "pcw-search", "pcw-create", "pcw-audit", "pcw-rework", "pcw-upgrade", "pcw-analyze"):
             matching = [skill for entry in skills["data"] for skill in entry["skills"]
                         if skill["name"] == self.skill_prefix + short_name
+                        and Path(skill["path"]) == self.skill_root / short_name / "SKILL.md"
                         and (self.source_mode or skill.get("pluginId") == PLUGIN_ID)]
-            self.assertEqual(1, len(matching), skills)
+            self.assertEqual(1, len(matching), {"skill": short_name, "matches": matching, "errors": [e.get("errors", []) for e in skills["data"]]})
             self.assertTrue(matching[0]["enabled"])
             self.assertTrue(matching[0]["path"].endswith("/skills/" + short_name + "/SKILL.md"))
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.0 — unreleased
+
+- Share one RAG/profile and analytical database across context folders under a selected memory root. Search defaults to the active category; explicit category lists and all-category retrieval preserve its instructions and write destination.
+- Introduce workspace format 2 with stable YAML IDs, descriptive filenames, cross-context links and unchanged-body vector reuse across path/category moves.
+- Generalize required sources to `reference` and `instruction`, covering files, records, queries and knowledge fragments as well as URLs. Skills require fresh bounded retrieval on every receipt.
+- Automatically route detected incompatibility to upgrade. Migrate cards and shared index together, retain workspace/control backups, custom instructions and unfinished proposals, and resume after file/index failures.
+
 ## 0.13.0 — 2026-10-07
 
 - Ask separately whether new contexts should author required external source links. Store the explicit choice in INSTRUCTIONS; preserve existing settings and retries of older accepted creation requests.

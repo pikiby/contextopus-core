@@ -6,3 +6,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Browser capture scratch; reviewed documentation media lives under docs/media.
+.playwright-mcp/

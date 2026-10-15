@@ -5,12 +5,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from test_runtime import Factory
 from pcw_runtime import PCWError, PCWRuntime
 from pcw_runtime.cycles import CycleRuntime
 from pcw_runtime.policies import policies
 from pcw_runtime.workspaces import EMPTY_PROJECT
+from pcw_runtime.runtime import _parse, _revision
+from pcw_runtime.cycles import _json
 
 
 def create(runtime, **settings):
@@ -86,7 +89,9 @@ def test_legacy_migration_preserves_every_source(tmp_path):
     replay = runtime.upgrade_apply(plan["revision"], "Retry")
     assert replay["replayed"]
     assert replay["project_description"]["status"] == "placeholder"
-    assert path.read_bytes() == text
+    migrated = runtime.read(material_id=item["id"])
+    assert migrated["content"] == _parse(text.decode())[1]
+    assert migrated["path"] == "knowledge/Exact-facts.md"
     assert runtime.instructions_read()["content"] == instructions
     assert (engine.root / "CURRENT.md").read_text() == "old task state"
     assert runtime.read(material_id=item["id"])["content"].startswith("# Exact facts")
@@ -220,14 +225,14 @@ def test_migration_interruption_keeps_backup_and_retries_same_operation(tmp_path
     with patch.object(runtime.engine, "_write", side_effect=interrupt):
         with pytest.raises(OSError):
             runtime.upgrade_apply(plan["revision"], "Upgrade selected context")
-    pending = json.loads((runtime.control.root / "migration.json").read_text())
+    pending = json.loads(runtime._migration_receipt_path().read_text())
     assert pending["status"] == "applying"
     assert not runtime._format_path().exists()
     assert (Path(pending["backup"]) / item["path"]).read_bytes() == original
     result = runtime.upgrade_apply(plan["revision"], "Resume the same migration")
     assert result["backup"] == pending["backup"]
     assert result["status"] == "complete"
-    assert (runtime.engine.root / item["path"]).read_bytes() == original
+    assert runtime.read(material_id=item["id"])["content"] == _parse(original.decode())[1]
 
 
 def legacy_with_work(tmp_path):
@@ -240,7 +245,39 @@ def legacy_with_work(tmp_path):
     runtime.tmp_write(saved, "# Storage retention\nVerified retention rules.")
     applied = runtime.proposal_prepare(saved, [{"key": "saved", "content": "# Retention\nSaved rules."}])
     runtime.proposal_apply(saved, applied["proposal_id"], applied["revision"], confirmation="Approve this text")
-    # The preceding release has the same draft format, but no workspace format marker.
+    # Build a genuine preceding-format fixture: filename identity, old snapshots
+    # and a per-context index. Do not disguise format-2 files by removing a marker.
+    def old_snapshot(ident, snapshot):
+        if snapshot is None:
+            return None
+        metadata, body = _parse(snapshot["text"])
+        metadata.pop("id", None)
+        text = "---\n" + yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True) + "---\n" + body
+        return {"path": "knowledge/" + ident, "text": text, "fingerprint": _revision(text)}
+    for material in list(runtime.engine.materials.values()):
+        path = runtime.engine.root / material.path
+        snapshot = old_snapshot(material.id, {"text": path.read_text()})
+        path.unlink()
+        (runtime.engine.root / snapshot["path"]).write_text(snapshot["text"])
+    records = runtime._records()
+    for cycle_id, cycle in records["cycles"].items():
+        for proposal_id, entry in cycle["proposals"].items():
+            plan = runtime._load_plan(cycle_id, proposal_id, entry)
+            plan.pop("format_version", None)
+            for ident, change in plan["entries"].items():
+                for which in ("before", "after"):
+                    change[which] = old_snapshot(ident, change[which])
+            runtime.engine._write(runtime._plan_path(cycle_id, proposal_id), _json(plan))
+            runtime.engine._write(runtime._plan_path(cycle_id, proposal_id).with_suffix(".md"), runtime._review(plan))
+            entry["revision"] = _revision(_json(plan))
+            for supplied in (proposal, applied):
+                if supplied["proposal_id"] == proposal_id:
+                    supplied["revision"] = entry["revision"]
+    runtime._persist(records)
+    runtime.engine.legacy_state.mkdir(exist_ok=True)
+    old_engine = PCWRuntime(tmp_path, "old", provider_factory=Factory())
+    old_engine.reconcile()
+    old_engine.close()
     runtime._format_path().unlink()
     (runtime.engine.root / "PROJECT.md").unlink()
     (runtime.engine.root / "current").rmdir()
@@ -262,11 +299,12 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     result = runtime.upgrade_apply(plan["revision"], "Upgrade without cancelling work")
     assert result["pending_work_preserved"] and result["status"] == "complete"
     after = runtime._source_files()
-    assert all(after[path] == digest for path, digest in before.items())
-    assert (Path(result["control_backup"]) / "cycles.json").read_bytes() == runtime.record_path.read_bytes()
-    assert (Path(result["control_backup"]) / "material-ids.json").read_bytes() == (runtime.control.root / "material-ids.json").read_bytes()
-    runtime._migration_verify_backup(result)
-    assert result["control_sources"] == control
+    assert all(after[path] == digest for path, digest in before.items() if not path.startswith("knowledge/"))
+    receipt = json.loads(runtime._migration_receipt_path().read_text())
+    assert (Path(receipt["control_backup"]) / "cycles.json").read_bytes() == runtime.record_path.read_bytes()
+    assert (Path(receipt["control_backup"]) / "material-ids.json").read_bytes() == (runtime.control.root / "material-ids.json").read_bytes()
+    runtime._migration_verify_backup(receipt)
+    assert receipt["control_sources"] == control
     assert runtime._records()["cycles"][pending]["state"] == "active"
     assert runtime._records()["cycles"][saved]["state"] == "active"
     assert not (runtime.engine.knowledge / proposal["created_ids"]["new"]).exists()
@@ -375,7 +413,7 @@ def test_snapshot_interruption_resumes_same_backup_without_overwrite(tmp_path):
     with patch.object(runtime, "_migration_copy", side_effect=interrupt):
         with pytest.raises(OSError):
             runtime.upgrade_apply(plan["revision"], "Upgrade")
-    operation = json.loads((runtime.control.root / "migration.json").read_text())
+    operation = json.loads(runtime._migration_receipt_path().read_text())
     first = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in Path(operation["backup"]).rglob("*") if p.is_file()}
     assert runtime.upgrade_plan()["resume_revision"] == plan["revision"]
     result = runtime.upgrade_apply(plan["revision"], "Retry same operation")

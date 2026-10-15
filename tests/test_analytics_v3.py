@@ -52,7 +52,7 @@ def test_dispatch_records_calls_errors_and_actual_files(tmp_path):
         version = event["versions"][0]
         assert version["relation"] == "during_call"
         assert "Observed mechanism" in runtime.analytics_blob_read(version["after_blob"])["value"]
-        path = runtime.engine.knowledge / p["created_ids"]["fact"]
+        path = runtime.engine.root / result["materials"][0]["path"]
         path.write_text(path.read_text().replace("Observed mechanism", "Outside MCP edit"))
         read = dispatch(str(tmp_path), "p", "read", {"material_id": p["created_ids"]["fact"]})
         observed = runtime.analytics_read(read["analytics"]["event_id"])

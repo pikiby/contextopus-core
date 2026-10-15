@@ -16,9 +16,9 @@ from test_workspace_v3 import create
 BODY = '''# Version support
 
 ```yaml
-required_sources:
-  - url: https://www.postgresql.org/support/versioning/
-    extract: Identify supported major versions and end-of-support dates.
+sources:
+  - reference: https://www.postgresql.org/support/versioning/
+    instruction: Identify supported major versions and end-of-support dates.
 ```
 
 Ordinary citation: https://www.postgresql.org/about/

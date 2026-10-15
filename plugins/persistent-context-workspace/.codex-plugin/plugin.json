@@ -1,6 +1,6 @@
 {
   "name": "persistent-context-workspace",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Project memory with independent reading, task state, configurable updates, history and analytics",
   "author": {
     "name": "pikiby",

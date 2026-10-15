@@ -21,6 +21,12 @@ PLUGIN = ROOT / "plugins" / "persistent-context-workspace"
 SCRIPTS = PLUGIN / "scripts"
 
 
+legacy_posix_launcher = unittest.skipUnless(
+    os.name == "posix" and Path("/bin/sh").is_file(),
+    "Legacy 0.14 POSIX shell launcher fixture; standalone Core/MCP coverage runs separately",
+)
+
+
 class StartupTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="pcw startup ")
@@ -97,6 +103,7 @@ class StartupTests(unittest.TestCase):
         ):
             self.distribution(name, module, version, body=body)
 
+    @legacy_posix_launcher
     def test_no_python_is_diagnosed_by_launcher(self):
         environment = {**self.environment, "PATH": str(self.root / "absent-bin")}
         environment.pop("PCW_PYTHON")
@@ -106,6 +113,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual("", result.stdout)
         self.assertFalse(self.packages.exists())
 
+    @legacy_posix_launcher
     def test_explicit_python_needs_no_python3_or_plugin_root_environment(self):
         environment = {**self.environment, "PATH": str(self.root / "absent-bin")}
         result = self.launch("--check", environment=environment)
@@ -114,6 +122,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(str(self.plugin), report["plugin_root"])
         self.assertEqual("missing_dependencies", report["status"])
 
+    @legacy_posix_launcher
     def test_path_python_is_used_without_looking_for_a_venv(self):
         binary_directory = self.root / "bin"
         binary_directory.mkdir()
@@ -128,6 +137,7 @@ class StartupTests(unittest.TestCase):
         self.assertNotIn("venv", target)
         self.assertFalse((self.root / "data").exists())
 
+    @legacy_posix_launcher
     def test_explicit_invalid_python_is_not_ignored(self):
         non_executable = self.root / "not executable"
         non_executable.write_text("not Python")
@@ -139,6 +149,7 @@ class StartupTests(unittest.TestCase):
                 self.assertIn("PCW", result.stderr)
                 self.assertEqual("", result.stdout)
 
+    @legacy_posix_launcher
     def test_old_python_is_rejected_before_loading_plugin_code(self):
         old_python = self.root / "old python"
         program = "import sys; sys.version_info = (3, 10); sys.version = '3.10.0 (fixture)'; exec(sys.argv[-1])"
@@ -150,6 +161,7 @@ class StartupTests(unittest.TestCase):
         self.assertIn("3.10.0", result.stderr)
         self.assertEqual("", result.stdout)
 
+    @legacy_posix_launcher
     def test_base_check_is_stdlib_only_and_read_only(self):
         self.base()
         before = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*"))
@@ -163,6 +175,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(str(self.packages), report["dependency_install_target"])
         self.assertEqual(before, sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*")))
 
+    @legacy_posix_launcher
     def test_local_missing_dependencies_do_not_block_base_readiness(self):
         self.base()
         self.assertEqual(0, self.launch("--check").returncode)
@@ -173,6 +186,7 @@ class StartupTests(unittest.TestCase):
         self.assertTrue(all(item["status"] == "missing_distribution" for item in report["dependencies"]["local"]))
 
     @unittest.skipIf(sys.prefix != sys.base_prefix, "The selected test interpreter intentionally disables its user site")
+    @legacy_posix_launcher
     def test_normal_user_site_packages_are_reused_and_explicit_restriction_is_respected(self):
         self.base()
         userbase = self.root / "existing user installation"
@@ -197,6 +211,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(None if visible_versions == "missing" else visible_versions,
                          report["dependencies"]["base"][0]["version"])
 
+    @legacy_posix_launcher
     def test_local_metadata_does_not_import_or_download(self):
         self.base()
         self.local()
@@ -206,6 +221,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual([], list(self.root.rglob("__pycache__")))
         self.assertEqual([], list(self.project.iterdir()))
 
+    @legacy_posix_launcher
     def test_selected_existing_venv_keeps_its_user_site_disabled(self):
         self.base()
         userbase = self.root / "existing user installation"
@@ -222,6 +238,7 @@ class StartupTests(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual("missing_distribution", report["dependencies"]["base"][0]["status"])
 
+    @legacy_posix_launcher
     def test_incompatible_direct_version_and_missing_module_are_reported(self):
         self.base(mcp_version="1.9.9")
         result = self.launch("--check")
@@ -235,6 +252,7 @@ class StartupTests(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual("missing_module", report["dependencies"]["base"][0]["status"])
 
+    @legacy_posix_launcher
     def test_explicit_import_failure_preserves_original_traceback(self):
         self.base()
         result = self.launch("--check-imports")
@@ -243,6 +261,7 @@ class StartupTests(unittest.TestCase):
         self.assertIn("Traceback (most recent call last)", result.stderr)
         self.assertIn("UNEXPECTED_DEPENDENCY_IMPORT", result.stderr)
 
+    @legacy_posix_launcher
     def test_explicit_local_imports_are_separate_from_base_imports(self):
         self.base(body="")
         self.local()
@@ -252,6 +271,7 @@ class StartupTests(unittest.TestCase):
         self.assertIn("UNEXPECTED_LOCAL_IMPORT", result.stderr)
         self.assertFalse(json.loads(result.stdout)["model_checked"])
 
+    @legacy_posix_launcher
     def test_active_cached_plugin_wins_and_server_stays_in_one_process(self):
         self.base(body="")
         for directory in (self.packages, self.project):
@@ -269,6 +289,7 @@ class StartupTests(unittest.TestCase):
         self.assertTrue(all(item["origin"] == str(self.plugin / "pcw_runtime" / "server.py") for item in outputs))
         self.assertTrue(all(item["transport"] == "stdio" for item in outputs))
 
+    @legacy_posix_launcher
     def test_normal_startup_has_no_readiness_output_on_stdout(self):
         result = self.launch()
         self.assertEqual(3, result.returncode)
@@ -276,6 +297,7 @@ class StartupTests(unittest.TestCase):
         self.assertIn('"status": "missing_dependencies"', result.stderr)
         self.assertIn("startup never installs", result.stderr)
 
+    @legacy_posix_launcher
     def test_invalid_dependency_directory_is_actionable(self):
         for value in ("", "relative/packages", str(self.python)):
             with self.subTest(value=value):

@@ -1,0 +1,418 @@
+"""Application assembly: explicit root/context, shared resources and module registry."""
+
+from dataclasses import dataclass
+from importlib import metadata, resources as package_resources
+from pathlib import Path
+from pydantic import ConfigDict, create_model
+from .core.operations import OperationRegistry, OperationSpec
+from .core.resources import ProcessResources
+from .core.storage import StorageLayout
+from .core.monitoring import RootServices
+
+
+@dataclass(frozen=True)
+class RequestContext:
+    root: Path
+    workspace: str | None = None
+
+
+class Application:
+    def __init__(self, root, context=None, *, resources=None, discover=True):
+        self.layout = StorageLayout.resolve(root)
+        self.context = RequestContext(self.layout.root, context)
+        self.resources = resources or ProcessResources()
+        self._owns_resources = resources is None
+        from .core.analytics import OperationJournal
+
+        self.journal = OperationJournal(self.layout)
+        self.registry = OperationRegistry(self.journal)
+        from .core.rag import RagIndex
+
+        self.index = RagIndex(self.layout, self.resources)
+        from .modules.workspace.source import WorkspaceEligibility
+
+        self.index.register_source(
+            "workspace", WorkspaceEligibility(self.layout, self.resources.acquire)
+        )
+        self.services = RootServices(self.layout, self.resources, self.registry)
+        self._register_core()
+        from .modules.workspace.operations import register_operations
+
+        register_operations(self.registry, provider_factory=self.resources.acquire)
+        self.registry.register_module(
+            "workspace", available=True, state="available", open_tui=None
+        )
+        if discover:
+            for entry in metadata.entry_points(group="contextopus.modules"):
+                entry.load()(self)
+        try:
+            from .modules.session_search import SessionSearch
+
+            module = SessionSearch()
+            if module.available():
+                module.register(self.registry)
+                self.registry.register_module(
+                    "session_search",
+                    available=True,
+                    state="available",
+                    open_tui="session_search.open_tui",
+                )
+        except ImportError:
+            pass
+
+    def _operation(self, name, kind, fn, fields=None):
+        model = create_model(
+            name.replace(".", "_") + "_arguments",
+            __config__=ConfigDict(extra="forbid", strict=True),
+            **(fields or {}),
+        )
+        self.registry.register(
+            OperationSpec(
+                name,
+                kind,
+                model,
+                lambda request_context, **kw: fn(**kw),
+                description=fn.__doc__ or name.replace("_", " ").replace(".", " "),
+                guard_root=not name.startswith("core.relocation_"),
+            )
+        )
+
+    def _register_core(self):
+        self._operation("core.status", "query", self.services.status)
+        self._operation(
+            "core.search",
+            "query",
+            self.search,
+            {
+                "query": (str, ...),
+                "module": (str | None, None),
+                "collection": (str | None, None),
+                "object_type": (str | None, None),
+                "include_archived": (bool | None, None),
+                "distance": (float | None, None),
+                "limit": (int | None, None),
+            },
+        )
+        self._operation("core.model_hardware", "query", self.model_hardware)
+        self._operation(
+            "core.model_plan",
+            "query",
+            self.model_plan,
+            {
+                "config": (dict | None, None),
+                "chunking": (dict | None, None),
+                "device": (str, "auto"),
+            },
+        )
+        self._operation(
+            "core.model_apply", "execute", self.model_apply, {"plan": (dict, ...)}
+        )
+        self._operation(
+            "core.settings",
+            "query",
+            self.settings,
+            {
+                "module": (str | None, None),
+                "context": (str | None, None),
+                "request": (dict | None, None),
+            },
+        )
+        self._operation(
+            "core.settings_preview",
+            "query",
+            self.settings_preview,
+            {
+                "changes": (dict, ...),
+                "module": (str | None, None),
+                "context": (str | None, None),
+                "request_only": (bool, False),
+            },
+        )
+        self._operation(
+            "core.settings_apply",
+            "execute",
+            self.services.apply_settings,
+            {"preview_revision": (str, ...)},
+        )
+        self._operation("procedure", "query", self.procedure, {"name": (str, ...)})
+        self._operation("core.init", "execute", self.initialize)
+        self._operation("core.doctor", "query", self.doctor)
+        self._operation("core.index_upgrade", "execute", self.index_upgrade)
+        self._operation(
+            "core.relocation_plan",
+            "query",
+            self.relocation_plan,
+            {"destination": (str, ...)},
+        )
+        self._operation(
+            "core.relocation_apply",
+            "execute",
+            self.relocation_apply,
+            {"plan": (dict, ...)},
+        )
+        self._operation(
+            "core.relocation_rollback",
+            "execute",
+            self.relocation_rollback,
+            {"plan": (dict, ...)},
+        )
+
+    def settings(self, module=None, context=None, request=None):
+        return self.services._settings.snapshot(module, context, request)
+
+    def settings_preview(self, changes, module=None, context=None, request_only=False):
+        return self.services._settings.preview(changes, module, context, request_only)
+
+    def active_profile(self):
+        import json
+
+        path = self.layout.workspace_rag / "active.json"
+        return json.loads(path.read_text()) if path.is_file() else None
+
+    def model_hardware(self):
+        from .core.model_setup import detect_hardware
+
+        return detect_hardware()
+
+    def model_plan(self, config=None, chunking=None, device="auto"):
+        from .core.model_setup import plan_embedding_setup
+
+        return plan_embedding_setup(
+            config, chunking, device, previous=self.active_profile()
+        )
+
+    def model_apply(self, plan):
+        from .core.model_setup import apply
+
+        return apply(
+            plan, apply_profile=self.apply_profile, read_active=self.active_profile
+        )
+
+    def apply_profile(self, config, chunking):
+        from .modules.workspace.server import runtime
+
+        contexts = self.layout.workspace_base
+        names = (
+            [
+                p.name
+                for p in sorted(contexts.iterdir())
+                if not p.name.startswith(".")
+                and p.is_dir()
+                and (p / "knowledge").is_dir()
+            ]
+            if contexts.is_dir()
+            else []
+        )
+        if names:
+            selected = (
+                self.context.workspace if self.context.workspace in names else names[0]
+            )
+            engine = runtime(
+                str(self.layout.root), selected, provider_factory=self.resources.acquire
+            ).engine
+            from .modules.workspace.runtime import SearchConfig
+
+            search = (
+                self.active_profile()["search"]
+                if self.active_profile()
+                else vars(SearchConfig())
+            )
+            return engine.switch_embeddings(config, search, chunking)
+        active = self.active_profile()
+        if active:
+            from .core.rag import rebuild_profile
+
+            self.index._generic_table()
+            if self.index.table.count_rows():
+                raise ValueError(
+                    "Profile switch requires module source adapters for existing documents"
+                )
+            result = rebuild_profile(
+                self.index,
+                previous=active,
+                config=config,
+                search=active["search"],
+                chunking=chunking,
+                documents=[],
+                validate_snapshot=lambda: None,
+                read_active=self.active_profile,
+                write_active=self.write_active_profile,
+                factory=self.resources.acquire,
+            )
+            provider = result.pop("_provider", None)
+            if provider is not None:
+                provider.close()
+            self.index._provider = None
+            self.index.embeddings = self.index.chunking = None
+            return result
+        # Initial setup verifies the actual adapter before publishing a pointer.
+        from .core.rag import RagIndex
+
+        provider = self.resources.acquire(config)
+        try:
+            RagIndex.vectors(
+                provider,
+                ["Embedding connection verification"],
+                config["profile"]["dimensions"],
+                "document",
+            )
+            self.initialize()
+            self.index.embeddings, self.index.chunking = config, chunking
+            self.index._generic_table(create=True)
+            self.index._provider = provider
+        except Exception:
+            provider.close()
+            raise
+        return {"status": "ok", "active": self.active_profile(), "reembedded": False}
+
+    def write_active_profile(self, active):
+        import json, os
+        from .core.storage import sync_directory
+
+        path = self.layout.workspace_rag / "active.json"
+        temporary = path.with_suffix(".tmp")
+        with temporary.open("w") as stream:
+            json.dump(active, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        sync_directory(path.parent)
+
+    def search(self, query, **options):
+        root_values = self.services.settings()["values"]
+        selected_module = (
+            options.get("module")
+            or root_values.get("module")
+            or ("workspace" if self.context.workspace else None)
+        )
+        selected_collection = (
+            options.get("collection")
+            or self.context.workspace
+            or root_values.get("context")
+        )
+        snapshot = self.services._settings.snapshot(
+            module=selected_module,
+            context=selected_collection if selected_module else None,
+        )
+        values = snapshot["values"]
+        defaults = {
+            "module": selected_module or values.get("module"),
+            "collection": selected_collection or values.get("context"),
+            "object_type": values.get("object_type"),
+            "include_archived": values.get("include_archived", False),
+            "distance": values.get("distance"),
+            "limit": values.get("searchN", 20),
+        }
+        defaults.update({k: v for k, v in options.items() if v is not None})
+        return {"results": self.index.search(query, **defaults), "effective": defaults}
+
+    def procedure(self, name):
+        if name == "default-instructions":
+            return {
+                "name": name,
+                "content": package_resources.files("contextopus.modules.workspace")
+                .joinpath("default_instructions.md")
+                .read_text(encoding="utf-8"),
+            }
+        parts = name.split("/")
+        if any(not p or p in {".", ".."} or "\\" in p for p in parts):
+            raise ValueError("Invalid procedure name")
+        path = package_resources.files("contextopus").joinpath(
+            "resources", "procedures", *parts[:-1], parts[-1] + ".md"
+        )
+        return {"name": name, "content": path.read_text(encoding="utf-8")}
+
+    def index_upgrade(self):
+        if self.active_profile() is None:
+            return {"status": "not_initialized", "root": str(self.layout.root)}
+        self.index._generic_table(create=True)
+        return {
+            "status": "upgraded",
+            "table": self.index.table.name,
+            "columns": self.index.table.schema.names,
+            "model_loaded": self.index._provider is not None,
+        }
+
+    def initialize(self):
+        if (self.layout.root / ".pcw").is_dir():
+            return {
+                "status": "relocation_required",
+                "root": str(self.layout.root),
+                "next_action": "core.relocation_plan",
+            }
+        with self.layout.guard():
+            for path in (
+                self.layout.rag,
+                self.layout.analytics,
+                self.layout.configuration,
+                self.layout.root / "modules/workspace/workspace_contexts",
+                self.layout.root / "modules/workspace/control",
+            ):
+                path.mkdir(parents=True, exist_ok=True)
+        return {"status": "initialized", "root": str(self.layout.root)}
+
+    def doctor(self):
+        return {
+            "root": str(self.layout.root),
+            "exists": self.layout.root.is_dir(),
+            "frozen": (self.layout.root / ".contextopus-freeze.json").exists(),
+            "layout": "legacy"
+            if (self.layout.root / ".pcw").exists()
+            else "contextopus",
+            "model_loaded": bool(self.resources.providers._entries),
+        }
+
+    def relocation_plan(self, destination):
+        from .core.relocation import plan
+
+        return plan(self.layout.root, destination)
+
+    def relocation_apply(self, plan):
+        from .core.relocation import apply
+
+        if Path(plan["source"]).resolve() != self.layout.root:
+            raise ValueError("Plan belongs to another root")
+        from .modules.workspace.server import _runtimes, _cache_lock
+
+        with _cache_lock:
+            for key in [k for k in _runtimes if k[0] == str(self.layout.root)]:
+                _runtimes.pop(key).close()
+        self.index.table = self.index.db = None
+        result = apply(plan)
+        self.journal.rebind(StorageLayout(result["destination"]))
+        return result
+
+    def relocation_rollback(self, plan):
+        from .core.relocation import rollback
+
+        result = rollback(plan)
+        return result
+
+    def query(self, operation, arguments=None):
+        if operation == "describe":
+            return self.registry.describe((arguments or {}).get("operation"))
+        return self.registry.dispatch("query", operation, arguments, self.context)
+
+    def execute(self, operation, arguments=None):
+        return self.registry.dispatch("execute", operation, arguments, self.context)
+
+    def close(self):
+        if self._owns_resources:
+            from .modules.workspace.server import _runtimes, _cache_lock
+
+            with _cache_lock:
+                selected = [
+                    k
+                    for k, runtime in _runtimes.items()
+                    if k[0] == str(self.context.root)
+                    and runtime.engine._factory == self.resources.acquire
+                ]
+                for key in selected:
+                    _runtimes.pop(key).close()
+            self.resources.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()

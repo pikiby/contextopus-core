@@ -1,0 +1,2 @@
+recursive-include src/contextopus/resources *.md *.yaml *.json
+include README.md

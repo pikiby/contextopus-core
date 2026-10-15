@@ -1,6 +1,12 @@
 # PCW implementation
 
-Version 0.13.0 implements the [v3 design](docs/context-workspace-design-v3.md).
+Version 0.14.0 implements the [v4 design](docs/context-workspace-design-v4.md), extending the previous v3 work below.
+
+- Share the RAG and analytical databases under the chosen memory root while retaining separate context files and rules.
+- Filter one, several or all categories before vector top-N; cross-context reading never switches active instructions.
+- Store stable IDs in YAML and use descriptive renameable knowledge filenames.
+- Generalize required sources to references and bounded retrieval instructions, checked on every receipt.
+- Route incompatible contexts immediately to migration; migrate cards and vectors together with recoverable snapshots and retained unfinished proposals.
 
 The complete ordered work is tracked in [the upgrade plan](docs/context-workspace-upgrade-plan.md). Its execution procedure is [the goal](docs/context-workspace-upgrade-goal.md); API details are in [the contracts](docs/context-workspace-v3-contracts.md).
 
