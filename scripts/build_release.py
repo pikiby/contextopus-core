@@ -17,6 +17,8 @@ def main():
     for client in ("codex", "claude-code", "opencode", "crush"):
         archive = destination / f"contextopus-{client}-{VERSION}.zip"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for name in ("LICENSE", "NOTICE"):
+                bundle.write(ROOT / name, name)
             for path in sorted(skills.rglob("*")):
                 if path.is_file():
                     bundle.write(path, "skills/" + path.relative_to(skills).as_posix())

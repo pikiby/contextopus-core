@@ -10,15 +10,16 @@ external note, but also redundant operational knowledge, a follow-up for omitted
 content, repeated reads and a wrong executor binding. The four-response size
 comparison in the previous release was not a measurement of this normal task.
 
-Reproduction reads these exact local logs; it does not scan session directories
-or export message bodies:
+Reproduction requires the original measurement logs, which are not distributed.
+Replace the example paths below with your own logs; the command does not scan
+session directories or export message bodies:
 
 ```sh
 python3 tests/measure_native_cycle.py \
   --start 2026-09-16T23:45:18.912Z --end 2026-09-16T23:58:14.416Z \
-  /home/example/.codex/sessions/2026/09/16/rollout-2026-09-16T19-30-01-trace-redacted-06.jsonl \
-  /home/example/.codex/sessions/2026/09/16/rollout-2026-09-16T20-49-28-trace-redacted-07.jsonl \
-  /home/example/.codex/sessions/2026/09/16/rollout-2026-09-16T20-56-24-trace-redacted-08.jsonl
+  /path/to/primary.jsonl \
+  /path/to/author.jsonl \
+  /path/to/splitter.jsonl
 ```
 
 | Observation | Original task |

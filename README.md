@@ -58,3 +58,7 @@ Other client names: `claude-code`, `opencode`, `crush`. Integration refuses name
 - [Previous changelog](CHANGELOG.md)
 
 The repository remains private. The [validated six-job matrix](https://github.com/pikiby/contextopus-core/actions/runs/38671106182) tests, builds, verifies and installs the wheel on Linux, macOS and Windows with Python 3.12 and 3.13. [Release notes](docs/releases/1.0.0.md) describe performed checks and their limits.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.

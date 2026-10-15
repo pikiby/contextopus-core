@@ -2,6 +2,7 @@
 
 from pathlib import Path, PurePosixPath
 import hashlib
+from email.parser import BytesParser
 import json
 import tarfile
 import tomllib
@@ -47,6 +48,15 @@ def verify():
     }
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
+        dist_info = f"{distribution}-{version}.dist-info"
+        package_metadata = BytesParser().parsebytes(archive.read(f"{dist_info}/METADATA"))
+        if package_metadata["License-Expression"] != "Apache-2.0":
+            raise ValueError("Wheel license metadata is missing or inconsistent")
+        if set(package_metadata.get_all("License-File", [])) != {"LICENSE", "NOTICE"}:
+            raise ValueError("Wheel license file declarations are incomplete")
+        for name in ("LICENSE", "NOTICE"):
+            if archive.read(f"{dist_info}/licenses/{name}") != (ROOT / name).read_bytes():
+                raise ValueError(f"Wheel misses the exact {name}")
         if not required <= names:
             raise ValueError("Wheel misses required application modules/resources")
         if any(
@@ -56,6 +66,10 @@ def verify():
             raise ValueError("Unsafe wheel member path")
     with tarfile.open(sdist) as archive:
         names = {PurePosixPath(name).parts[1:] for name in archive.getnames()}
+        for name in ("LICENSE", "NOTICE"):
+            member = archive.extractfile(f"{distribution}-{version}/{name}")
+            if member is None or member.read() != (ROOT / name).read_bytes():
+                raise ValueError(f"sdist misses the exact {name}")
         if tuple("pyproject.toml".split("/")) not in names:
             raise ValueError("sdist misses project metadata")
     source = ROOT / "src/contextopus/resources/skills"
@@ -63,6 +77,9 @@ def verify():
         with zipfile.ZipFile(
             destination / f"contextopus-{client}-{version}.zip"
         ) as archive:
+            for name in ("LICENSE", "NOTICE"):
+                if archive.read(name) != (ROOT / name).read_bytes():
+                    raise ValueError(f"{client} bundle misses the exact {name}")
             for skill in source.iterdir():
                 if (
                     skill.is_dir()

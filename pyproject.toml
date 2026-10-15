@@ -7,6 +7,8 @@ name = "contextopus-core"
 version = "1.0.0"
 description = "Standalone persistent context for people and coding agents"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 dependencies = ["lancedb>=0.20,<1", "mcp>=1.10,<2", "PyYAML>=6,<7", "pydantic>=2.11,<3", "textual==8.2.8", "platformdirs>=4,<5", "tomlkit>=0.13,<1", "jsonschema>=4,<5"]
 
