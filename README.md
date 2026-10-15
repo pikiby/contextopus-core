@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/contextopus-logo.png" alt="Contextopus logo" width="360">
+  <img src="docs/media/contextopus-wide-1200.svg" alt="Contextopus animated logo" width="1200">
 </p>
 
 # Contextopus
