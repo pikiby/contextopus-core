@@ -1,10 +1,14 @@
+<p align="center">
+  <img src="docs/media/contextopus-logo.png" alt="Contextopus logo" width="360">
+</p>
+
 # Contextopus
 
 Persistent context for people and coding agents. Keep project knowledge, working instructions and unfinished work outside a chat, then use the same context from a terminal or your coding assistant.
 
 Contextopus is a standalone Python application with a shared Core, a Workspace module, a terminal interface and an MCP service. Coding-client integrations connect to that service and expose short skills.
 
-**1.0.0 is validated and installed.** Linux, macOS and Windows pass the Python 3.12/3.13 matrix. Real Qwen CPU inference and native connections from all four supported coding clients were verified. Installation uses a checked wheel from the private GitHub Release; no PyPI publication is implied. Screenshots below show actual headless TUI rendering with synthetic example data.
+**1.0.0 is validated and installed.** Linux, macOS and Windows pass the Python 3.12/3.13 matrix. Real Qwen CPU inference and native connections from all four supported coding clients were verified. Installation uses a checked wheel from [GitHub Releases](https://github.com/pikiby/contextopus-core/releases); no PyPI publication is implied. Screenshots below show actual headless TUI rendering with synthetic example data.
 
 ![Contextopus terminal example](docs/media/tui/main-wide.png)
 
@@ -26,7 +30,7 @@ Full procedures are served by the installed runtime when needed. Workspace selec
 
 ## Install
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), download the private release's wheel through an authenticated GitHub session, and verify it against `SHA256SUMS`. From the download directory:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), download the wheel from the [1.0.0 release](https://github.com/pikiby/contextopus-core/releases/tag/v1.0.0), and verify it against `SHA256SUMS`. From the download directory:
 
 ```console
 uv tool install --python 3.12 ./contextopus_core-1.0.0-py3-none-any.whl
@@ -57,7 +61,7 @@ Other client names: `claude-code`, `opencode`, `crush`. Integration refuses name
 - [1.0.0 release notes](docs/releases/1.0.0.md)
 - [Previous changelog](CHANGELOG.md)
 
-The repository remains private. The [validated six-job matrix](https://github.com/pikiby/contextopus-core/actions/runs/38671106182) tests, builds, verifies and installs the wheel on Linux, macOS and Windows with Python 3.12 and 3.13. [Release notes](docs/releases/1.0.0.md) describe performed checks and their limits.
+The [validated six-job matrix](https://github.com/pikiby/contextopus-core/actions/runs/38671106182) tests, builds, verifies and installs the wheel on Linux, macOS and Windows with Python 3.12 and 3.13. [Release notes](docs/releases/1.0.0.md) describe performed checks and their limits.
 
 ## License
 
