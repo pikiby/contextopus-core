@@ -6,6 +6,7 @@ import subprocess
 import textwrap
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 from .backend import Backend
@@ -21,12 +22,12 @@ class ContextopusApp(App):
     #content { width: 79; max-width: 100%; height: auto; background: transparent; }
     """
     BINDINGS = [
-        ("up", "up", "Select"),
-        ("down", "down", "Select"),
-        ("left", "change", "Change"),
-        ("right", "change", "Change"),
-        ("enter", "apply", "Apply"),
-        ("q", "back", "Quit"),
+        Binding("up", "up", "Select", priority=True),
+        Binding("down", "down", "Select", priority=True),
+        Binding("left", "change", "Change", priority=True),
+        Binding("right", "change", "Change", priority=True),
+        Binding("enter", "apply", "Apply", priority=True),
+        Binding("q", "back", "Quit", priority=True),
     ]
 
     def __init__(self, application):

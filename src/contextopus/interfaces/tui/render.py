@@ -4,13 +4,13 @@ from .charts import History
 
 
 def value(item, suffix=""):
-    return (
-        "—"
-        if item is None
-        else f"{item:,}{suffix}"
-        if isinstance(item, (int, float))
-        else str(item)
-    )
+    if item is None:
+        return "—"
+    if isinstance(item, float):
+        return f"{item:,.2f}{suffix}"
+    if isinstance(item, int):
+        return f"{item:,}{suffix}"
+    return str(item)
 
 
 def bar(number):
