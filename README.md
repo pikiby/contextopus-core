@@ -23,7 +23,6 @@ Actual Textual render with clearly marked synthetic example data. [Keyboard sett
 | Analyze actual agent operations and historical instructions | `w-analyze` skill |
 | Review a requested instructions change | `w-settings` skill |
 | Create an explicitly requested Workspace | `w-create` skill |
-| Upgrade old PCW installation, contexts and native skills | `w` → upgrade |
 | Find a context by name, path or meaning | `w-find` skill |
 | Inspect status/settings/modules | `contextopus status`, `settings`, `modules` |
 | Work from a terminal interface | `contextopus tui` |
