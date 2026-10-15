@@ -112,35 +112,38 @@ class EventStore:
 
     @contextmanager
     def connect(self):
-        self._safe()
-        self.root.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA busy_timeout=30000")
-        db.executescript("""
-            CREATE TABLE IF NOT EXISTS blobs (id TEXT PRIMARY KEY, text TEXT NOT NULL, redactions INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS events (
-              id TEXT PRIMARY KEY, workspace TEXT NOT NULL, tool TEXT NOT NULL, cycle_id TEXT, task_id TEXT,
-              mode TEXT, started_at TEXT NOT NULL, finished_at TEXT, duration_ms REAL,
-              state TEXT NOT NULL, params TEXT, result TEXT, error TEXT, result_bytes INTEGER,
-              source TEXT NOT NULL DEFAULT 'mcp', source_event_id TEXT, import_id TEXT);
-            CREATE INDEX IF NOT EXISTS events_scope ON events(workspace, cycle_id, task_id, started_at);
-            CREATE TABLE IF NOT EXISTS versions (
-              event_id TEXT, path TEXT, relation TEXT NOT NULL, before_hash TEXT, after_hash TEXT,
-              before_blob TEXT, after_blob TEXT, PRIMARY KEY(event_id, path, relation));
-            CREATE TABLE IF NOT EXISTS observed (workspace TEXT, path TEXT, hash TEXT, blob TEXT,
-              PRIMARY KEY(workspace, path));
-            CREATE TABLE IF NOT EXISTS imports (id TEXT PRIMARY KEY, adapter TEXT NOT NULL,
-              source_path TEXT, session_id TEXT, imported_at TEXT, records INTEGER);
-            CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, created_at TEXT,
-              criterion TEXT, assessment TEXT, evidence TEXT);
-        """)
-        try:
-            with db:
-                yield db
-        finally:
-            db.close()
+        # WAL initialization is not safely serialized by SQLite busy_timeout
+        # alone. Share the same portable root lock as every domain operation.
+        with self.layout.guard():
+            self._safe()
+            self.root.mkdir(parents=True, exist_ok=True)
+            db = sqlite3.connect(self.path, timeout=30)
+            try:
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA busy_timeout=30000")
+                db.execute("PRAGMA journal_mode=WAL")
+                db.executescript("""
+                    CREATE TABLE IF NOT EXISTS blobs (id TEXT PRIMARY KEY, text TEXT NOT NULL, redactions INTEGER NOT NULL);
+                    CREATE TABLE IF NOT EXISTS events (
+                      id TEXT PRIMARY KEY, workspace TEXT NOT NULL, tool TEXT NOT NULL, cycle_id TEXT, task_id TEXT,
+                      mode TEXT, started_at TEXT NOT NULL, finished_at TEXT, duration_ms REAL,
+                      state TEXT NOT NULL, params TEXT, result TEXT, error TEXT, result_bytes INTEGER,
+                      source TEXT NOT NULL DEFAULT 'mcp', source_event_id TEXT, import_id TEXT);
+                    CREATE INDEX IF NOT EXISTS events_scope ON events(workspace, cycle_id, task_id, started_at);
+                    CREATE TABLE IF NOT EXISTS versions (
+                      event_id TEXT, path TEXT, relation TEXT NOT NULL, before_hash TEXT, after_hash TEXT,
+                      before_blob TEXT, after_blob TEXT, PRIMARY KEY(event_id, path, relation));
+                    CREATE TABLE IF NOT EXISTS observed (workspace TEXT, path TEXT, hash TEXT, blob TEXT,
+                      PRIMARY KEY(workspace, path));
+                    CREATE TABLE IF NOT EXISTS imports (id TEXT PRIMARY KEY, adapter TEXT NOT NULL,
+                      source_path TEXT, session_id TEXT, imported_at TEXT, records INTEGER);
+                    CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, created_at TEXT,
+                      criterion TEXT, assessment TEXT, evidence TEXT);
+                """)
+                with db:
+                    yield db
+            finally:
+                db.close()
 
     @staticmethod
     def _blob(db, value):

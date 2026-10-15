@@ -55,6 +55,11 @@ class SessionSearch:
         return self.launch_command() is not None
 
     def request(self, payload):
+        if not hasattr(socket, "AF_UNIX"):
+            raise RuntimeError(
+                "The external session-search daemon requires Unix-domain sockets; "
+                "this Python platform does not support AF_UNIX"
+            )
         encoded = json.dumps(payload).encode() + b"\n"
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(self.timeout)
@@ -78,6 +83,10 @@ class SessionSearch:
                 "available": self.available(),
                 "launch_command": self.launch_command(),
                 "socket_path": self.socket_path,
+                "transport": {
+                    "kind": "unix_socket",
+                    "supported": hasattr(socket, "AF_UNIX"),
+                },
                 "daemon": self.request({"op": "status"}),
             }
         except (OSError, ValueError, RuntimeError) as exc:
@@ -88,6 +97,10 @@ class SessionSearch:
                 "available": self.available(),
                 "launch_command": self.launch_command(),
                 "socket_path": self.socket_path,
+                "transport": {
+                    "kind": "unix_socket",
+                    "supported": hasattr(socket, "AF_UNIX"),
+                },
                 "state": "unavailable",
                 "reason": str(exc),
             }

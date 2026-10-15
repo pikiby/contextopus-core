@@ -56,14 +56,18 @@ def _start_unlocked(root):
             stderr=log,
             **options,
         )
-    (runtime / "service.json").write_text(
-        json.dumps({"pid": process.pid, "root": str(root)})
-    )
     for _ in range(100):
         if process.poll() is not None:
             raise RuntimeError(f"Service exited; inspect {runtime / 'service.log'}")
         current = status(root)
         if current["state"] == "running":
+            if current.get("root") != str(root):
+                raise RuntimeError("The service endpoint belongs to another root")
+            # On Windows, a venv launcher can have a different PID from the
+            # interpreter that actually owns the endpoint. Use health identity.
+            (runtime / "service.json").write_text(
+                json.dumps({"pid": current["pid"], "root": str(root)})
+            )
             return current
         time.sleep(0.1)
     raise RuntimeError("Service startup timed out; inspect service.log")

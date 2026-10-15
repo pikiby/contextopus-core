@@ -31,7 +31,7 @@ class StartupTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="pcw startup ")
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.packages = self.root / "private packages"
         self.project = self.root / "source project"
         self.project.mkdir()

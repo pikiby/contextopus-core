@@ -181,7 +181,7 @@ def plan(
             )
             if (
                 prior != content
-                and _digest(prior) not in accepted
+                and _digest(prior.replace(b"\r\n", b"\n")) not in accepted
                 and managed.get("skills", {}).get(relative) != _digest(prior)
             ):
                 raise IntegrationConflict(

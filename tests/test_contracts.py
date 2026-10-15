@@ -316,7 +316,9 @@ class LauncherTests(unittest.TestCase):
                         return result
 
                     created = call("workspace_create", request_id="protocol-create", user_request="Create the protocol fixture",
-                        instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text(),
+                        # Protocol/approval coverage is strictly offline; the real
+                        # model/tokenizer is exercised by separate inference tests.
+                        instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text().replace("material_max_tokens: 1024", "material_max_tokens: null"),
                         project_content="# Protocol fixture\nA temporary test project.\n")
                     self.assertEqual("created", created["status"])
                     self.assertEqual([], call("search", query="empty")["results"])

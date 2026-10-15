@@ -127,7 +127,11 @@ def test_http_remote_facade_shared_owner(tmp_path):
                     time.sleep(0.05)
             else:
                 pytest.fail("HTTP MCP server did not start")
-            assert health["pid"] == process.pid
+            assert isinstance(health["pid"], int) and health["pid"] > 0
+            assert health["root"] == str((tmp_path / "data").resolve())
+            # Windows venv python.exe redirects to a child interpreter PID.
+            if os.name != "nt":
+                assert health["pid"] == process.pid
             first = RemoteApplication(
                 tmp_path / "data", endpoint=f"http://127.0.0.1:{port}/mcp"
             )
@@ -167,18 +171,22 @@ def test_offline_observation_does_not_start_or_create(
     assert not root.exists()
 
 
-def test_user_scope_and_existing_plain_jsonc_are_merged(tmp_path):
-    config = tmp_path / ".config/opencode/opencode.jsonc"
+def test_user_scope_and_existing_plain_jsonc_are_merged(tmp_path, monkeypatch):
+    config_base = tmp_path / "native-config"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_base))
+    monkeypatch.setenv("LOCALAPPDATA", str(config_base))
+    config = config_base / "opencode/opencode.jsonc"
     config.parent.mkdir(parents=True)
     config.write_text('{"unrelated":"keep"}')
     integrate(plan("opencode", tmp_path, scope="user", install_skills=False))
     saved = json.loads(config.read_text())
     assert saved["unrelated"] == "keep"
     assert saved["mcp"]["contextopus"]["type"] == "remote"
-    assert not (tmp_path / ".config/opencode/skills").exists()
+    assert not (config_base / "opencode/skills").exists()
 
 
-def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path):
+@pytest.mark.parametrize("crlf", [False, True])
+def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path, crlf):
     import hashlib
     from importlib.resources import files
 
@@ -189,7 +197,8 @@ def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path):
         Path(__file__).resolve().parents[1]
         / "plugins/persistent-context-workspace/skills/pcw/SKILL.md"
     )
-    old.write_bytes(source.read_bytes())
+    original = source.read_bytes().replace(b"\r\n", b"\n")
+    old.write_bytes(original.replace(b"\n", b"\r\n") if crlf else original)
     integrate(
         plan("claude-code", tmp_path, scope="user", legacy_skills=old.parent.parent)
     )
@@ -251,3 +260,29 @@ def test_explicit_default_root_binding_is_persistent_without_data_creation(
     assert not target.exists()
     monkeypatch.setenv("CONTEXTOPUS_ROOT", str(tmp_path / "override"))
     assert cli.default_root() == tmp_path / "override"
+
+
+def test_service_records_actual_owner_pid_after_venv_redirector(tmp_path, monkeypatch):
+    from contextopus.integrations import service
+    from types import SimpleNamespace
+
+    states = iter(
+        [{"state": "stopped"}, {"state": "running", "root": str(tmp_path), "pid": 111}]
+    )
+    monkeypatch.setattr(service, "status", lambda root: next(states))
+    monkeypatch.setattr(
+        service.subprocess,
+        "Popen",
+        lambda *a, **kw: SimpleNamespace(pid=999, poll=lambda: None),
+    )
+    assert service.start(tmp_path)["pid"] == 111
+    assert json.loads((tmp_path / "runtime/service.json").read_text())["pid"] == 111
+    monkeypatch.setattr(
+        service,
+        "status",
+        lambda root: {"state": "running", "root": str(tmp_path), "pid": 111},
+    )
+    signalled = []
+    monkeypatch.setattr(service.os, "kill", lambda pid, signal: signalled.append(pid))
+    assert service.stop(tmp_path)["pid"] == 111
+    assert signalled == [111]
