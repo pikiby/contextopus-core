@@ -1,46 +1,56 @@
 # Contextopus 1.0.0 transition
 
-The existing 0.14.0 working tree is the source, including uncommitted v4 work. HEAD is 0.13.0; comparing only HEAD loses that distinction. Delivery baseline: `/tmp/contextopus-delivery-baseline` (tracked patch, status and preexisting package/doc copies).
+## Source baseline
 
-## Acceptance and ownership
+The transition began from the preexisting dirty 0.14.0/v4 working tree, whose Git
+HEAD was 0.13.0. That is the original baseline, not the current release state.
+The tracked patch, status and preexisting package/document copies were preserved
+in the delivery baseline before implementation.
 
-- [x] Identity: Contextopus; distribution `contextopus-core`; import `contextopus`; command `contextopus`; target private repository `pikiby/contextopus-core`.
-- [x] Root Python 3.12+ package; optional local embeddings; canonical resources included in wheel.
-- [x] Core/Application/registry and Workspace reuse the existing implementation (core owner).
-- [x] One loopback HTTP MCP owner; thin native Codex/Claude Code/OpenCode/Crush configuration adapters.
-- [x] Canonical procedures retain selection, implicit-update, source-reading, review/approval and migration constraints; native skills fetch them progressively.
-- [x] Integrations preview affected paths, preserve unrelated configuration, refuse naming collisions and stale previews, avoid printing existing secrets.
-- [x] TUI implementation and actual headless captures with synthetic data; live readiness remains separate (UI owner).
-- [x] Shared test environment and initial wheel/sdist clean installation. Delivery/settings/backend: 16 passed including two-client HTTP MCP; native host verification remains pending.
-- [x] Final build and isolated wheel check completed. Full suite: 337 passed/6 skipped, followed by 34 targeted tests and both repaired stdio subtests; CI remains the cross-platform gate.
-- [ ] Linux/macOS/Windows CI passes; release assets and SHA256SUMS checked.
-- [x] Private GitHub rename, local directory rename with compatibility symlink, and CPU-only uv tool installation verified outside checkout.
-- [ ] Data/native rollout and GitHub Release publication. Do not publish to PyPI. Current user authorization covers GitHub rename, local rename, card updates and installation; the lead coordinates execution after validation.
+## Accepted delivery
 
-## Delivery sequence
+- [x] Contextopus identity: `contextopus-core` distribution, `contextopus` import/CLI, private `pikiby/contextopus-core` repository.
+- [x] Python 3.12+ standalone application with one loopback HTTP MCP resource owner; persistent data lives outside client caches.
+- [x] Shared Application/operation registry, Workspace module, settings, model setup and TUI use the same service/API.
+- [x] Canonical progressive procedures retain selection, implicit-update, source-reading, review/approval and migration constraints.
+- [x] Native integrations preserve unrelated configuration, reject collisions/stale previews and retain edited skill files for review.
+- [x] Literal Codex `$w` and seven other bare skills use direct native integration; optional plugin delivery exposes namespaced skills. Both plugin caches remain preserved and disabled in the selected direct installation.
+- [x] All four native clients connected. Fresh Codex read status/procedure and discovered eight bare skills; OpenCode/Crush independently discovered the shared eight skills.
+- [x] Authorized migration verified 27 contexts, 235 cards and the file receipt, preserving originals, IDs, links, instructions, Current/tmp, pending approvals and history. Default root binding uses the migrated root.
+- [x] Existing pinned Qwen CPU profile/cache preserved; real search/read succeeded after migration.
+- [x] Current project knowledge and PROJECT were applied through the new MCP and read back by the lead. Post-restart selected Workspace contains 43 materials (36 reviewed records updated), pending/outstanding work is zero, and the active cycle/task survived owner restart.
+- [x] Linux/macOS/Windows × Python 3.12/3.13 full tests, build, artifact verification and wheel installation passed.
+- [x] Final standalone wheel and four client bundles built; resources and SHA256SUMS checked; outside-checkout installation verified.
+- [x] Installed TUI passed a real 79×24 PTY smoke: selected Settings remained visible; Settings → Q back → Q exit succeeded; owner and settings revision stayed unchanged.
+- [x] Final documentation records the accepted behavior, performed checks and material limits. GitHub tagging/publication follows the lead's final release gate.
 
-1. Preserve the working tree; agree module/API/resource boundaries.
-2. Build standalone Application and common operations; adapt transports to that API.
-3. Test semantic invariants, migration, relocation receipts, central service ownership and configuration collision handling.
-4. Build wheel/sdist and versioned client bundles; inspect package resources and install wheel in an isolated environment.
-5. Gather genuine TUI captures and validation evidence; finalize release notes.
-6. After the internal validation gate, rename private repository and local checkout, install from verified wheel through uv, merge native configurations, verify each actual client and publish GitHub Release only after CI passes.
+## Evidence and limits
 
-## Current evidence boundaries
+The full CI matrix passed for implementation commit `615669e7b56ad037cbdcd61f0dca667bbc27c7ea`:
+[run 38671106182](https://github.com/pikiby/contextopus-core/actions/runs/38671106182).
+Linux/macOS jobs each reported 372 passed, 6 skipped and 64 subtests passed;
+Windows jobs each reported 351 passed, 27 skipped and 53 subtests passed.
+Windows retains portable Core/Workspace/LanceDB/HTTP tests; extra skips cover
+legacy POSIX shell launchers and POSIX access-mode checks. External Codex/model
+fixtures require their explicit opt-in provisioning.
 
-A generated config does not establish that a client connected. A built artifact does not establish clean installation. A TUI snapshot does not establish model readiness. Unknown metrics stay unknown. GraphFrontier is a future integration; an external skill registry is an idea; session search depends on the independently installed indexer and must be reported unavailable when absent.
+Headless TUI media uses synthetic EXAMPLE data. Five legacy contexts still need
+complete human-reviewed instructions before initialization. Session search uses
+an independently running compatible service and reports unavailable when absent.
+Fake-hardware/model tests prove device propagation and atomic failure handling,
+not real GPU inference. Native discovery/connection checks do not establish a
+model-driven full workflow in every host. GraphFrontier and the skill registry
+remain future integrations. No PyPI publication is part of this delivery.
 
-## Final release lane (after the lead's code-freeze gate)
+## Repeated upgrade and release
 
-```console
-uv lock --check
-uv sync --locked --extra test
-uv run --locked pytest -q
-uv build --no-sources
-uv run --locked python scripts/build_release.py
-uv run --locked python scripts/verify_release.py
-```
+Fetch the canonical `upgrade` procedure through `wu` (MCP `procedure` operation).
+It reuses format upgrade, bounded durable relocation plans/receipts/rollback,
+index namespace upgrade, default-root binding and managed native integrations.
+It preserves the selected direct/plugin mode, refuses unknown/user-edited skill
+collisions and retains active-session caches.
 
-Then install the exact verified wheel into isolated temporary uv tool/bin directories and verify the installed command from outside the checkout. The first clean-wheel check already passed; rerun for the final artifact because Core/TUI subsequently changed. Record the final full-suite totals and CI URLs in release notes. Live installation, private GitHub rename and publication follow the lead's quality gate.
-
-Additional implemented checks: explicit model setup diagnoses CPU/CUDA/MPS without weights, preserves the active pinned profile, delegates switching to Core's atomic rebuild and refuses stale/unavailable-device plans. Fake-hardware/provider tests exercise both actual Application API and HTTP MCP with real LanceDB; they establish configuration propagation and atomic failure behavior, not real GPU inference.
+Release verification uses the locked environment, full tests, `uv build`,
+`scripts/build_release.py`, `scripts/verify_release.py` and an outside-checkout
+wheel installation. The release wheel must match the installed artifact. The
+lead coordinates the final tag/publication gate after those checks.

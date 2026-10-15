@@ -4,7 +4,7 @@ Persistent context for people and coding agents. Keep project knowledge, working
 
 Contextopus is a standalone Python application with a shared Core, a Workspace module, a terminal interface and an MCP service. Coding-client integrations connect to that service and expose short skills.
 
-**1.0.0 is being prepared.** Installation below uses a verified local wheel or an authenticated private GitHub Release asset. No PyPI publication is implied. The terminal interface is implemented; the captures below show its actual headless rendering with synthetic example data. Live model/client readiness is verified separately.
+**1.0.0 is validated and installed.** Linux, macOS and Windows pass the Python 3.12/3.13 matrix. Real Qwen CPU inference and native connections from all four supported coding clients were verified. Installation uses a checked wheel from the private GitHub Release; no PyPI publication is implied. Screenshots below show actual headless TUI rendering with synthetic example data.
 
 ![Contextopus terminal example](docs/media/tui/main-wide.png)
 
@@ -53,8 +53,8 @@ Other client names: `claude-code`, `opencode`, `crush`. Integration refuses name
 
 - [Canonical old-installation/context/skills upgrade procedure](src/contextopus/resources/procedures/upgrade.md)
 - [Native integration details and primary references](docs/integrations.md)
-- [Transition acceptance and remaining validation](docs/implementation/contextopus-transition.md)
+- [Transition acceptance and evidence](docs/implementation/contextopus-transition.md)
 - [1.0.0 release notes](docs/releases/1.0.0.md)
 - [Previous changelog](CHANGELOG.md)
 
-The repository remains private. Cross-platform CI builds and checks Linux, macOS and Windows; release readiness requires those jobs to pass. Local validation alone does not establish another operating system's support.
+The repository remains private. The [validated six-job matrix](https://github.com/pikiby/contextopus-core/actions/runs/38671106182) tests, builds, verifies and installs the wheel on Linux, macOS and Windows with Python 3.12 and 3.13. [Release notes](docs/releases/1.0.0.md) describe performed checks and their limits.
