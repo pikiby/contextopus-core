@@ -213,6 +213,9 @@ class LauncherTests(unittest.TestCase):
                 environment = {
                     **os.environ,
                     "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
+                    "PCW_DEPENDENCIES": str(Path(cache) / "empty-private-dependencies"),
+                    "HF_HOME": str(Path(cache) / "empty-huggingface-cache"),
+                    "XDG_CACHE_HOME": str(Path(cache) / "empty-xdg-cache"),
                     "HF_HUB_OFFLINE": "1",
                     "TRANSFORMERS_OFFLINE": "1",
                     "PYTHONDONTWRITEBYTECODE": "1",
@@ -225,6 +228,19 @@ class LauncherTests(unittest.TestCase):
                     environment.pop("PCW_PYTHON", None)
                 active_plugin = Path(cache) / "installed plugin with spaces"
                 shutil.copytree(PLUGIN, active_plugin, ignore=shutil.ignore_patterns("__pycache__", ".venv", "*.egg-info", "build"))
+                # The launcher deliberately ignores PYTHONPATH (-E). Inject the
+                # test provider through the temporary launcher copy instead; keep
+                # its readiness checks and real stdio/MCP entrypoint intact.
+                shutil.copyfile(ROOT / "tests/fixtures/offline_stdio_provider.py",
+                                active_plugin / "scripts/offline_stdio_provider.py")
+                entry = active_plugin / "scripts/launch.py"
+                entry_text = entry.read_text()
+                original_run = "    run_mcp()\n"
+                self.assertEqual(1, entry_text.count(original_run))
+                entry.write_text(entry_text.replace(original_run,
+                    '    import runpy\n'
+                    '    runpy.run_path(str(Path(__file__).with_name("offline_stdio_provider.py")))\n'
+                    + original_run))
                 # The descriptor requests add many log lines. An unread stderr
                 # pipe can fill and block the server while stdout is awaited.
                 error_log = tempfile.TemporaryFile(mode="w+")
@@ -321,12 +337,12 @@ class LauncherTests(unittest.TestCase):
 
                     created = call("workspace_create", request_id="protocol-create", user_request="Create the protocol fixture",
                         # Protocol/approval coverage is strictly offline; the real
-                        # model/tokenizer is exercised by separate inference tests.
+                        # model/tokenizer is replaced by the explicit test provider.
                         instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text()
                             .replace("material_max_tokens: 1024", "material_max_tokens: null")
                             .replace("git_history_enabled: false", "git_history_enabled: true"),
                         project_content="# Protocol fixture\nA temporary test project.\n")
-                    self.assertEqual("created", created["status"])
+                    self.assertEqual("created", created["status"], created)
                     self.assertEqual([], call("search", query="empty", types=["knowledge"])["results"])
                     opened = call("startup", request_id="protocol-invocation")
                     cycle_id = opened["cycle_id"]
@@ -371,7 +387,6 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual("recovery_required", call("status")["status"])
                     self.assertEqual("recovered", call("recover_workspace")["status"])
                     self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
-                    # Embeddings may be pending in this strictly offline protocol test.
                     closed = call("finish", cancel=True)
                     self.assertEqual("cancelled", closed["status"])
                     self.assertFalse((Path(directory) / ".pcw/protocol/tmp" / cycle_id).exists())

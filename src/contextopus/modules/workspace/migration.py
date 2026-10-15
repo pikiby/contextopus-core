@@ -183,13 +183,14 @@ class FormatMigrationMixin:
             metadata, _ = _parse(text)
             ident = _id(metadata.get("id", path.stem))
             extra.append((path, ident, text, task_record(ident, text)))
-        for name in ("CURRENT.md", "current.md"):
-            path = self.engine.root / name
-            if path.is_file():
+        # Enumerate physical entries: constructed uppercase/lowercase aliases can
+        # both resolve to one file on case-insensitive filesystems.
+        for path in sorted(self.engine.root.iterdir()):
+            if path.name.casefold() == "current.md" and path.is_file():
                 self.engine._assert_safe(path)
                 text = read_utf8(path)
                 metadata, _ = _parse(text)
-                ident = _id(metadata.get("id", document_id(self.engine.workspace, name)))
+                ident = _id(metadata.get("id", document_id(self.engine.workspace, path.name)))
                 extra.append((path, ident, text, task_record(ident, text)))
         for path, ident, before, converted in extra:
             if ident in ids:

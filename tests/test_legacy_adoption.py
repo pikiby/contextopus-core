@@ -145,3 +145,45 @@ def test_previously_initialized_lost_rules_are_not_replaced(tmp_path):
         assert not (original / "INSTRUCTIONS.md").exists()
     finally:
         runtime.close()
+
+
+def test_case_insensitive_current_alias_is_migrated_once(tmp_path, monkeypatch):
+    """Reproduce macOS alias lookup while keeping Linux directory enumeration real."""
+    from pathlib import Path
+    from contextopus.modules.workspace import migration
+    original, _ = sparse(tmp_path)
+    runtime = CycleRuntime(tmp_path, 'old', provider_factory=Factory())
+    actual = original / 'current.md'
+    alias = original / 'CURRENT.md'
+    is_file = Path.is_file
+    read = migration.read_utf8
+    try:
+        monkeypatch.setattr(Path, 'is_file', lambda path: is_file(actual if path == alias else path))
+        monkeypatch.setattr(migration, 'read_utf8', lambda path: read(actual if path == alias else path))
+        assert alias.is_file() and actual.is_file()
+        transformed, _ = runtime._v2_transforms(0)
+        tasks = [item for item in transformed.values() if _parse(item['text'])[0]['type'] == 'task']
+        assert len(tasks) == 1
+        assert set(transformed) == {'knowledge/topic.md', 'current.md'}
+        assert 'original ongoing task' in tasks[0]['text']
+        assert actual.read_bytes() == b'original ongoing task\r\n'
+    finally:
+        runtime.close()
+
+
+def test_distinct_current_case_entries_are_both_preserved(tmp_path):
+    original, _ = sparse(tmp_path)
+    uppercase = original / 'CURRENT.md'
+    if uppercase.exists():
+        pytest.skip('Distinct case variants require a case-sensitive filesystem')
+    uppercase.write_text('Separate uppercase task', encoding='utf-8')
+    runtime = CycleRuntime(tmp_path, 'old', provider_factory=Factory())
+    try:
+        transformed, _ = runtime._v2_transforms(0)
+        tasks = [item for item in transformed.values() if _parse(item['text'])[0]['type'] == 'task']
+        assert len(tasks) == 2
+        assert {'current.md', 'CURRENT.md'} <= set(transformed)
+        assert len({task['id'] for task in tasks}) == 2
+        assert len({task['path'] for task in tasks}) == 2
+    finally:
+        runtime.close()
