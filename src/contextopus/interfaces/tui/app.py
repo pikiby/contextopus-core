@@ -190,15 +190,33 @@ class ContextopusApp(App):
             if color:
                 styled.stylize(color, position, position + len(line))
             position += len(line)
+        self.selected_line = next(
+            (row for row, line in enumerate(text.splitlines()) if line.startswith("▶")),
+            None,
+        )
         self.query_one("#content", Static).update(styled)
+
+    def show_selected(self):
+        viewport = self.query_one("#viewport", VerticalScroll)
+        row = self.selected_line
+        if row is None:
+            return
+        top = int(viewport.scroll_y)
+        height = viewport.size.height
+        if row < top:
+            viewport.scroll_to(y=row, animate=False)
+        elif row >= top + height:
+            viewport.scroll_to(y=row - height + 1, animate=False)
 
     def action_up(self):
         self.selected = (self.selected - 1) % len(self.actions)
         self.draw()
+        self.call_after_refresh(self.show_selected)
 
     def action_down(self):
         self.selected = (self.selected + 1) % len(self.actions)
         self.draw()
+        self.call_after_refresh(self.show_selected)
 
     def action_change(self):
         if self.page == "settings" and self.selected == 0:

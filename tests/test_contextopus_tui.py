@@ -115,6 +115,12 @@ async def test_short_terminal_menu_bindings_open_settings_back_and_quit_without_
         assert viewport.max_scroll_y > 0
         await pilot.press("down")
         assert app.selected == 1
+        await pilot.pause()
+        assert (
+            viewport.scroll_y
+            <= app.selected_line
+            < viewport.scroll_y + viewport.size.height
+        )
         await pilot.press("enter")
         assert app.page == "settings"
         await pilot.press("q")
