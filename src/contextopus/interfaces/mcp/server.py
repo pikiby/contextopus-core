@@ -76,6 +76,9 @@ def create_server(root, host="127.0.0.1", port=8765):
         if context is not None and workspace is not None and context != workspace:
             raise ValueError("context and workspace disagree")
         app = owner.application(work_root, context or workspace)
+        # Reaching transport dispatch proves this owner is serving requests.
+        # It provides no evidence about a particular native client's identity.
+        app.services.runtime_mcp["server"] = "running"
         from contextopus.modules.workspace.operations import _DESCRIPTIONS
 
         if operation in _DESCRIPTIONS:

@@ -26,7 +26,25 @@ Use the destination explicitly for subsequent requests and run `core.index_upgra
 
 Start/verify one owner with `contextopus --root <new root> service start`. Bind the persistent default with `contextopus root --set <new root>`; also pass the exact destination during rollout verification. Do not infer a shared Workspace selection from a process/session ID.
 
-For Codex plugin installations, use supported native commands after checking the installed CLI's help:
+Choose and preserve one Codex delivery mode. For literal `$w`, `$ws`, `$wi`, `$wc`, `$wu`, `$wa`, `$wr`, `$wx`, use the existing direct integration:
+
+```console
+contextopus integrate codex --user
+contextopus integrate codex --user --apply
+```
+
+Before switching from plugin delivery to direct integration, set only the known
+`plugins."persistent-context-workspace@persistent-context-workspace".enabled`
+and `plugins."contextopus@contextopus".enabled` declarations to `false` in the
+native Codex TOML configuration, preserving unrelated values and both caches.
+Do not uninstall plugins to achieve this. The direct integration supplies one
+manual HTTP MCP server and eight bare user skills. Verify these exact bare names
+in a fresh native session. Updating this installation uses the same direct mode;
+do not turn its plugin back on as an automatic upgrade step.
+
+Optional plugin delivery exposes `contextopus:w` and corresponding namespaced
+skills, rather than literal bare `$w`. If that mode is explicitly chosen, use
+supported native commands after checking the installed CLI's help:
 
 ```console
 codex plugin marketplace add <new source checkout>
@@ -39,7 +57,7 @@ The final step disables the old plugin declaration for fresh sessions, removes i
 
 For manually installed native skills/configuration, preview `contextopus integrate <client> --user --legacy-skills <explicit old skill directory>` (or `--project <directory>`), inspect affected paths, then repeat with `--apply`. Existing recognized unchanged old skill files become thin compatibility aliases that fetch the new canonical procedure; short names are installed alongside them. User-modified/unrecognized legacy skills stop the operation for review; merge their requested custom behavior explicitly rather than silently overwriting it. Previously managed unchanged skills can be updated through their recorded hashes; stale previews are refused. Plugin caches are never edited through this option.
 
-Avoid duplicate skill copies across roots a client already discovers. For example, Claude's user skills are also discoverable by OpenCode and Crush: after installing that shared copy, use `--config-only` for those clients. Codex's native plugin supplies its own skills; do not additionally install identical user skills there. Genuine JSONC comments/trailing commas require the client's supported editor rather than destructive rewriting. Preserve unrelated MCP servers, settings and credentials, and never print whole configurations.
+Avoid duplicate skill copies across roots a client already discovers. For example, Claude's user skills are also discoverable by OpenCode and Crush: after installing that shared copy, use `--config-only` for those clients. For Codex choose either enabled plugin skills plus its MCP, or bare user skills plus manual MCP; do not enable both copies. If switching modes, review previously managed user skills before removing them and never overwrite user edits. Genuine JSONC comments/trailing commas require the client's supported editor rather than destructive rewriting. Preserve unrelated MCP servers, settings and credentials, and never print whole configurations.
 
 Verify each actual fresh client connection: tools/list and a read such as `procedure(name="upgrade")` or `core.status` through that client. File presence, direct Python checks and the old session's working tools are not this proof. Verify that new requests reach the destination root and new process, while the old cache remains available. Report per-client verification separately and list remaining blockers honestly.
 

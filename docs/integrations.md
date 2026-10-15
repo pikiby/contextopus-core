@@ -26,7 +26,9 @@ Configuration schema support is implemented; live compatibility remains subject 
 
 `--user` selects native user configuration instead of a project file. `--config-only` reuses an already discoverable shared skill copy. `--legacy-skills <directory>` upgrades only recognized unchanged old manually installed skill entrypoints into compatibility aliases; edited/unknown files stop for review, and plugin caches are refused. The retained source/cache 0.14.0 entrypoints are represented by packaged content hashes.
 
-Codex plugin users first run `codex plugin marketplace add <checkout>` and `codex plugin add contextopus@contextopus`, then preview/apply `contextopus integrate codex --user --native-plugin`. This cutover requires the installed new cache, disables the exact old plugin flag, removes its obsolete marketplace declaration and an exactly matching duplicate Contextopus manual HTTP entry, and preserves old cache files. Other servers are retained; a conflicting Contextopus definition fails. No plugin uninstall command is used.
+For literal `$w`, `$ws`, `$wi`, `$wc`, `$wu`, `$wa`, `$wr`, `$wx`, use `contextopus integrate codex --user --apply`. This direct native integration installs user skills and one HTTP MCP entry. Keep the Contextopus plugin disabled when using this method to avoid duplicate skills and tools. The rollout selected this direct method.
+
+Optional Codex plugin users first run `codex plugin marketplace add <checkout>` and `codex plugin add contextopus@contextopus`, then preview/apply `contextopus integrate codex --user --native-plugin`. This cutover requires the installed new cache, disables the exact old plugin flag, removes its obsolete marketplace declaration and an exactly matching duplicate Contextopus manual HTTP entry, and preserves old cache files. Other servers are retained; a conflicting Contextopus definition fails. No plugin uninstall command is used.
 
 Use `contextopus root --set <chosen persistent root>` only for an explicitly selected root; it writes the persistent default binding, creates no data root and never selects/switches a Workspace. `--root` and `CONTEXTOPUS_ROOT` override this default.
 
@@ -40,7 +42,7 @@ app-server calls listed one Contextopus MCP server, read `core.status` and
 fetched the upgrade procedure. Codex namespaces plugin skills as
 `contextopus:w`, `contextopus:ws`, `contextopus:wi`, `contextopus:wc`,
 `contextopus:wu`, `contextopus:wa`, `contextopus:wr`, `contextopus:wx`.
-The disabled old plugin's skills were absent from fresh discovery.
+The disabled old plugin's skills were absent from fresh discovery. Plugin delivery therefore exposes namespaced skills, not literal bare `$w`. An isolated direct-integration check independently confirmed all eight bare names, enabled with no plugin ID. The live installation then selected that direct method, retaining disabled plugin caches.
 
 Claude's native MCP inspection and OpenCode's native MCP listing reported
 connected. OpenCode's skill listing and Crush's native workspace API both

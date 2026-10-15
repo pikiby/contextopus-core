@@ -71,6 +71,15 @@ run(sys.argv[1],port=int(sys.argv[2]))
             else:
                 pytest.fail("isolated MCP owner did not start")
             remote = RemoteApplication(root, endpoint=f"http://127.0.0.1:{port}/mcp")
+            status = remote.query("core.status")
+            assert status["mcp"] == {"server": "running", "verified_client": "unknown"}
+            from contextopus.startup import Application
+
+            with Application(tmp_path / "independent") as independent:
+                assert independent.query("core.status")["mcp"] == {
+                    "server": "unknown",
+                    "verified_client": "unknown",
+                }
             description = remote.query("describe", {"operation": "third.echo"})
             assert description["kind"] == "query"
             assert description["arguments_schema"]["required"] == ["message"]

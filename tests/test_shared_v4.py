@@ -86,7 +86,7 @@ def test_sources_are_generic_returned_on_every_read_not_executed(tmp_path):
 def legacy(root):
     old = PCWRuntime(root, "old", provider_factory=Factory())
     item = old.create('# Known fact\n```yaml\nrequired_sources:\n- url: https://example.com\n  extract: Current number\n```\n')
-    (old.root / "INSTRUCTIONS.md").write_text("Custom exact user rules\n")
+    (old.root / "INSTRUCTIONS.md").write_text("Custom exact user rules\n", encoding="utf-8", newline="")
     (old.root / "CURRENT.md").write_text("Keep ongoing work")
     original = (old.root / item["path"]).read_bytes().decode("utf-8")
     old.close()

@@ -74,7 +74,7 @@ def test_legacy_migration_preserves_every_source(tmp_path):
     path = engine.root / item["path"]
     text = path.read_bytes()
     instructions = "# My own rules\nNo inferred permissions.\n"
-    (engine.root / "INSTRUCTIONS.md").write_text(instructions)
+    (engine.root / "INSTRUCTIONS.md").write_text(instructions, encoding="utf-8", newline="")
     (engine.root / "CURRENT.md").write_text("old task state")
     engine.close()
     runtime = CycleRuntime(tmp_path, "old", provider_factory=Factory())

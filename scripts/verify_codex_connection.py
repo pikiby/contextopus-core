@@ -16,7 +16,7 @@ import threading
 import time
 
 
-def verify(cwd, expected_root):
+def verify(cwd, expected_root, delivery="direct"):
     with tempfile.TemporaryFile(mode="w+") as error_log:
         process = subprocess.Popen(
             ["codex", "app-server", "--stdio"],
@@ -123,20 +123,34 @@ def verify(cwd, expected_root):
                 item
                 for entry in skills_result["data"]
                 for item in entry["skills"]
-                if item.get("pluginId") == "contextopus@contextopus"
-                and item.get("enabled")
+                if item.get("enabled")
+                and (
+                    item.get("pluginId") == "contextopus@contextopus"
+                    if delivery == "plugin"
+                    else item["name"] in {"w", "ws", "wi", "wc", "wu", "wa", "wr", "wx"}
+                    and not item.get("pluginId")
+                    and Path(item["path"]).parent.parent
+                    == Path.home() / ".agents/skills"
+                )
             ]
             expected_skills = {
-                "contextopus:" + name
+                ("contextopus:" if delivery == "plugin" else "") + name
                 for name in ("w", "ws", "wi", "wc", "wu", "wa", "wr", "wx")
             }
             if {item["name"] for item in skills} != expected_skills:
                 raise RuntimeError(
-                    "Fresh Codex did not discover all eight namespaced short skills"
+                    "Fresh Codex did not discover all eight expected short skills"
                 )
             if any(
                 item.get("pluginId")
-                == "persistent-context-workspace@persistent-context-workspace"
+                in (
+                    {
+                        "persistent-context-workspace@persistent-context-workspace",
+                        "contextopus@contextopus",
+                    }
+                    if delivery == "direct"
+                    else {"persistent-context-workspace@persistent-context-workspace"}
+                )
                 and item.get("enabled")
                 for entry in skills_result["data"]
                 for item in entry["skills"]
@@ -204,6 +218,7 @@ def verify(cwd, expected_root):
                     {
                         "verified": True,
                         "client": "Codex",
+                        "delivery": delivery,
                         "server": server["name"],
                         "plugin_id": server.get("pluginId"),
                         "runtime_status": server.get("runtimeStatus"),
@@ -230,5 +245,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cwd", type=Path, default=Path.cwd())
     parser.add_argument("--expected-root", type=Path, required=True)
+    parser.add_argument("--delivery", choices=("direct", "plugin"), default="direct")
     args = parser.parse_args()
-    verify(args.cwd, args.expected_root)
+    verify(args.cwd, args.expected_root, args.delivery)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .text_io import read_utf8
+
 import json
 import os
 from pathlib import Path
@@ -82,7 +84,7 @@ class HistoryMixin:
         root.mkdir(parents=True, exist_ok=True)
         queue_path = root / "queue.json"
         self.control.safe(queue_path)
-        queue = json.loads(queue_path.read_text()) if queue_path.exists() else []
+        queue = json.loads(read_utf8(queue_path)) if queue_path.exists() else []
         snapshot_path = root / (_id(operation_id) + ".json")
         self.control.safe(snapshot_path)
         if not snapshot_path.exists():
@@ -111,12 +113,12 @@ class HistoryMixin:
         self.control.safe(queue_path)
         if not queue_path.exists():
             return {"status": "empty"}
-        queue = json.loads(queue_path.read_text())
+        queue = json.loads(read_utf8(queue_path))
         receipt = {"status": "empty"}
         for operation_id in queue:
             path = root / (_id(operation_id) + ".json")
             self.control.safe(path)
-            snapshot = json.loads(path.read_text())
+            snapshot = json.loads(read_utf8(path))
             if snapshot["revision"] != _revision(encode(snapshot["files"])):
                 raise PCWError(
                     "Stored Git snapshot was changed; inspect before retrying"
@@ -134,7 +136,7 @@ class HistoryMixin:
                 self.engine._own_git()
                 exclude = self.engine.root / ".git/info/exclude"
                 self.engine._assert_safe(exclude)
-                previous = exclude.read_text() if exclude.exists() else ""
+                previous = read_utf8(exclude) if exclude.exists() else ""
                 additions = [
                     value
                     for value in (
@@ -219,7 +221,7 @@ class HistoryMixin:
                 }
         if requested is not None:
             path = root / (requested + ".json")
-            snapshot = json.loads(path.read_text())
+            snapshot = json.loads(read_utf8(path))
             return {
                 key: snapshot.get(key) for key in ("status", "commit", "operation_id")
             }

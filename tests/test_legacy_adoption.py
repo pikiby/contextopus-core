@@ -12,7 +12,7 @@ from test_runtime import Factory
 def sparse(root):
     context = root / ".pcw/old"
     (context / "knowledge").mkdir(parents=True)
-    (context / "knowledge/topic.md").write_text("# Original\nLiteral source body.\n")
+    (context / "knowledge/topic.md").write_text("# Original\nLiteral source body.\n", encoding="utf-8", newline="")
     (context / "current.md").write_bytes(b"original ongoing task\r\n")
     (context / "tmp").mkdir()
     (context / "tmp/result.md").write_bytes(b"preserved draft\x00\xff")
