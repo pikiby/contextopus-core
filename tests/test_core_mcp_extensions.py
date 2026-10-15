@@ -188,7 +188,7 @@ def test_managed_http_relocation_excludes_runtime_artifacts_and_updates_identity
                 {"destination": str(destination), "include_manifest": True},
             )
             assert not any(
-                entry["path"] in {"runtime/service.log", "runtime/service.json"}
+                entry["path"] in {"runtime/service.log", "runtime/service.json", "runtime/mcp-owner.lock"}
                 for entry in plan["files"]
             )
             for _ in range(3):

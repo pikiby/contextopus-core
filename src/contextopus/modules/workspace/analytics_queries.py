@@ -86,10 +86,13 @@ def query_events(store, *, workspaces=None, cycle_id=None, task_id=None,
     else:
         scope = supplied
         if since is None and until is None and not any((cycle_id, task_id, import_id)):
+            # Include events stamped on this clock tick while retaining an
+            # exclusive bound and the frozen rowid insertion boundary.
             end = datetime.now(timezone.utc)
-            scope.update(since=(end - timedelta(days=7)).isoformat(), until=end.isoformat())
+            scope.update(since=(end - timedelta(days=7)).isoformat(),
+                         until=(end + timedelta(microseconds=1)).isoformat())
         elif scope['since'] is not None and scope['until'] is None:
-            scope['until'] = datetime.now(timezone.utc).isoformat()
+            scope['until'] = (datetime.now(timezone.utc) + timedelta(microseconds=1)).isoformat()
         elif scope['since'] is None and scope['until'] is not None and not any((cycle_id, task_id, import_id)):
             scope['since'] = (_timestamp(scope['until']) - timedelta(days=7)).isoformat()
     _validate_scope(scope)

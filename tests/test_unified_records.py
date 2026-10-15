@@ -13,14 +13,17 @@ from test_runtime import Factory
 
 
 @pytest.mark.parametrize("interruption", ["snapshotting", "applying"])
-def test_recovers_interrupted_preceding_format_before_v3(tmp_path, interruption):
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_recovers_interrupted_preceding_format_before_v3(tmp_path, interruption, line_ending):
     from contextopus.modules.workspace.workspaces import encode
     runtime = workspace(tmp_path)
     root = runtime.engine.root
     project = runtime.project_read()
     (root / project["path"]).unlink()
-    (root / "PROJECT.md").write_text(project["content"])
-    (root / "knowledge/old-id.md").write_text("# Important fact\nPreserve this identity\n")
+    (root / "PROJECT.md").write_bytes(project["content"].encode("utf-8"))
+    source = "# Important fact\nPreserve this identity\n".replace("\n", line_ending)
+    converted = "---\nid: old-id.md\nlinks: []\n---\n# Important fact\nPreserve this identity\n".replace("\n", line_ending)
+    (root / "knowledge/old-id.md").write_bytes(source.encode("utf-8"))
     runtime.control.write(runtime._format_path(), encode({"format_version": 1}))
     backup = runtime.control.root / "backups/preceding"
     operation = {
@@ -29,9 +32,9 @@ def test_recovers_interrupted_preceding_format_before_v3(tmp_path, interruption)
         "workspace_snapshot": runtime._migration_tree(root),
         "backup": str(backup / "workspace"), "control_backup": str(backup / "control"),
         "transforms": {"knowledge/old-id.md": {
-            "id": "old-id.md", "before": "# Important fact\nPreserve this identity\n",
+            "id": "old-id.md", "before": source,
             "path": "knowledge/Important fact.md",
-            "text": "---\nid: old-id.md\nlinks: []\n---\n# Important fact\nPreserve this identity\n",
+            "text": converted,
         }}, "overlays": {}, "instruction_initialization": {},
     }
     receipt = runtime.control.root / "migration-v2.json"
@@ -42,7 +45,7 @@ def test_recovers_interrupted_preceding_format_before_v3(tmp_path, interruption)
         operation["status"] = "applying"
         runtime.control.write(receipt, encode(operation))
         # Crash between writing the descriptive file and removing its old name.
-        (root / "knowledge/Important fact.md").write_text(operation["transforms"]["knowledge/old-id.md"]["text"])
+        (root / "knowledge/Important fact.md").write_bytes(converted.encode("utf-8"))
     plan = runtime.upgrade_plan()
     assert plan["ready"] and plan["recover_format_two_first"] == "preceding-v2", plan
     assert runtime.upgrade_apply(plan["revision"], "Upgrade")["status"] == "complete"
@@ -162,13 +165,15 @@ def test_metadata_changes_reuse_vectors_and_conflict_with_old_revision(tmp_path)
     runtime.close()
 
 
-def test_interrupted_migration_resumes_and_preserves_legacy_project_approval(tmp_path):
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_interrupted_migration_resumes_and_preserves_legacy_project_approval(tmp_path, line_ending):
     from contextopus.modules.workspace.runtime import _revision
     runtime = workspace(tmp_path)
     cycle = runtime.startup("change-project")["cycle_id"]
     before = runtime.project_read()
     root = runtime.engine.root
-    (root / "PROJECT.md").write_text(before["content"])
+    legacy_body = before["content"].replace("\n", line_ending)
+    (root / "PROJECT.md").write_bytes(legacy_body.encode("utf-8"))
     (root / before["path"]).unlink()
     (root / "current").mkdir()
     runtime.control.write(runtime._format_path(), json.dumps({"format_version": 2}))
@@ -179,7 +184,7 @@ def test_interrupted_migration_resumes_and_preserves_legacy_project_approval(tmp
             "created_ids": {}, "instructions_revision": runtime._instructions()["revision"],
             "knowledge_approval_required": True,
             "entries": {"PROJECT.md": {
-                "before": {"path": "PROJECT.md", "text": before["content"], "fingerprint": _revision(before["content"])},
+                "before": {"path": "PROJECT.md", "text": legacy_body, "fingerprint": _revision(legacy_body)},
                 "after": {"path": "PROJECT.md", "text": text, "fingerprint": _revision(text)},
             }},
         }, "prepared")
@@ -190,10 +195,26 @@ def test_interrupted_migration_resumes_and_preserves_legacy_project_approval(tmp
             runtime.upgrade_apply(plan["revision"], "Upgrade")
     assert runtime.upgrade_plan()["resume_revision"] == plan["revision"]
     assert runtime.upgrade_apply(plan["revision"], "Retry")["status"] == "complete"
-    assert runtime.project_read()["content"] == before["content"]
+    assert runtime.project_read()["content"] == legacy_body
     with pytest.raises(PCWError, match="confirmation"):
         runtime.proposal_apply(cycle, proposal["proposal_id"], proposal["revision"])
     result = runtime.proposal_apply(cycle, proposal["proposal_id"], proposal["revision"], "I approve the displayed project change")
     assert result["status"] == "applied", result
     assert runtime.project_read()["content"] == "# Project\nChanged purpose"
+    runtime.close()
+
+
+def test_migration_review_rejects_newline_only_source_change(tmp_path):
+    runtime = workspace(tmp_path)
+    project = runtime.project_read()
+    root = runtime.engine.root
+    legacy = root / "PROJECT.md"
+    legacy.write_bytes(project["content"].encode("utf-8"))
+    (root / project["path"]).unlink()
+    runtime.control.write(runtime._format_path(), json.dumps({"format_version": 2}))
+    plan = runtime.upgrade_plan()
+    assert plan["ready"], plan
+    legacy.write_bytes(project["content"].replace("\n", "\r\n").encode("utf-8"))
+    with pytest.raises(PCWError, match="changed since migration review"):
+        runtime.upgrade_apply(plan["revision"], "Upgrade")
     runtime.close()

@@ -182,7 +182,7 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
                     for relative, text in sorted(snapshot["files"].items()):
                         self._history_paths([relative])
                         blob = self._history_git(
-                            "hash-object", "-w", "--stdin", text=text
+                            "hash-object", "-w", "--no-filters", "--stdin", text=text
                         ).stdout.strip()
                         self._history_git(
                             "update-index",

@@ -212,3 +212,29 @@ except RuntimeError as exc:
             if child.poll() is None:
                 child.terminate()
                 child.wait(timeout=10)
+
+
+def test_active_mcp_owner_lock_is_never_read_or_copied(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    source = tmp_path / "old"
+    runtime = source / "runtime"
+    runtime.mkdir(parents=True)
+    owner_lock = runtime / "mcp-owner.lock"
+    owner_lock.write_bytes(b"\0")
+    (source / "knowledge.md").write_bytes(b"Permanent content")
+    original = Path.open
+
+    def deny_owner_lock(self, *args, **kwargs):
+        # Windows denies reads of the byte held by the running MCP owner.
+        if self == owner_lock:
+            raise PermissionError("active Windows owner lock")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", deny_owner_lock)
+    proposal = relocation.plan(source, tmp_path / "new")
+    assert "runtime/mcp-owner.lock" not in {entry["path"] for entry in proposal["files"]}
+    result = relocation.apply(proposal)
+    assert result["status"] == "complete"
+    assert not (tmp_path / "new/runtime/mcp-owner.lock").exists()
+    assert (tmp_path / "new/knowledge.md").read_bytes() == b"Permanent content"

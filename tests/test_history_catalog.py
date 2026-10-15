@@ -1,6 +1,7 @@
 """Actual Git repositories exercise the rebuildable catalog without a RAG backend."""
 from contextlib import nullcontext
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -38,7 +39,7 @@ def commit(r, changes, transformations=()):
         if text is None:
             path.unlink()
         else:
-            path.write_text(text)
+            path.write_bytes(text.encode('utf-8'))
         after = {'path': relative, 'revision': hashlib.sha256(path.read_bytes()).hexdigest()} if path.exists() else None
         event_changes.append(dict(id=ident, before=before, after=after))
     event = dict(version=1, operation_id='knowledge-test', kind='knowledge', changes=event_changes,
@@ -244,3 +245,59 @@ def test_declared_target_fingerprint_must_match_git_version(history):
     with r._history_catalog() as db:
         assert not db.execute('SELECT 1 FROM history_versions WHERE context=? AND oid=?', (r._history_context, oid)).fetchone()
     assert not r.history_lineage('a')['edges']
+
+
+def test_exact_fixture_bytes_preserve_lineage_with_git_autocrlf(history):
+    r = history
+    r._history_git('config', 'core.autocrlf', 'true')
+    body = '---\nid: a\n---\nA'
+    old = commit(r, {'a': body})
+    assert (r.engine.root / 'knowledge/a.md').read_bytes() == body.encode('utf-8')
+    assert r._history_git('show', old + ':knowledge/a.md').stdout == body
+    split = commit(r, {'b': 'B'}, [dict(kind='split', sources=['a'], targets=['a', 'b'])])
+    new = commit(r, {'a': body + ' revised'})
+    graph = r.history_lineage('a')
+    assert any(e['kind'] == 'revision' and e['source_commit'] == split and e['target_commit'] == new for e in graph['edges'])
+    assert any(e['kind'] == 'split' and e['source_commit'] == old for e in graph['edges'])
+
+
+def test_git_newline_normalization_is_not_claimed_as_exact_raw_version(history):
+    import json
+    r = history
+    r._history_git('config', 'core.autocrlf', 'true')
+    oid = commit(r, {'a': '---\r\nid: a\r\n---\r\nA'})
+    with r._history_catalog() as db:
+        metadata = json.loads(db.execute('SELECT metadata FROM history_commits WHERE context=? AND oid=?',
+                                        (r._history_context, oid)).fetchone()[0])
+    assert metadata['target_mismatches'] == ['a']
+    raw_digest = hashlib.sha256((r.engine.root / 'knowledge/a.md').read_bytes()).hexdigest()
+    assert r._history_content_reference('knowledge/a.md', raw_digest)['status'] == 'unversioned'
+
+
+def test_automatic_history_preserves_crlf_bytes_despite_git_eol_filters(tmp_path):
+    from pcw_runtime.cycles import CycleRuntime
+    from test_runtime import Factory
+    from test_workspace_v3 import create
+    from test_history_lineage import save
+    runtime = CycleRuntime(tmp_path, 'raw-history', provider_factory=Factory())
+    try:
+        create(runtime)
+        cycle = runtime.startup('raw-history-test')['cycle_id']
+        proposal, _ = save(runtime, cycle, [{'key': 'a', 'content': '# Body\nRaw snapshot body.'}])
+        material = runtime.read(material_id=proposal['created_ids']['a'])
+        path = runtime.engine.root / material['path']
+        raw = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+        path.write_bytes(raw)
+        runtime._history_git('config', 'core.autocrlf', 'true')
+        (runtime.engine.root / '.gitattributes').write_bytes(b'*.md text eol=lf\n')
+        receipt = runtime._history_record('knowledge-crlf-raw', force=True)
+        assert receipt['status'] == 'committed'
+        assert runtime._history_git('show', receipt['commit'] + ':' + material['path']).stdout.encode('utf-8') == raw
+        reference = runtime._history_content_reference(material['path'], hashlib.sha256(raw).hexdigest())
+        assert reference['status'] == 'versioned'
+        assert reference['commit'] == receipt['commit']
+        stored = json.loads((runtime._history_root() / 'knowledge-crlf-raw.json').read_text())
+        assert 'files' not in stored  # Compaction also verified exact CRLF replay.
+        assert path.read_bytes() == raw
+    finally:
+        runtime.close()

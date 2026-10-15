@@ -233,3 +233,20 @@ def test_sqlite_json_instruction_refs_are_structured_and_text_availability():
     assert report['instruction_basis'][0]['rule_text_available']
     assert report['instruction_basis'][1]['instructions_revision'] == 'unversioned-rev'
     assert not report['instruction_basis'][1]['rule_text_available']
+
+
+def test_implicit_upper_bound_includes_same_clock_tick_but_explicit_stays_exclusive(monkeypatch):
+    from contextopus.modules.workspace import analytics_queries
+    fixed = datetime(2026, 10, 15, 12, 0, 0, 123456, tzinfo=timezone.utc)
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed if tz is not None else fixed.replace(tzinfo=None)
+    monkeypatch.setattr(analytics_queries, 'datetime', FixedClock)
+    store = Store()
+    store.add(fixed.isoformat())
+    implicit = query_events(store)
+    assert implicit['total_events'] == 1
+    assert implicit['scope']['until'] == '2026-10-15T12:00:00.123457+00:00'
+    assert query_events(store, since='2026-10-15')['total_events'] == 1
+    assert query_events(store, since='2026-10-15', until=fixed.isoformat())['total_events'] == 0

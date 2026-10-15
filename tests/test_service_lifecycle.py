@@ -58,17 +58,18 @@ async def test_tui_can_start_stopped_service_without_mcp_call(tmp_path):
         start.assert_called_once_with(str(tmp_path))
 
 
-def test_upgrade_removes_only_managed_retired_skills_and_rejects_stale_plan(tmp_path):
+@pytest.mark.parametrize("managed_content", [b"Old managed search", b"Old managed\r\nsearch\r\n"])
+def test_upgrade_removes_only_managed_retired_skills_and_rejects_stale_plan(tmp_path, managed_content):
     root = tmp_path / ".agents/skills"
     old = root / "ws/SKILL.md"
     old.parent.mkdir(parents=True)
-    old.write_text("Old managed search")
+    old.write_bytes(managed_content)
     modified = root / "wr/SKILL.md"
     modified.parent.mkdir()
     modified.write_text("My custom rework")
     metadata = tmp_path / ".contextopus/codex-integration.json"
     metadata.parent.mkdir()
-    metadata.write_text(json.dumps({"skills": {str(old.relative_to(tmp_path)): _digest(old.read_bytes())}}))
+    metadata.write_text(json.dumps({"skills": {old.relative_to(tmp_path).as_posix(): _digest(old.read_bytes())}}))
     preview = plan("codex", tmp_path)
     assert preview["removals"] == [{"path": str(old), "expected": _digest(old.read_bytes())}]
     assert preview["preserved"][0]["path"] == str(modified)
@@ -76,7 +77,7 @@ def test_upgrade_removes_only_managed_retired_skills_and_rejects_stale_plan(tmp_
     with pytest.raises(IntegrationConflict):
         integrate(preview)
     assert not (tmp_path / ".codex/config.toml").exists()
-    old.write_text("Old managed search")
+    old.write_bytes(managed_content)
     result = integrate(preview)
     assert not old.exists() and modified.read_text() == "My custom rework"
     assert set(path.name for path in root.iterdir()) == {"w", "w-search", "w-create", "w-settings", "w-find", "w-analyze", "wr"}

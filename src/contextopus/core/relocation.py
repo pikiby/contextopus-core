@@ -51,6 +51,7 @@ def _transient(relative):
         "runtime",
         "runtime/service.json",
         "runtime/service.log",
+        "runtime/mcp-owner.lock",
     } or (_WINDOWS and _runtime_lock(relative))
 
 

@@ -337,7 +337,8 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     (None, "missing"), ("\n \n", "empty"), (EMPTY_PROJECT, "placeholder"),
     ("# My project\nVerified purpose and boundaries.\n", "present"),
 ])
-def test_current_format_reports_project_content_without_rewriting(workspace, content, status):
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_current_format_reports_project_content_without_rewriting(workspace, content, status, line_ending):
     project = workspace.project_read()
     path = workspace.engine.root / project["path"]
     if content is None:
@@ -345,12 +346,15 @@ def test_current_format_reports_project_content_without_rewriting(workspace, con
     else:
         from contextopus.modules.workspace.records import record_text
         metadata, _ = _parse(path.read_text())
-        path.write_text(record_text(metadata, content))
+        stored = record_text(metadata, content).replace("\n", line_ending).encode("utf-8")
+        path.write_bytes(stored)
     before = workspace._source_files()
     plan = workspace.upgrade_plan()
     assert plan["project_description"]["status"] == status
     assert plan["project_description"]["content_reviewed"] is False
     assert before == workspace._source_files()
+    if content is not None:
+        assert path.read_bytes() == stored
 
 
 def test_current_format_reports_damaged_unfinished_work(workspace):

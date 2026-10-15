@@ -404,7 +404,9 @@ class WorkspaceMixin:
         if len(candidates) > 1:
             return {"status": "ambiguous", "content_reviewed": False}
         path, body = candidates[0]
-        status = "empty" if not body.strip() else "placeholder" if body.strip() == EMPTY_PROJECT.strip() else "present"
+        # Placeholder identity is semantic; retain original bytes for revision checks.
+        comparable = body.replace("\r\n", "\n").replace("\r", "\n").strip()
+        status = "empty" if not comparable else "placeholder" if comparable == EMPTY_PROJECT.strip() else "present"
         return {"path": path.relative_to(self.engine.root).as_posix(), "status": status, "content_reviewed": False}
 
     def _migration_copy(self, source, destination, manifest):
