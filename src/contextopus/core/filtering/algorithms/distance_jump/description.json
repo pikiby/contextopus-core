@@ -1,0 +1,36 @@
+{
+  "id": "distance_jump",
+  "version": "1.0.0",
+  "purpose": "Cut at the first unusually large positive distance gap.",
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "N": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "d_max": {
+        "type": "number",
+        "minimum": 0
+      },
+      "min_jump": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
+      "multiplier": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
+    },
+    "additionalProperties": false
+  },
+  "defaults": {
+    "N": 20,
+    "d_max": 0.8,
+    "min_jump": 0.02,
+    "multiplier": 3.0
+  },
+  "when_to_use": "Use for a compact relevance cluster. Raise multiplier or min_jump to retain more. Uses the arithmetic median of positive gaps for legacy compatibility.",
+  "how_to_adjust": "Use for a compact relevance cluster. Raise multiplier or min_jump to retain more. Uses the arithmetic median of positive gaps for legacy compatibility."
+}

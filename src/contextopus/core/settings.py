@@ -15,12 +15,14 @@ DEFAULTS = {
     "include_archived": False,
     "searchN": 20,
     "distance": None,
+    "selection": {"algorithm": "distance_jump", "parameters": {}},
 }
 
 
 class Settings:
-    def __init__(self, layout):
+    def __init__(self, layout, registry=None):
         self.layout = layout
+        self.registry = registry
         self.path = layout.configuration / "settings.json"
         self._previews = {}
 
@@ -45,7 +47,7 @@ class Settings:
         root = self._read()
         active_path = self.layout.workspace_rag / "active.json"
         active = json.loads(active_path.read_text()) if active_path.is_file() else None
-        effective = dict(DEFAULTS)
+        effective = json.loads(json.dumps(DEFAULTS))
         sources = {key: "default" for key in effective}
         if active:
             effective.update(
@@ -67,14 +69,57 @@ class Settings:
             layers.append(
                 (scope, json.loads(path.read_text()) if path.is_file() else {})
             )
+        from .filtering import registry_for_layout
+        registry = self.registry or registry_for_layout(self.layout)
+        selection = {"algorithm": "distance_jump", "parameters": {}}
+        selection_sources = {"algorithm": "default"}
+        if active:
+            selection["parameters"] = {k:v for k,v in active["search"].items() if k in ("N", "d_max", "min_jump", "multiplier")}
+            selection_sources.update({"parameters." + k: "root.active_index" for k in selection["parameters"]})
+        def merge_selection(layer, origin):
+            nonlocal selection
+            value = layer.get("selection")
+            if value is not None:
+                if not isinstance(value, dict):
+                    raise ValueError("selection must be an object")
+                algorithm = value.get("algorithm", selection["algorithm"])
+                if algorithm != selection["algorithm"]:
+                    selection = {"algorithm": algorithm, "parameters": {}}
+                    selection_sources.clear()
+                if "algorithm" in value:
+                    selection_sources["algorithm"] = origin
+                selection["parameters"].update(value.get("parameters", {}))
+                selection_sources.update({"parameters." + k: origin for k in value.get("parameters", {})})
+                selection["algorithm"] = algorithm
+                if registry.contains(selection["algorithm"]):
+                    registry.resolve(selection)
+            defaults = registry.resolve(selection)[1]["defaults"] if registry.contains(selection["algorithm"]) else {}
+            for old, new in (("searchN", "N"), ("distance", "d_max")):
+                if old in layer and layer[old] is not None and new not in (value or {}).get("parameters", {}) and new in defaults:
+                    selection["parameters"][new] = layer[old]
+                    selection_sources["parameters." + new] = origin + ".legacy"
         for scope, layer in layers:
+            self._validate_changes(layer, allow_unavailable=True)
+            merge_selection(layer, scope + ".configuration")
             effective.update(layer)
             sources.update({key: scope + ".configuration" for key in layer})
         configured = dict(effective)
         if request:
             self._validate_changes(request)
+            merge_selection(request, "request")
             effective.update(request)
             sources.update({key: "request" for key in request})
+        if registry.contains(selection["algorithm"]):
+            effective["selection"] = registry.resolve(selection)[0]
+            selection_status = {"valid":True, "algorithm":selection["algorithm"]}
+        else:
+            effective["selection"] = selection
+            selection_status = {"valid":False, "code":"algorithm_unavailable",
+                "algorithm":selection["algorithm"], "next_action":"core.settings_preview",
+                "message":"The saved algorithm is unavailable. Enable its prepared module again or preview/apply a replacement selection at the configured scope. A builtin request override can search without saving a replacement."}
+        for key in effective["selection"]["parameters"]:
+            selection_sources.setdefault("parameters." + key, "algorithm.default")
+        sources.update({"selection." + key: value for key, value in selection_sources.items()})
         if active:
             current = {
                 "provider": active["config"]["provider"]["type"],
@@ -84,11 +129,12 @@ class Settings:
             effective.update(current)
             sources.update({key: "root.active_index" for key in current})
         encoded = json.dumps(
-            [layers, active, request, {"module": module, "context": context}],
+            [layers, active, request, {"module": module, "context": context}, registry.catalog()],
             sort_keys=True,
         ).encode()
         return {
             "values": effective,
+            "selection_status": selection_status,
             "scope": str(self.layout.root),
             "sources": sources,
             "selected_scope": {
@@ -106,10 +152,20 @@ class Settings:
             "revision": hashlib.sha256(encoded).hexdigest(),
         }
 
-    @staticmethod
-    def _validate_changes(changes):
+    def _validate_changes(self, changes, allow_unavailable=False):
         if not isinstance(changes, dict) or set(changes) - set(DEFAULTS):
             raise ValueError("Unknown configuration fields")
+        if "selection" in changes:
+            from .filtering import registry_for_layout
+            value = changes['selection']
+            if not isinstance(value, dict) or set(value) - {'algorithm', 'parameters'} or not isinstance(value.get('parameters', {}),dict):
+                raise ValueError('selection requires algorithm and parameters')
+            if 'algorithm' in value:
+                if not isinstance(value['algorithm'], str) or not value['algorithm']:
+                    raise ValueError('selection.algorithm must be a nonempty string')
+                registry = self.registry or registry_for_layout(self.layout)
+                if not allow_unavailable or registry.contains(value['algorithm']):
+                    registry.resolve(value)
         for key in ("include", "exclude"):
             if key in changes and (
                 not isinstance(changes[key], list)
@@ -146,22 +202,22 @@ class Settings:
         self._validate_changes(changes)
         before = self.snapshot(module, context)
         revision = hashlib.sha256(
-            json.dumps([before["revision"], changes], sort_keys=True).encode()
+            json.dumps([before["revision"], changes, {"request_only":request_only}], sort_keys=True).encode()
         ).hexdigest()
         preview = {
             "preview_revision": revision,
             "base_revision": before["revision"],
-            "changes": dict(changes),
+            "changes": json.loads(json.dumps(changes)),
             "selected_scope": {"module": module, "context": context},
             "request_only": request_only,
-            "effective": {**before["values"], **changes},
+            "effective": self.snapshot(module, context, request=changes)["values"],
             "requires_reindex": bool(
                 set(changes) & {"include", "exclude", "provider", "model", "chunk_size"}
             ),
             "consequences": "Future search requests use the saved filters. Model and chunk changes require reindex. Existing data is retained; no processing is started.",
             "running_process_applied": False,
         }
-        self._previews[revision] = preview
+        self._previews[revision] = json.loads(json.dumps(preview))
         return preview
 
     def apply(self, revision):
@@ -183,6 +239,11 @@ class Settings:
             path = self._scope_path(**scope)
             existing = json.loads(path.read_text()) if path.is_file() else {}
             saved = {**existing, **preview["changes"]}
+            if 'selection' in preview['changes']:
+                old = existing.get('selection', {})
+                new = preview['changes']['selection']
+                if new.get('algorithm', old.get('algorithm')) == old.get('algorithm'):
+                    saved['selection'] = {**old, **new, 'parameters': {**old.get('parameters', {}), **new.get('parameters', {})}}
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(".tmp")
             temporary.write_text(json.dumps(saved, indent=2) + "\n")

@@ -1,0 +1,21 @@
+{
+  "id": "nearest_n",
+  "version": "1.0.0",
+  "purpose": "Keep the nearest N candidates.",
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "N": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      }
+    },
+    "additionalProperties": false
+  },
+  "defaults": {
+    "N": 20
+  },
+  "when_to_use": "Use when a fixed nearest window is needed. Increase N to inspect a longer tail.",
+  "how_to_adjust": "Use when a fixed nearest window is needed. Increase N to inspect a longer tail."
+}

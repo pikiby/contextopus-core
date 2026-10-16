@@ -26,7 +26,7 @@ Configuration schema support is implemented; live compatibility remains subject 
 
 `--user` selects native user configuration instead of a project file. `--config-only` reuses an already discoverable shared skill copy. `--legacy-skills <directory>` removes only recognized unchanged old manually installed entrypoints; edited/unknown files are preserved and reported, and plugin caches are refused. The retained source/cache 0.14.0 entrypoints are represented by packaged content hashes.
 
-For literal `$w`, `$w-search`, `$w-create`, `$w-settings`, `$w-find`, `$w-analyze`, use `contextopus integrate codex --user --apply`. This direct native integration installs user skills and one HTTP MCP entry. Keep the Contextopus plugin disabled when using this method to avoid duplicate skills and tools. The rollout selected this direct method.
+For literal `$w`, `$w-search`, `$w-create`, `$w-settings`, `$w-context`, `$w-analyze`, use `contextopus integrate codex --user --apply`. This direct native integration installs user skills and one HTTP MCP entry. Keep the Contextopus plugin disabled when using this method to avoid duplicate skills and tools. The rollout selected this direct method.
 
 Optional Codex plugin users first run `codex plugin marketplace add <checkout>` and `codex plugin add contextopus@contextopus`, then preview/apply `contextopus integrate codex --user --native-plugin`. This cutover requires the installed new cache, disables the exact old plugin flag, removes its obsolete marketplace declaration and an exactly matching duplicate Contextopus manual HTTP entry, and preserves old cache files. Other servers are retained; a conflicting Contextopus definition fails. No plugin uninstall command is used.
 

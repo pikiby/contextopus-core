@@ -20,7 +20,6 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
-import statistics
 import subprocess
 import tempfile
 import threading
@@ -84,28 +83,9 @@ class SearchConfig:
 
 
 def select_candidates(rows: list[dict], config: SearchConfig) -> list[dict]:
-    """Apply N, d_max, first median-positive-gap jump, then material deduplication."""
-    ordered = sorted(rows, key=lambda row: row["distance"])[: config.N]
-    kept = [
-        row
-        for row in ordered
-        if math.isfinite(row["distance"]) and row["distance"] <= config.d_max
-    ]
-    if len(kept) >= 3:
-        gaps = [b["distance"] - a["distance"] for a, b in zip(kept, kept[1:])]
-        positive = [gap for gap in gaps if gap > 0]
-        if positive:
-            threshold = max(
-                config.min_jump, statistics.median(positive) * config.multiplier
-            )
-            for index, gap in enumerate(gaps):
-                if gap >= threshold:
-                    kept = kept[: index + 1]
-                    break
-    unique = {}
-    for row in kept:
-        unique.setdefault(row["id"], row)
-    return list(unique.values())
+    """Compatibility adapter preserving the legacy search selection order."""
+    from contextopus.core.filtering import select
+    return select(rows, legacy=dataclasses.asdict(config))["results"]
 
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
@@ -1454,7 +1434,10 @@ class PCWRuntime:
     ):
         with self._guard():
             namespace = self._namespace()
-            if namespace and self.table.count_rows(f"NOT {namespace}"):
+            # Algorithm cards are derivative data. The explicit model-apply
+            # boundary refreshes them after publishing the rebuilt source index.
+            derivative = "(module = 'core' AND collection = 'search_algorithm')"
+            if namespace and self.table.count_rows(f"NOT ({namespace}) AND (module IS NULL OR collection IS NULL OR NOT {derivative})"):
                 raise PCWError(
                     "Profile switch requires source adapters for every indexed module; non-Workspace documents are present"
                 )

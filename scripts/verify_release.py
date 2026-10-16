@@ -46,7 +46,7 @@ def verify():
         "contextopus/modules/workspace/default_instructions.md",
         "contextopus/resources/procedures/workspace.md",
     }
-    skills = {"w", "w-search", "w-create", "w-settings", "w-find", "w-analyze"}
+    skills = {"w", "w-search", "w-create", "w-settings", "w-context", "w-analyze"}
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
         dist_info = f"{distribution}-{version}.dist-info"
@@ -60,6 +60,12 @@ def verify():
                 raise ValueError(f"Wheel misses the exact {name}")
         if not required <= names:
             raise ValueError("Wheel misses required application modules/resources")
+        source_package = ROOT / "src/contextopus"
+        for path in source_package.rglob("*"):
+            if path.is_file() and path.suffix in {".py", ".json", ".md", ".yaml"} and "__pycache__" not in path.parts:
+                member = "contextopus/" + path.relative_to(source_package).as_posix()
+                if member not in names or archive.read(member) != path.read_bytes():
+                    raise ValueError(f"Wheel has missing or stale application content: {member}")
         packaged_skills = {PurePosixPath(n).parts[-2] for n in names
                            if n.startswith("contextopus/resources/skills/") and n.endswith("/SKILL.md")}
         if packaged_skills != skills:

@@ -1,6 +1,7 @@
 ---
 allow_implicit_updates: false
 knowledge_approval_required: false
+instructions_approval_required: true
 git_history_enabled: true
 material_max_tokens: 1024
 create_required_sources: false
@@ -9,7 +10,7 @@ create_required_sources: false
 
 ## Knowledge approval
 
-Show the exact knowledge changes in chat before applying them. The frontmatter setting controls whether to wait for user approval: `false` means apply after showing; `true` means wait for explicit approval of the shown revision. Changes to these instructions always require explicit approval through `w-settings` (the canonical Contextopus `instructions` procedure).
+Show the exact knowledge changes in chat before applying them. The `knowledge_approval_required` frontmatter setting controls whether to wait for user approval: `false` means apply after showing; `true` means wait for explicit approval of the shown revision. The independent `instructions_approval_required` setting controls approval of instruction edits: true (also the default when absent) waits for explicit approval; false applies the shown revision without another prompt. The current instructions determine approval even when an edit disables it. Edit instructions through `w-settings` (the canonical Contextopus `instructions` procedure).
 
 `allow_implicit_updates` separately controls starting a work cycle without an explicit Workspace invocation such as `w`. When false, only independent reading is allowed without that invocation. Creation, switching context and changing instructions still require the user's clear direction. `git_history_enabled` enables local history of permanent data; `material_max_tokens` optionally limits each final knowledge body, with null disabling the limit.
 

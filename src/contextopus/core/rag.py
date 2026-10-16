@@ -37,6 +37,7 @@ class RagIndex:
         self._requested_embeddings = embeddings
         self.db = self.table = self._provider = None
         self.source_adapters = {}
+        self.algorithm_registry = None
 
     def register_source(self, module, adapter):
         self.source_adapters[module] = adapter
@@ -130,6 +131,10 @@ class RagIndex:
     def nearest(
         table, vector, *, predicate=None, columns=None, limit=20, metric="cosine"
     ):
+        if limit is None:
+            limit = table.count_rows()
+        if not limit:
+            return []
         query = table.search(vector).distance_type(metric)
         if predicate:
             query = query.where(predicate, prefilter=True)
@@ -249,6 +254,69 @@ class RagIndex:
     def _quote(value):
         return "'" + str(value).replace("'", "''") + "'"
 
+    def profile(self):
+        """Read the active root profile without creating storage or loading a model."""
+        pointer = self.layout.workspace_rag / "active.json"
+        if not pointer.is_file():
+            raise ValueError("Initialize the Core embedding profile before indexing")
+        return json.loads(pointer.read_text())["config"]
+
+    def vector_revisions(self, module, collection):
+        with self.layout.guard():
+            table = self._generic_table()
+            if table is None:
+                return {}
+            rows = self.read_rows(table, ["object_id", "revision"],
+                "module=" + self._quote(module) + " AND collection=" + self._quote(collection))
+            return {r["object_id"]: r["revision"] for r in rows}
+
+    def put_vector(self, document, vector, *, profile):
+        """Store one module-prepared block using the root's existing profile."""
+        with self.layout.guard():
+            if self.profile() != profile:
+                raise ValueError("Core embedding profile changed; restart the module")
+            table = self._generic_table(create=True)
+            dimensions = profile["profile"]["dimensions"]
+            if len(vector) != dimensions or not all(math.isfinite(float(x)) for x in vector) or not any(vector):
+                raise ValueError("Invalid vector dimensions or values")
+            row = dict(material_id=document.key.id, part_index=0, part_count=1,
+                       text=document.text, vector=list(vector), path=document.location,
+                       revision=document.revision, token_start=0, token_end=0,
+                       char_start=0, char_end=len(document.text), chunking_id="module-block-v1",
+                       module=document.key.module, collection=document.key.collection,
+                       object_id=document.key.id, metadata=json.dumps(document.metadata), workspace="")
+            table.merge_insert(["module", "collection", "object_id", "part_index"]).when_matched_update_all().when_not_matched_insert_all().execute([row])
+
+    def delete_document(self, key):
+        with self.layout.guard():
+            table = self._generic_table()
+            if table is not None:
+                table.delete(self.key_predicate(key))
+
+    @classmethod
+    def key_predicate(cls, key):
+        return " AND ".join(name + "=" + cls._quote(value) for name, value in
+                            (("module", key.module), ("collection", key.collection), ("object_id", key.id)))
+
+    def search_vector(self, vector, *, module, collection, object_ids, profile, limit=20):
+        """Apply module eligibility before nearest lookup; never load another model."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("Invalid result limit")
+        ids = list(dict.fromkeys(object_ids))
+        if not ids:
+            return []
+        with self.layout.guard():
+            if self.profile() != profile:
+                raise ValueError("Core embedding profile changed; restart the module")
+            table = self._generic_table()
+            if table is None:
+                return []
+            if len(vector) != profile["profile"]["dimensions"] or not all(math.isfinite(float(v)) for v in vector):
+                raise ValueError("Invalid query vector")
+            predicate = ("module=" + self._quote(module) + " AND collection=" + self._quote(collection)
+                         + " AND object_id IN (" + ",".join(self._quote(x) for x in ids) + ")")
+            return self.nearest(table, vector, predicate=predicate, limit=limit)
+
     def index(self, document):
         from .chunking import chunking_identity
 
@@ -285,7 +353,11 @@ class RagIndex:
             "chunks": len(rows),
         }
 
-    def search(
+    def search(self, query, **options):
+        """Compatibility result list; use search_detailed for selection evidence."""
+        return self.search_detailed(query, **options)['results']
+
+    def search_detailed(
         self,
         query,
         *,
@@ -295,13 +367,53 @@ class RagIndex:
         status=None,
         include_archived=False,
         distance=None,
-        limit=20,
+        limit=None,
+        selection=None,
+        output="materials",
+        request=None,
+        purpose=None,
+        task_id=None,
+        candidate_limit=None,
     ):
-        if type(limit) is not int or not 1 <= limit <= 1000:
+        if limit is not None and (type(limit) is not int or not 1 <= limit <= 1000):
             raise ValueError("Invalid result limit")
+        if candidate_limit is not None and (type(candidate_limit) is not int or not 1 <= candidate_limit <= 100000):
+            raise ValueError('candidate_limit must be between 1 and 100000')
+        from .filtering import select, registry_for_layout
+        registry = self.algorithm_registry or registry_for_layout(self.layout)
+        from .settings import Settings, matches_location
+        request = dict(request or {})
+        if selection is not None:
+            request['selection'] = selection
+        snapshot = Settings(self.layout, registry=registry).snapshot(module=module, context=collection if module else None, request=request)
+        effective_selection = snapshot['values']['selection']
+        parameters = dict(effective_selection['parameters'])
+        if limit is not None:
+            name = 'page_size' if effective_selection['algorithm'] == 'none' else 'N'
+            parameters[name] = limit
+            snapshot['sources']['selection.parameters.' + name] = 'request.legacy'
+        if distance is not None:
+            if 'd_max' not in parameters:
+                raise ValueError('distance requires an algorithm with d_max')
+            parameters['d_max'] = distance
+            snapshot['sources']['selection.parameters.d_max'] = 'request.legacy'
+        effective_selection = {**effective_selection, 'parameters':parameters}
+        registry.resolve(effective_selection)
+        eligible_keys = []
+        def finish(items, eligible=0):
+            result = select(items, effective_selection, eligible_count=eligible, eligible_documents=len(set(eligible_keys)) if eligible else 0, eligible_fragments=eligible, output=output, registry=registry)
+            result['diagnostics']['settings_sources'] = snapshot['sources']
+            result['diagnostics'].update(purpose=purpose,task_id=task_id,
+                scope={'module':module, 'contexts':[collection] if collection is not None else None,
+                       'settings_context':collection if module else None, 'object_type':object_type,
+                       'status':status, 'include_archived':include_archived,
+                       'include':snapshot['values']['include'], 'exclude':snapshot['values']['exclude']},
+                candidate_pool_truncated=False)
+            result['diagnostics']['limits']['nearest'] = candidate_limit
+            return result
         table = self._generic_table()
         if table is None:
-            return []
+            return finish([])
         clauses = []
         for name, value in (("module", module), ("collection", collection)):
             if value is not None:
@@ -312,11 +424,7 @@ class RagIndex:
             ["module", "collection", "object_id", "metadata", "path"],
             " AND ".join(clauses) or None,
         )
-        from .settings import Settings, matches_location
-
-        filters = Settings(self.layout).snapshot(
-            module=module, context=collection if module else None
-        )["values"]
+        filters = snapshot["values"]
         source_documents = {
             module: adapter.eligible_documents(
                 [row for row in rows if row["module"] == module]
@@ -345,6 +453,7 @@ class RagIndex:
                 continue
             if not include_archived and meta.get("archived", False):
                 continue
+            eligible_keys.append(key.value())
             eligible.append(
                 "(module="
                 + self._quote(row["module"])
@@ -355,7 +464,7 @@ class RagIndex:
                 + ")"
             )
         if not eligible:
-            return []
+            return finish([])
         vector = self.vectors(
             self._get_provider(),
             [query],
@@ -363,14 +472,11 @@ class RagIndex:
             "query",
         )[0]
         found = self.nearest(
-            table, vector, predicate=" OR ".join(eligible), limit=limit
+            table, vector, predicate=" OR ".join(dict.fromkeys(eligible)), limit=candidate_limit
         )
-        result, seen = [], set()
+        result = []
         for row in found:
             key = DocumentKey(row["module"], row["collection"], row["object_id"])
-            if key in seen or distance is not None and row["_distance"] > distance:
-                continue
-            seen.add(key)
             source_document = source_documents.get(row["module"], {}).get(key)
             if source_document is not None:
                 row = {
@@ -381,6 +487,7 @@ class RagIndex:
             result.append(
                 {
                     "key": json.loads(key.value()),
+                    "part_index": row.get("part_index"),
                     "revision": row["revision"],
                     "location": row["path"],
                     "excerpt": row["text"],
@@ -388,7 +495,10 @@ class RagIndex:
                     "distance": row["_distance"],
                 }
             )
-        return result
+        answer = finish(result, len(eligible))
+        answer['diagnostics']['limits']['nearest'] = candidate_limit
+        answer['diagnostics']['candidate_pool_truncated'] = candidate_limit is not None and len(eligible) > len(found)
+        return answer
 
     @staticmethod
     def vectors(provider, parts, dimensions, purpose):

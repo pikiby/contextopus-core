@@ -1,0 +1,26 @@
+{
+  "id": "distance_threshold",
+  "version": "1.0.0",
+  "purpose": "Keep candidates inside an absolute distance boundary.",
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "N": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "d_max": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "additionalProperties": false
+  },
+  "defaults": {
+    "N": 20,
+    "d_max": 0.8
+  },
+  "when_to_use": "Use a calibrated distance scale. Lower d_max for stricter relevance.",
+  "how_to_adjust": "Use a calibrated distance scale. Lower d_max for stricter relevance."
+}

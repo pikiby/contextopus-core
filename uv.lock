@@ -307,12 +307,13 @@ wheels = [
 
 [[package]]
 name = "contextopus-core"
-version = "1.1.0"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
     { name = "lancedb" },
     { name = "mcp" },
+    { name = "packaging" },
     { name = "platformdirs" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -341,6 +342,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4,<5" },
     { name = "lancedb", specifier = ">=0.20,<1" },
     { name = "mcp", specifier = ">=1.10,<2" },
+    { name = "packaging", specifier = ">=24" },
     { name = "platformdirs", specifier = ">=4,<5" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },

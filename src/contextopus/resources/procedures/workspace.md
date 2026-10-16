@@ -48,7 +48,7 @@ For an unknown signature, call `contextopus_query(operation="describe", argument
 
 ## Related operations
 
-Change INSTRUCTIONS only through the [instructions procedure](procedure:instructions) on a direct request and explicit approval. Project purposes and boundaries use the canonical `type: project` record; update it through ordinary proposals. There is no separate Current storage or project-update procedure.
+Change INSTRUCTIONS only through the [instructions procedure](procedure:instructions) on a direct request under the current `instructions_approval_required` policy. Project purposes and boundaries use the canonical `type: project` record; update it through ordinary proposals. There is no separate Current storage or project-update procedure.
 
 When Git history is enabled, use bounded history queries to investigate missing former instructions/conditions/links, unexplained state conflicts, regressions after rule changes, project evolution or restoration. Start with `history_list` or `history_search`, inspect `history_changes`, then read only the relevant diff/old text. Follow explicit merge/split provenance across record IDs; do not infer it from similarity. Historical text is not current authority. Restore through a normal proposal. Analyze operations through `analytics_query/read` only for an analysis task; import only the explicitly selected transcript. See [History and analytics](procedure:reference/history-analytics).
 

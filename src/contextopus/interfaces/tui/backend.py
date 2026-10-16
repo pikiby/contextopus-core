@@ -36,10 +36,16 @@ class Backend:
             raise ValueError("Unknown lifecycle action")
         return await asyncio.to_thread(getattr(service, action), self.application.root)
 
-    async def preview(self, changes):
+    async def preview(self, changes, module=None, context=None):
         return await asyncio.to_thread(
-            self.application.query, "core.settings_preview", {"changes": changes}
+            self.application.query, "core.settings_preview", {"changes": changes, **({"module": module} if module else {}), **({"context": context} if context else {})}
         )
+
+    async def algorithms(self):
+        return await asyncio.to_thread(self.application.query, "core.algorithms")
+
+    async def scoped_settings(self, module=None, context=None):
+        return await asyncio.to_thread(self.application.query, "core.settings", {"module": module, "context": context})
 
     async def apply(self, revision):
         return await asyncio.to_thread(
@@ -48,8 +54,21 @@ class Backend:
             {"preview_revision": revision},
         )
 
-    async def open_module(self, module):
-        return await asyncio.to_thread(self.application.execute, module + ".open_tui")
+    async def modules(self):
+        return await asyncio.to_thread(self.application.query, "core.modules")
+
+    async def module_action(self, action, module, source=None):
+        if action not in {"prepare", "enable", "disable", "update"}:
+            raise ValueError("Unknown module action")
+        arguments = {"module": module}
+        if source is not None:
+            arguments["source"] = source
+        return await asyncio.to_thread(self.application.execute, "core.module_" + action, arguments)
+
+    async def open_module(self, module, operation=None):
+        operation = operation or module + ".open_tui"
+        description = await asyncio.to_thread(self.application.query, "describe", {"operation": operation})
+        return await asyncio.to_thread(getattr(self.application, description["kind"]), operation)
 
     async def reconnect(self, client):
         from contextopus.integrations.reconnect import reconnect

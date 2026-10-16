@@ -19,7 +19,7 @@ jobs:
       - run: uv build --no-sources
       - run: uv run --locked python scripts/build_release.py
       - run: uv run --locked python scripts/verify_release.py
-      - run: uv tool install --python ${{ matrix.python }} ./dist/contextopus_core-1.1.0-py3-none-any.whl
+      - run: uv tool install --python ${{ matrix.python }} ./dist/contextopus_core-1.2.0-py3-none-any.whl
       - run: contextopus --version
       - uses: actions/upload-artifact@v4
         with:

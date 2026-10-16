@@ -143,9 +143,9 @@ def test_auto_mode_still_checks_file_conflicts_and_full_revision(workspace):
     assert "Concurrent edit" in path.read_text()
 
 
-def test_mcp_schema_allows_omitting_confirmation_only_for_knowledge():
+def test_mcp_schema_allows_omitting_confirmation_under_runtime_policy():
     knowledge = pcw_query("describe", arguments={"operation": "proposal_apply"})["arguments_schema"]
     instructions = pcw_query("describe", arguments={"operation": "instructions_apply"})["arguments_schema"]
     assert "confirmation" not in knowledge["required"]
-    assert "confirmation" in instructions["required"]
+    assert "confirmation" not in instructions["required"]
     assert "knowledge_approval_required" not in knowledge["properties"]

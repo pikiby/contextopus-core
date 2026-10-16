@@ -440,7 +440,14 @@ class WorkspaceSourceAdapter(PCWRuntime):
         all_categories=False,
         types=None,
         statuses=None,
+        selection=None,
+        output="materials",
+        purpose=None,
+        task_id=None,
+        candidate_limit=None,
     ):
+        if candidate_limit is not None and (type(candidate_limit) is not int or not 1 <= candidate_limit <= 100000):
+            raise PCWError("Invalid candidate_limit")
         with self._guard():
             if type(all_categories) is not bool or (
                 all_categories and categories is not None
@@ -448,9 +455,23 @@ class WorkspaceSourceAdapter(PCWRuntime):
                 raise PCWError("Choose categories or all_categories, not both")
             from contextopus.core.settings import Settings, matches_location
 
-            settings = Settings(self.layout).snapshot(
-                module="workspace", context=self.workspace
-            )["values"]
+            from contextopus.core.filtering import registry_for_layout
+            algorithm_registry = registry_for_layout(self.layout)
+            snapshot = Settings(self.layout, registry=algorithm_registry).snapshot(
+                module="workspace", context=self.workspace,
+                request={"selection": selection} if selection is not None else None,
+            )
+            settings = snapshot["values"]
+            from contextopus.core.filtering import select
+            effective_selection = settings["selection"]
+            parameters = dict(effective_selection["parameters"])
+            for key,value in {"N":N, "d_max":d_max, "min_jump":min_jump, "multiplier":multiplier}.items():
+                if value is not None:
+                    if key not in parameters:
+                        raise PCWError(f"{key} is not supported by the selected algorithm")
+                    parameters[key] = value
+                    snapshot["sources"]["selection.parameters." + key] = "request.legacy"
+            effective_selection = {**effective_selection, "parameters":parameters}
             selected = list(self.categories) if all_categories else categories
             if selected is None and settings.get("context"):
                 selected = [settings["context"]]
@@ -511,6 +532,9 @@ class WorkspaceSourceAdapter(PCWRuntime):
                     == settings["object_type"]
                 )
             }
+            eligible_fragments = sum(1 for r in self._rows(["material_id"]) if r["material_id"] in eligible)
+            selection_result = select([], effective_selection, eligible_count=len(eligible), eligible_documents=len(eligible), eligible_fragments=eligible_fragments, output=output,
+                                      registry=algorithm_registry)
             results = []
             if eligible:
                 vector = self._vectors(
@@ -531,17 +555,26 @@ class WorkspaceSourceAdapter(PCWRuntime):
                     self.table,
                     vector,
                     predicate=predicate,
-                    columns=["material_id", "text"],
-                    limit=config.N,
+                    columns=["material_id", "text", "revision", "part_index"],
+                    limit=candidate_limit,
                     metric=config.metric,
                 )
-                results = select_candidates(
+                selection_result = select(
                     [
-                        {**self._label(r["material_id"]), "distance": r["_distance"], "excerpt": r["text"]}
+                        {**self._label(r["material_id"]), "key":["workspace",self.owners[r["material_id"]],r["material_id"]], "distance": r["_distance"], "excerpt": r["text"], "revision":r.get("revision"), "part_index":r.get("part_index")}
                         for r in rows
                     ],
-                    config,
+                    effective_selection, eligible_count=len(eligible), eligible_documents=len(eligible), eligible_fragments=eligible_fragments, output=output, registry=algorithm_registry,
                 )
+            results = selection_result["results"]
+            selection_result["diagnostics"]["settings_sources"] = snapshot["sources"]
+            selection_result["diagnostics"].update(purpose=purpose, task_id=task_id,
+                scope={"module":"workspace", "contexts":selected, "settings_context":self.workspace,
+                       "types":types, "statuses":statuses, "object_type":settings["object_type"],
+                       "include_archived":settings["include_archived"],
+                       "include":settings["include"], "exclude":settings["exclude"]})
+            selection_result["diagnostics"]["limits"]["nearest"] = candidate_limit
+            selection_result["diagnostics"]["candidate_pool_truncated"] = candidate_limit is not None and eligible_fragments > selection_result["diagnostics"]["counts"]["considered_fragments"]
             pending = sorted(
                 i
                 for i, m in self.catalog.items()
@@ -554,6 +587,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
             )
             return {
                 "results": results,
+                "diagnostics": selection_result["diagnostics"],
                 "categories": selected,
                 "active_workspace": self.workspace,
                 "pending_preparation": pending[:50],

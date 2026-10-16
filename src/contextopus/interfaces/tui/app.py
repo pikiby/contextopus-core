@@ -8,10 +8,34 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
-from textual.widgets import Static
+from textual.widgets import Static, Input
+from textual.screen import ModalScreen
 from .backend import Backend
 from .charts import History
 from . import render
+
+
+class ModuleSourceScreen(ModalScreen):
+    """Collect an unpacked release path; Escape cancels without mutation."""
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, title="Update module: enter unpacked release directory; Escape cancels", value=""):
+        super().__init__()
+        self.prompt, self.initial = title, value
+
+    def compose(self):
+        yield Static(self.prompt)
+        yield Input(value=self.initial, placeholder="Enter value", id="module-source")
+
+    def on_mount(self):
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event):
+        if event.value.strip():
+            self.dismiss(event.value.strip())
+
+    def action_cancel(self):
+        self.dismiss(None)
 
 
 class ContextopusApp(App):
@@ -36,6 +60,12 @@ class ContextopusApp(App):
         self.snapshot = {"status": {"state": "loading"}, "settings": {}}
         self.selected = 0
         self.page = "main"
+        self.module_items = []
+        self.algorithm_catalog = []
+        self.selection_scope = {"module": None, "context": None}
+        self.selection_settings = {}
+        self.selection_draft = None
+        self.selection_preview = None
         self.draft = None
         self.preview = None
         self.message = None
@@ -93,6 +123,10 @@ class ContextopusApp(App):
                 self.preview,
                 self.message,
             )
+        elif self.page == "selection":
+            text, self.actions = render.selection(self.selection_settings, self.algorithm_catalog, self.selection_draft, self.selection_scope, width, self.selected, self.selection_preview, self.message)
+        elif self.page == "modules":
+            text, self.actions = render.modules(self.module_items, width, self.selected, self.message)
         elif self.page == "connections":
             text, self.actions = render.connections(width, self.selected, self.message)
         elif self.page == "errors":
@@ -210,6 +244,36 @@ class ContextopusApp(App):
         elif row >= top + height:
             viewport.scroll_to(y=row - height + 1, animate=False)
 
+    def check_action(self, action, parameters):
+        if isinstance(self.screen, ModuleSourceScreen) and action in {"up", "down", "change", "apply", "back"}:
+            return False
+        return True
+
+    async def update_module_source(self, module, source):
+        if not source:
+            return
+        self.busy = True
+        self.message = "Updating " + module + "…"
+        self.draw()
+        try:
+            result = await self.backend.module_action("update", module, source)
+            self.message = module + ": " + result["state"]
+            self.module_items = await self.backend.modules()
+        except Exception as exc:
+            self.message = str(exc)
+        finally:
+            self.busy = False
+            self.draw()
+
+    async def run_module_tui(self, module, operation=None):
+        descriptor = await self.backend.open_module(module, operation)
+        argv = descriptor["argv"]
+        if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) for arg in argv):
+            raise ValueError("Module TUI must return a nonempty argv list")
+        with self.suspend():
+            child = await asyncio.to_thread(subprocess.run, argv, check=False)
+        self.message = "Module closed." if child.returncode == 0 else "Module failed: " + str(child.returncode)
+
     def action_up(self):
         self.selected = (self.selected - 1) % len(self.actions)
         self.draw()
@@ -220,7 +284,49 @@ class ContextopusApp(App):
         self.draw()
         self.call_after_refresh(self.show_selected)
 
+    def cycle_algorithm(self):
+        if not self.algorithm_catalog:
+            raise ValueError("No search algorithms available")
+        current = (self.selection_draft or self.selection_settings.get('values', {}).get('selection', {})).get('algorithm')
+        ids = [item['id'] for item in self.algorithm_catalog]
+        description = self.algorithm_catalog[(ids.index(current) + 1) % len(ids) if current in ids else 0]
+        self.selection_draft = {'algorithm': description['id'], 'parameters': dict(description['defaults'])}
+        self.selection_preview = None
+        self.draw()
+
+    async def selection_input(self, kind, value):
+        if value is None:
+            return
+        import json
+        try:
+            parsed = json.loads(value)
+            if kind == 'scope':
+                if not isinstance(parsed, dict) or set(parsed) - {'module', 'context'}:
+                    raise ValueError('Scope requires module and context keys')
+                scope = {'module': parsed.get('module'), 'context': parsed.get('context')}
+                if any(v is not None and (not isinstance(v, str) or not v.strip()) for v in scope.values()) or scope['context'] and not scope['module']:
+                    raise ValueError('Context scope requires a module; names must be nonempty strings')
+                settings = await self.backend.scoped_settings(**scope)
+                self.selection_scope, self.selection_settings = scope, settings
+                self.selection_draft = None
+            else:
+                import copy
+                import jsonschema
+                draft = copy.deepcopy(self.selection_draft or self.selection_settings['values']['selection'])
+                description = next(item for item in self.algorithm_catalog if item['id'] == draft['algorithm'])
+                jsonschema.validate(parsed, description['parameters_schema'])
+                draft['parameters'] = parsed
+                self.selection_draft = draft
+            self.selection_preview = None
+            self.message = None
+        except Exception as exc:
+            self.message = str(exc)
+        self.draw()
+
     def action_change(self):
+        if self.page == "selection" and self.actions[self.selected] == "Algorithm":
+            self.cycle_algorithm()
+            return
         if self.page == "settings" and self.selected == 0:
             current = (
                 self.snapshot.get("settings", {})
@@ -257,6 +363,51 @@ class ContextopusApp(App):
                 self.page = "settings"
                 self.selected = 0
                 self.message = None
+            elif action == "Search selection":
+                self.selection_preview, self.selection_draft = None, None
+                self.algorithm_catalog = await self.backend.algorithms()
+                if isinstance(self.algorithm_catalog, dict):
+                    self.algorithm_catalog = self.algorithm_catalog.get('algorithms', [])
+                self.selection_settings = await self.backend.scoped_settings(**self.selection_scope)
+                self.page, self.selected, self.message = "selection", 0, None
+            elif self.page == "selection" and action != "Back":
+                import json
+                if action == "Algorithm":
+                    self.cycle_algorithm()
+                elif action in {"Scope", "Parameters JSON"}:
+                    kind = 'scope' if action == 'Scope' else 'parameters'
+                    value = self.selection_scope if kind == 'scope' else (self.selection_draft or self.selection_settings['values']['selection'])['parameters']
+                    title = 'Scope JSON: root {"module":null,"context":null}; module or module+context' if kind == 'scope' else 'Parameters JSON; see algorithm schema and guidance below'
+                    self.push_screen(ModuleSourceScreen(title, json.dumps(value)), lambda value: self.run_worker(self.selection_input(kind, value)) if value else None)
+                elif action == "Preview selection":
+                    draft = self.selection_draft or self.selection_settings['values']['selection']
+                    self.selection_preview = await self.backend.preview({'selection': draft}, **self.selection_scope)
+                    self.message = self.selection_preview['consequences']
+                elif action == "Apply selection":
+                    if self.selection_preview is None:
+                        self.message = "Preview selection before applying."
+                    else:
+                        await self.backend.apply(self.selection_preview['preview_revision'])
+                        self.selection_preview = None
+                        self.selection_draft = None
+                        self.selection_settings = await self.backend.scoped_settings(**self.selection_scope)
+                        self.message = "Saved for future searches."
+            elif action == "Modules":
+                self.module_items = await self.backend.modules()
+                self.page, self.selected, self.message = "modules", 0, None
+            elif self.page == "modules" and action != "Back":
+                verb, module = action.split(" ", 1)
+                if verb == "Update":
+                    self.push_screen(ModuleSourceScreen(), lambda source: self.run_worker(self.update_module_source(module, source)) if source else None)
+                elif verb == "Open":
+                    item = next(item for item in self.module_items if item["id"] == module)
+                    await self.run_module_tui(module, item["open_tui"])
+                else:
+                    self.message = verb + " " + module + "…"
+                    self.draw()
+                    result = await self.backend.module_action(verb.lower(), module)
+                    self.message = module + ": " + result["state"]
+                    self.module_items = await self.backend.modules()
             elif action == "Error details":
                 self.page = "errors"
                 self.selected = 0
@@ -291,17 +442,7 @@ class ContextopusApp(App):
                     self.message = "Saved. Applies to future requests."
                     await self.poll()
             elif action == "Open Session search":
-                # Child owns the terminal while the parent display is suspended.
-                descriptor = await self.backend.open_module("session_search")
-                with self.suspend():
-                    child = await asyncio.to_thread(
-                        subprocess.run, descriptor["argv"], check=False
-                    )
-                self.message = (
-                    "Module closed."
-                    if child.returncode == 0
-                    else "Module failed: " + str(child.returncode)
-                )
+                await self.run_module_tui("session_search")
         except Exception as exc:
             self.message = str(exc)
         finally:

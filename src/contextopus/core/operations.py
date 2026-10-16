@@ -34,7 +34,27 @@ class OperationRegistry:
             raise ValueError(f"Invalid or duplicate operation: {spec.name}")
         self._operations[spec.name] = spec
 
+    def replace_owned(self, owner, specs):
+        """Validate a complete contribution before atomically publishing its operations."""
+        specs = list(specs)
+        names = [spec.name for spec in specs]
+        owned = getattr(self, '_owned', {})
+        previous = owned.get(owner, set())
+        if len(names) != len(set(names)) or any(
+            spec.kind not in {'query', 'execute'}
+            or (spec.name in self._operations and spec.name not in previous)
+            for spec in specs
+        ):
+            raise ValueError('Invalid or conflicting module operations')
+        replacement = {k: v for k, v in self._operations.items() if k not in previous}
+        replacement.update({spec.name: spec for spec in specs})
+        self._operations = replacement
+        self._owned = {**owned, owner: set(names)}
+
     def describe(self, operation=None):
+        refresh = getattr(self, "refresh_modules", None)
+        if refresh:
+            refresh()
         if operation is None:
             return {
                 "operations": {
@@ -58,29 +78,32 @@ class OperationRegistry:
         }
 
     def dispatch(self, kind, operation, arguments=None, context=None):
-        if operation not in self._operations:
-            raise ValueError(f"Unknown operation: {operation}; use describe")
-        spec = self._operations[operation]
-        if kind != spec.kind:
-            raise ValueError(f"Operation {operation} requires {spec.kind}")
-        arguments = {} if arguments is None else arguments
-        schema = spec.arguments_schema
-        if hasattr(schema, "model_validate"):
-            arguments = schema.model_validate(arguments).model_dump()
-        else:
-            from jsonschema import Draft202012Validator
-
-            Draft202012Validator(schema).validate(arguments)
         from .storage import StorageLayout
         from pathlib import Path
 
         root = getattr(context, "root", None)
+        candidate = self._operations.get(operation)
         guard = (
             StorageLayout(root).guard()
-            if root and Path(root).exists() and spec.guard_root
+            if root and Path(root).exists() and (candidate is None or candidate.guard_root)
             else nullcontext()
         )
         with guard:
+            refresh = getattr(self, "refresh_modules", None)
+            if refresh and (candidate is None or candidate.guard_root):
+                refresh()
+            if operation not in self._operations:
+                raise ValueError(f"Unknown operation: {operation}; use describe")
+            spec = self._operations[operation]
+            if kind != spec.kind:
+                raise ValueError(f"Operation {operation} requires {spec.kind}")
+            arguments = {} if arguments is None else arguments
+            schema = spec.arguments_schema
+            if hasattr(schema, "model_validate"):
+                arguments = schema.model_validate(arguments).model_dump()
+            else:
+                from jsonschema import Draft202012Validator
+                Draft202012Validator(schema).validate(arguments)
             return self._invoke(spec, arguments, context)
 
     def _invoke(self, spec, arguments, context):
@@ -119,7 +142,9 @@ class OperationRegistry:
             with self._activity_lock:
                 self.active_operations.pop(activity_id, None)
         if observed:
-            self.journal.finish(
+            search_recorded = self.journal.finish(
                 ident, result=result, duration=time.monotonic() - started
             )
+            if search_recorded:
+                result = {**result, "search_event_id": ident}
         return result

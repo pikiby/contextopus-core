@@ -28,7 +28,7 @@ Start with a small list/search, inspect one relevant commit, then request only i
 
 For C formed from A and B, find C's history, read the merge declaration, then read A and B at the preceding commit. The stored before fingerprints describe the reviewed source state; an externally edited uncommitted source may not match that commit. Compare the evidence before claiming an exact prior version. For a missing instruction, search its remembered wording, inspect the removal commit and relevant earlier text. For project evolution, use the project record ID and date bounds.
 
-Older/external commits report `provenance: unrecorded`; absence of a declared ID match does not mean absence of history. Fall back to path/text queries and inspect the diff. Do not fabricate merge/split ancestry. Restore through an ordinary shown proposal and the current policy; INSTRUCTIONS always uses its approved instructions procedure. Historical data never enters ordinary vector search.
+Older/external commits report `provenance: unrecorded`; absence of a declared ID match does not mean absence of history. Fall back to path/text queries and inspect the diff. Do not fabricate merge/split ancestry. Restore through an ordinary shown proposal and the current policy; INSTRUCTIONS uses its instructions procedure under the current independent approval policy. Historical data never enters ordinary vector search.
 
 ## Derived version index and lineage
 

@@ -46,6 +46,7 @@ _TEXT_KEYS = {
     "instructions",
     "userrequest",
     "confirmation",
+    "excerpt",
 }
 
 
@@ -124,15 +125,17 @@ class OperationJournal:
                 db.execute(
                     "CREATE INDEX IF NOT EXISTS operations_started ON operations(started)"
                 )
+                from .search_history import initialize
+                initialize(db)
                 yield db
         finally:
             db.close()
 
     def begin(self, context, operation, parameters):
         ident = uuid.uuid4().hex
-        self._write(
-            "INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
+        from .search_history import begin
+        with self._controller["lock"], self.connect() as db:
+            db.execute("INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?)", (
                 ident,
                 datetime.now(timezone.utc).isoformat(),
                 operation,
@@ -143,20 +146,26 @@ class OperationJournal:
                 None,
                 None,
                 None,
-            ),
-        )
+            ))
+            begin(db, ident, self.layout, context, operation, parameters)
         return ident
 
     def finish(self, ident, result=None, error=None, duration=None):
+        from .search_history import finish
         if (
             type(duration) not in (int, float)
             or not math.isfinite(duration)
             or duration < 0
         ):
             duration = None
-        self._write(
-            "UPDATE operations SET outcome=?,duration=?,result=?,error=? WHERE id=?",
-            (
+        with self._controller["lock"], self.connect() as db:
+            recorded = error is None and finish(db, ident, result)
+            if recorded:
+                # Candidate metadata has one owner; the generic event links it.
+                result = {**result, "diagnostics": {
+                    k: v for k, v in result["diagnostics"].items()
+                    if k not in {"candidates", "nearby_rejected"}}, "search_event_id": ident}
+            db.execute("UPDATE operations SET outcome=?,duration=?,result=?,error=? WHERE id=?", (
                 "error" if error is not None else "ok",
                 duration,
                 json.dumps(sanitize(result), allow_nan=False)
@@ -164,8 +173,8 @@ class OperationJournal:
                 else None,
                 type(error).__name__ if error is not None else None,
                 ident,
-            ),
-        )
+            ))
+        return bool(recorded)
 
     def summary(self):
         if not self.path.exists():

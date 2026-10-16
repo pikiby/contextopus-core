@@ -213,12 +213,15 @@ def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path, crlf):
 
 
 def test_codex_native_cutover_preserves_old_cache_and_avoids_duplicate_mcp(tmp_path):
+    from importlib.metadata import version
+
+    release = version("contextopus-core")
     new = (
         tmp_path
-        / ".codex/plugins/cache/contextopus/contextopus/1.1.0/.codex-plugin/plugin.json"
+        / f".codex/plugins/cache/contextopus/contextopus/{release}/.codex-plugin/plugin.json"
     )
     new.parent.mkdir(parents=True)
-    new.write_text('{"name":"contextopus","version":"1.1.0"}')
+    new.write_text(json.dumps({"name": "contextopus", "version": release}))
     old = (
         tmp_path
         / ".codex/plugins/cache/persistent-context-workspace/persistent-context-workspace/0.14.0/keep"

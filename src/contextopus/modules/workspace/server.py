@@ -32,7 +32,7 @@ mcp = FastMCP(
         "Work cycles follow workspace invocation and approval settings. Keep progress in typed task records and results in tmp. "
         "Review results, prepare changes or a grounded no-change conclusion, show actual changed passages and links in chat, "
         "apply under the current policy, then finish. Never replace the review with a file link. "
-        "Instructions changes always require the user's direct request and approval. Tools bind revisions but cannot "
+        "Instructions changes require the user's direct request; current instructions_approval_required controls approval. Tools bind revisions but cannot "
         "authenticate chat origin. For operation analysis use w-analyze and the canonical analyze procedure: scope the period "
         "or task/cycle/import, inspect recorded historical rules and Git references, and report evidence gaps. PCW does not "
         "control agents; external actions retain their authorization requirements."
@@ -220,7 +220,7 @@ def pcw_execute(
     Pass operation parameters in arguments, coordinates separately. For its exact schema use
     pcw_query(operation='describe', arguments={'operation':'<name>'}). Creation needs an explicit
     request; startup never creates. Present prepared changes and follow workspace approval rules.
-    Instructions changes always require approval. Calls are journaled under their operation names.
+    Instructions approval follows instructions_approval_required in current rules. Calls are journaled under their operation names.
     """
     return _route(
         operation,

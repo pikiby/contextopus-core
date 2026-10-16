@@ -1,7 +1,7 @@
 """Explicit, host-independent PCW cycles over the existing knowledge engine.
 
-Human approval follows workspace policy for knowledge and is always required
-for instructions. This module binds application to an
+Human approval follows independent workspace policies for knowledge and
+instructions. This module binds application to an
 exact prepared revision; it cannot authenticate the origin of a chat message.
 Only cycle metadata survives cleanup. Drafts, returns and proposal bodies do not.
 """
@@ -337,6 +337,11 @@ class CycleRuntime(
         all_categories: bool = False,
         types: list[str] | None = None,
         statuses: list[str] | None = None,
+        selection: dict | None = None,
+        output: str = "materials",
+        purpose: str | None = None,
+        task_id: str | None = None,
+        candidate_limit: int | None = None,
     ):
         return self._read_call(
             cycle_id,
@@ -349,6 +354,7 @@ class CycleRuntime(
             categories=categories,
             all_categories=all_categories,
             types=types, statuses=statuses,
+            selection=selection, output=output, purpose=purpose, task_id=task_id, candidate_limit=candidate_limit,
         )
 
     def instructions_read(self, cycle_id: str | None = None):
@@ -498,8 +504,9 @@ class CycleRuntime(
 
     @staticmethod
     def _review_policy(plan, state):
-        required = plan.get("kind") == "instructions" or plan.get(
-            "knowledge_approval_required", True
+        required = plan.get(
+            "instructions_approval_required" if plan.get("kind") == "instructions"
+            else "knowledge_approval_required", True
         )
         return {
             "approval_required": required,
@@ -522,7 +529,7 @@ class CycleRuntime(
         _text(user_request, "user's direct request to change instructions")
         if not isinstance(content, str):
             raise PCWError("content must be ordinary Markdown text")
-        _knowledge_approval_required(content)
+        policies(content)
         with self._cycle(cycle_id) as (records, cycle):
             if cycle.get("purpose") == "audit":
                 raise PCWError("Audit cannot change instructions")
@@ -546,6 +553,7 @@ class CycleRuntime(
                 "cycle_id": cycle_id,
                 "proposal_id": ident,
                 "kind": "instructions",
+                "instructions_approval_required": policies(current["content"])["instructions_approval_required"],
                 "user_request": user_request,
                 "created_ids": {},
                 "entries": {"INSTRUCTIONS.md": {"before": before, "after": after}},
@@ -559,9 +567,8 @@ class CycleRuntime(
             return self._save_plan(records, cycle, plan, state)
 
     def instructions_apply(
-        self, cycle_id: str, proposal_id: str, expected_revision: str, confirmation: str
+        self, cycle_id: str, proposal_id: str, expected_revision: str, confirmation: str | None = None
     ):
-        _text(confirmation, "current user's explicit confirmation")
         with self._cycle(cycle_id) as (records, cycle):
             if cycle.get("purpose") == "audit":
                 raise PCWError("Audit cannot apply instructions")
@@ -584,6 +591,8 @@ class CycleRuntime(
                     "replayed": True,
                 }
             change = plan["entries"]["INSTRUCTIONS.md"]
+            if policies(change["before"]["text"])["instructions_approval_required"]:
+                _text(confirmation, "current user's explicit confirmation")
             retry = entry["state"] != "prepared"
             if not (retry and self._matches(change["after"])) and not self._matches(
                 change["before"]

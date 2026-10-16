@@ -315,7 +315,7 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual({"request_id", "purpose", "restart_cycle_id", "invocation", "task_id"},
                                      set(operations["startup"]["properties"]))
                     self.assertIn("user_request", operations["instructions_prepare"]["required"])
-                    self.assertIn("confirmation", operations["instructions_apply"]["required"])
+                    self.assertNotIn("confirmation", operations["instructions_apply"]["required"])
                     for name in ("search", "read", "read_many", "list", "instructions_read", "project_read"):
                         self.assertNotIn("cycle_id", operations[name].get("required", []))
                     for name in ("proposal_prepare", "proposal_apply", "tmp_write", "instructions_apply"):
@@ -338,7 +338,7 @@ class LauncherTests(unittest.TestCase):
                     created = call("workspace_create", request_id="protocol-create", user_request="Create the protocol fixture",
                         # Protocol/approval coverage is strictly offline; the real
                         # model/tokenizer is replaced by the explicit test provider.
-                        instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text()
+                        instructions_content=(ROOT / "src/contextopus/modules/workspace/default_instructions.md").read_text()
                             .replace("material_max_tokens: 1024", "material_max_tokens: null")
                             .replace("git_history_enabled: false", "git_history_enabled: true"),
                         project_content="# Protocol fixture\nA temporary test project.\n")

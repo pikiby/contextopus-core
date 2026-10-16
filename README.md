@@ -8,11 +8,15 @@ Persistent context for people and coding agents. Keep project knowledge, working
 
 Contextopus is a standalone Python application with a shared Core, a Workspace module, a terminal interface and an MCP service. Coding-client integrations connect to that service and expose short skills.
 
-**1.1.0 unifies projects, tasks and knowledge in searchable records**, adds project discovery, six short skills and native MCP service controls. Installation uses a checked wheel from [GitHub Releases](https://github.com/pikiby/contextopus-core/releases); no PyPI publication is implied. [Release notes](docs/releases/1.1.0.md) distinguish tests from platform and client verification.
+**1.2.0 adds installable modules, bundled product guides and selectable search algorithms.** Inspect inherited settings, preview a selection, and review recorded search evidence through the same Core operations used by MCP and the terminal. Instruction approval is now independent of knowledge approval and remains enabled by default. [Release notes and upgrade instructions](docs/releases/1.2.0.md).
 
 ![Contextopus terminal example](docs/media/tui/main-wide.png)
 
 Actual Textual render with clearly marked synthetic example data. [Keyboard settings demo](docs/media/tui/settings-demo.gif) · [Narrow terminal](docs/media/tui/main-narrow.png) · [Capture method and limits](docs/media/tui/README.md).
+
+![Search selection in Contextopus 1.2.0](docs/media/tui/selection-1.2-wide.png)
+
+New search-selection screen: inherited values, a pending algorithm choice and revision preview. [Modules screen](docs/media/tui/modules-1.2-wide.png). Both captures render the actual TUI with explicitly synthetic fixtures; they do not show a live installation.
 
 ## Use it
 
@@ -23,7 +27,7 @@ Actual Textual render with clearly marked synthetic example data. [Keyboard sett
 | Analyze actual agent operations and historical instructions | `w-analyze` skill |
 | Review a requested instructions change | `w-settings` skill |
 | Create an explicitly requested Workspace | `w-create` skill |
-| Find a context by name, path or meaning | `w-find` skill |
+| Find a context by name, path or meaning | `w-context` skill |
 | Inspect status/settings/modules | `contextopus status`, `settings`, `modules` |
 | Work from a terminal interface | `contextopus tui` |
 
@@ -31,20 +35,20 @@ Full procedures are served by the installed runtime when needed. Workspace selec
 
 ## Install
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), download the wheel from the [1.1.0 release](https://github.com/pikiby/contextopus-core/releases/tag/v1.1.0), and verify it against `SHA256SUMS`. From the download directory:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), download the wheel from the [1.2.0 release](https://github.com/pikiby/contextopus-core/releases/tag/v1.2.0), and verify it against `SHA256SUMS`. From the download directory:
 
 ```console
-uv tool install --python 3.12 ./contextopus_core-1.1.0-py3-none-any.whl
+uv tool install --python 3.12 ./contextopus_core-1.2.0-py3-none-any.whl
 contextopus --version
 contextopus init
 contextopus tui
 ```
 
-For local embedding inference, install the same verified wheel with its `local` extra: `uv tool install --python 3.12 "./contextopus_core-1.1.0-py3-none-any.whl[local]"`. Models download only when an explicitly requested operation needs inference; status and setup do not load a model. Python and application dependencies are managed by uv.
+For local embedding inference, install the same verified wheel with its `local` extra: `uv tool install --python 3.12 "./contextopus_core-1.2.0-py3-none-any.whl[local]"`. Models download only when an explicitly requested operation needs inference; status and setup previews do not load a model. Explicit init/model setup prepares bundled documentation and the algorithm catalog after a profile is configured. A first init without a model reports `model_setup_required`; use `contextopus setupmodel` to review the model plan, then `contextopus setupmodel --apply` when ready. Python and application dependencies are managed by uv.
 
 Use `--root <directory>` before a subcommand or `CONTEXTOPUS_ROOT` to select persistent storage. The default is the platform's user-data directory, outside plugin caches. Keep the same root across clients.
 
-To update, install the verified 1.1.0 wheel with `uv tool install --force --python 3.12 ./contextopus_core-1.1.0-py3-none-any.whl` (append `[local]` inside a quoted wheel path if needed). Retain the existing data root, run `contextopus --root <existing-data-root> service restart`, then use `w` → upgrade in a fresh client session to review context and skill updates. The upgrade preserves unfinished tasks, tmp and pending approval state. See the [release update instructions](docs/releases/1.1.0.md#install-or-update) before upgrading an older installation.
+To update, install the verified 1.2.0 wheel with `uv tool install --force --python 3.12 ./contextopus_core-1.2.0-py3-none-any.whl` (append `[local]` inside a quoted wheel path if needed). Retain the existing data root, run `contextopus --root <existing-data-root> service restart`, run `contextopus --root <existing-data-root> init` and inspect its setup result, then use `w` → upgrade in a fresh client session to review context and skill updates. The upgrade preserves unfinished tasks, tmp and pending approval state. See the [release update instructions](docs/releases/1.2.0.md#install-or-update) before upgrading an older installation.
 
 
 ```console
@@ -60,8 +64,12 @@ Other client names: `claude-code`, `opencode`, `crush`. Integration refuses name
 
 - [Canonical old-installation/context/skills upgrade procedure](src/contextopus/resources/procedures/upgrade.md)
 - [Native integration details and primary references](docs/integrations.md)
+- [Module installation and authoring](docs/modules.md)
+- [Search algorithms and settings](docs/search-selection.md)
+- [Search evidence and analysis](docs/search-analysis.md)
+- [Base documentation context](docs/base-context.md)
 - [Transition acceptance and evidence](docs/implementation/contextopus-transition.md)
-- [1.1.0 release notes](docs/releases/1.1.0.md)
+- [1.2.0 release notes](docs/releases/1.2.0.md)
 - [Previous changelog](CHANGELOG.md)
 
 The CI matrix tests, builds, verifies and installs the wheel on Linux, macOS and Windows with Python 3.12 and 3.13. Native service login and recovery checks are recorded separately; a passing Python test does not establish OS startup behavior.

@@ -46,12 +46,18 @@ class Application:
         )
         if discover:
             for entry in metadata.entry_points(group="contextopus.modules"):
-                entry.load()(self)
+                before = dict(self.registry._operations), dict(self.registry.modules)
+                try:
+                    entry.load()(self)
+                except Exception as exc:
+                    self.registry._operations, self.registry.modules = before
+                    self.registry.register_module(entry.name, available=False,
+                                                  state="error", error=str(exc))
         try:
             from .modules.session_search import SessionSearch
 
             module = SessionSearch()
-            if module.available():
+            if "session_search" not in self.registry.modules and module.available():
                 module.register(self.registry)
                 self.registry.register_module(
                     "session_search",
@@ -61,6 +67,17 @@ class Application:
                 )
         except ImportError:
             pass
+
+        from .core.module_management import ModuleManager
+        self.module_manager = ModuleManager(self)
+        self._operation("core.modules", "query", self.module_manager.discover)
+        for action in ("prepare", "enable", "disable"):
+            self._operation("core.module_" + action, "execute", getattr(self.module_manager, action), {"module": (str, ...)})
+        self._operation("core.module_update", "execute", self.module_manager.update, {"module": (str, ...), "source": (str, ...)})
+        self._refresh_algorithms()
+        self._register_search_tools()
+        from .modules.workspace.base_context import register as register_base
+        register_base(self)
 
     def _operation(self, name, kind, fn, fields=None):
         model = create_model(
@@ -94,6 +111,11 @@ class Application:
                 "include_archived": (bool | None, None),
                 "distance": (float | None, None),
                 "limit": (int | None, None),
+                "selection": (dict | None, None),
+                "output": (str, "materials"),
+                "candidate_limit": (int | None, None),
+                "purpose": (str | None, None),
+                "task_id": (str | None, None),
             },
         )
         self._operation("core.model_hardware", "query", self.model_hardware)
@@ -134,7 +156,7 @@ class Application:
         self._operation(
             "core.settings_apply",
             "execute",
-            self.services.apply_settings,
+            self.settings_apply,
             {"preview_revision": (str, ...)},
         )
         self._operation("procedure", "query", self.procedure, {"name": (str, ...)})
@@ -161,10 +183,61 @@ class Application:
         )
 
     def settings(self, module=None, context=None, request=None):
+        self._refresh_algorithms()
         return self.services._settings.snapshot(module, context, request)
 
     def settings_preview(self, changes, module=None, context=None, request_only=False):
+        self._refresh_algorithms()
         return self.services._settings.preview(changes, module, context, request_only)
+
+    def settings_apply(self, preview_revision):
+        self._refresh_algorithms()
+        return self.services.apply_settings(preview_revision)
+
+    def _refresh_algorithms(self):
+        from .core.filtering import registry_for_layout
+        registry = registry_for_layout(self.layout)
+        self.index.algorithm_registry = registry
+        self.services._settings.registry = registry
+
+    def _register_search_tools(self):
+        from .core.search_history import SearchHistory
+        history = SearchHistory(self.journal, self.index.algorithm_registry)
+        self._operation("core.search_events", "query", history.query, {
+            "since": (str | None, None), "until": (str | None, None),
+            "context": (str | None, None), "task_id": (str | None, None),
+            "instructions_revision": (str | None, None), "offset": (int, 0), "limit": (int, 50)})
+        self._operation("core.search_event", "query", history.read, {"event_id": (str, ...)})
+        def replay(event_id, selection, relevant_keys=None):
+            self._refresh_algorithms()
+            return SearchHistory(self.journal, self.index.algorithm_registry).replay(event_id, selection, relevant_keys)
+        self._operation("core.search_replay", "query", replay, {
+            "event_id": (str, ...), "selection": (dict, ...), "relevant_keys": (list | None, None)})
+
+        def catalog(query=None, semantic=False, limit=20):
+            from .core.filtering import AlgorithmCatalog
+            self._refresh_algorithms()
+            return AlgorithmCatalog(self.index.algorithm_registry, self.index).search(query, limit, semantic)
+        def refresh():
+            from .core.filtering import AlgorithmCatalog
+            self._refresh_algorithms()
+            return AlgorithmCatalog(self.index.algorithm_registry, self.index).refresh()
+        self._operation("core.algorithms", "query", catalog, {
+            "query": (str | None, None), "semantic": (bool, False), "limit": (int, 20)})
+        self._operation("core.algorithms_refresh", "execute", refresh)
+        self._operation("core.index_stats", "query", self.index_stats, {
+            "module": (str | None, None), "collection": (str | None, None)})
+
+    def index_stats(self, module=None, collection=None):
+        """Count stored fragments and unique objects without retrieving vectors."""
+        table = self.index._generic_table()
+        if table is None:
+            return {"fragments": 0, "objects": 0, "module": module, "collection": collection}
+        clauses = [name + "=" + self.index._quote(value) for name, value in
+                   (("module", module), ("collection", collection)) if value is not None]
+        rows = self.index.read_rows(table, ["module", "collection", "object_id"], " AND ".join(clauses) or None)
+        return {"fragments": len(rows), "objects": len({(r["module"], r["collection"], r["object_id"]) for r in rows}),
+                "module": module, "collection": collection, "basis": "stored_index_rows"}
 
     def active_profile(self):
         import json
@@ -187,9 +260,13 @@ class Application:
     def model_apply(self, plan):
         from .core.model_setup import apply
 
-        return apply(
+        result = apply(
             plan, apply_profile=self.apply_profile, read_active=self.active_profile
         )
+        if result.get("status") == "ok":
+            from .modules.workspace.base_context import prepare_setup
+            result["setup"] = prepare_setup(self)
+        return result
 
     def apply_profile(self, config, chunking):
         from .modules.workspace.server import runtime
@@ -226,7 +303,10 @@ class Application:
             from .core.rag import rebuild_profile
 
             self.index._generic_table()
-            if self.index.table.count_rows():
+            # A failed docs delivery may leave only rebuildable algorithm cards.
+            # Preserve the refusal for every other module's source documents.
+            derivative = "module = 'core' AND collection = 'search_algorithm'"
+            if self.index.table.count_rows(f"module IS NULL OR collection IS NULL OR NOT ({derivative})"):
                 raise ValueError(
                     "Profile switch requires module source adapters for existing documents"
                 )
@@ -282,6 +362,7 @@ class Application:
         sync_directory(path.parent)
 
     def search(self, query, **options):
+        self._refresh_algorithms()
         root_values = self.services.settings()["values"]
         selected_module = (
             options.get("module")
@@ -303,11 +384,13 @@ class Application:
             "collection": selected_collection or values.get("context"),
             "object_type": values.get("object_type"),
             "include_archived": values.get("include_archived", False),
-            "distance": values.get("distance"),
-            "limit": values.get("searchN", 20),
         }
         defaults.update({k: v for k, v in options.items() if v is not None})
-        return {"results": self.index.search(query, **defaults), "effective": defaults}
+        result = self.index.search_detailed(query, **defaults)
+        parameters = result["diagnostics"]["effective_settings"]["parameters"]
+        effective = {**defaults, "limit": next((parameters[name] for name in
+                     ("N", "page_size", "top_k") if name in parameters), None)}
+        return {**result, "effective": effective}
 
     def procedure(self, name):
         if name == "default-instructions":
@@ -317,6 +400,12 @@ class Application:
                 .joinpath("default_instructions.md")
                 .read_text(encoding="utf-8"),
             }
+        if "/" in name and hasattr(self, "module_manager"):
+            module, relative = name.split("/", 1)
+            if module in self.module_manager.loaded:
+                base = self.module_manager.sources(module, "procedures")
+                path = self.module_manager._inside(base, relative + ".md")
+                return {"name": name, "content": path.read_text(encoding="utf-8")}
         parts = name.split("/")
         if any(not p or p in {".", ".."} or "\\" in p for p in parts):
             raise ValueError("Invalid procedure name")
@@ -352,7 +441,9 @@ class Application:
                 self.layout.root / "modules/workspace/control",
             ):
                 path.mkdir(parents=True, exist_ok=True)
-        return {"status": "initialized", "root": str(self.layout.root)}
+        from .modules.workspace.base_context import prepare_setup
+        return {"status": "initialized", "root": str(self.layout.root),
+                "setup": prepare_setup(self)}
 
     def doctor(self):
         return {

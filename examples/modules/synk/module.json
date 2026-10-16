@@ -1,0 +1,12 @@
+{
+  "id": "synk",
+  "version": "1.0.0",
+  "core_requires": ">=1.2,<2",
+  "operations": [{
+    "name": "synk.version",
+    "kind": "query",
+    "handler": "adapter.py:version",
+    "arguments_schema": {"type": "object", "additionalProperties": false},
+    "description": "Read the installed Synk command version without starting synchronization"
+  }]
+}

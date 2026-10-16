@@ -20,8 +20,15 @@ def parser():
     )
     result.add_argument("--workspace", help="Explicitly selected Workspace")
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init", "status", "doctor", "mcp", "tui", "modules"):
+    for name in ("init", "status", "doctor", "mcp", "tui"):
         commands.add_parser(name)
+    modules = commands.add_parser("modules", help="List and manage root-local modules")
+    module_actions = modules.add_subparsers(dest="module_action")
+    for action in ("prepare", "enable", "disable", "update"):
+        command = module_actions.add_parser(action)
+        command.add_argument("module")
+        if action == "update":
+            command.add_argument("--source", required=True, type=Path)
     root_binding = commands.add_parser(
         "root", help="Inspect or explicitly bind the persistent default data root"
     )
@@ -191,6 +198,7 @@ def main(argv=None):
                 install_skills=not args.config_only,
                 native_plugin=args.native_plugin,
                 legacy_skills=args.legacy_skills,
+                root=root,
             )
             # Configuration content may contain credentials from other entries.
             emit(
@@ -198,6 +206,7 @@ def main(argv=None):
                     "client": args.client,
                     "removals": preview.get("removals", []),
                     "preserved": preview.get("preserved", []),
+                    "module_errors": preview.get("module_errors", []),
                     "files": [
                         {"path": item["path"], "changed": item["changed"]}
                         for item in preview["writes"]
@@ -284,7 +293,13 @@ def main(argv=None):
                         )
                     )
             elif args.command == "modules":
-                emit(app.services.status()["modules"])
+                if args.module_action:
+                    arguments = {"module": args.module}
+                    if args.module_action == "update":
+                        arguments["source"] = str(args.source.expanduser().resolve())
+                    emit(app.execute("core.module_" + args.module_action, arguments))
+                else:
+                    emit(app.query("core.modules"))
             elif args.command in ("init", "doctor"):
                 emit(
                     app.execute("core.init")

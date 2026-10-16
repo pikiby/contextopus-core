@@ -258,7 +258,7 @@ class CodexHostTests(unittest.TestCase):
         if self._testMethodName == "test_agent_creates_context_through_compact_interface":
             return  # The agent, not the harness, must create this workspace.
         self.tool("workspace_create", request_id="create-" + self._testMethodName,
-                  instructions_content=(PLUGIN / "pcw_runtime/default_instructions.md").read_text(),
+                  instructions_content=(Path(__file__).resolve().parents[1] / "src/contextopus/modules/workspace/default_instructions.md").read_text(),
                   project_content="# Host integration fixture\nTemporary PCW test workspace.\n",
                   user_request="Create this temporary test context with the supplied settings")
         opened = self.tool("startup", request_id="fixture-" + uuid.uuid4().hex)

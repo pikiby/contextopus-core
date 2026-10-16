@@ -148,7 +148,7 @@ def action_names(status):
         for m in status.get("modules", [])
     ):
         actions.append("Open Session search")
-    return actions + ["Settings", "Error details", "Quit"]
+    return actions + ["Settings", "Modules", "Error details", "Quit"]
 
 
 def connections(width=79, selected=0, message=None):
@@ -223,6 +223,7 @@ def settings(snapshot, width=79, selected=0, draft=None, preview=None, message=N
         "Include archived ◀ " + ("Yes" if pending else "No") + " ▶",
         "Preview changes",
         "Apply preview",
+        "Search selection",
         "Back",
     ]
     lines += [
@@ -236,3 +237,56 @@ def settings(snapshot, width=79, selected=0, draft=None, preview=None, message=N
         else ["", " ↑↓ Select   ←→ Change   Enter Apply   Q Back"]
     )
     return "\n".join(lines), actions
+
+
+def modules(items, width=79, selected=0, message=None):
+    import textwrap
+    lines = [" CONTEXTOPUS · MODULES", "", " Root-local modules · explicit preparation and enablement", ""]
+    actions = []
+    for item in items:
+        ident = item["id"]
+        lines.append(" " + ident + " · " + item["state"] + " · " + item.get("version", "unknown version"))
+        if item.get("error"):
+            lines.extend(" " + line for line in textwrap.wrap(item["error"], max(10, width - 2)))
+        choices = ["Prepare", "Enable", "Update", "Disable"]
+        if item["state"] == "enabled" and item.get("open_tui"):
+            choices.append("Open")
+        for choice in choices:
+            action = choice + " " + ident
+            lines.append(("▶ " if len(actions) == selected else "  ") + action)
+            actions.append(action)
+        lines.append("")
+    if not items:
+        lines += [" No module manifests found under root/modules.", ""]
+    lines.append(("▶ " if len(actions) == selected else "  ") + "Back")
+    actions.append("Back")
+    if message:
+        lines.extend(["", *textwrap.wrap(str(message), max(10, width - 2))])
+    lines.extend(["", " ↑↓ Select   Enter Apply   Q Back"])
+    lines = [line[:width] for line in lines]
+    return "\n".join(lines), actions
+
+
+def selection(config, catalog, draft, scope, width=79, selected=0, preview=None, message=None):
+    import json
+    import textwrap
+    effective = config.get('values', {}).get('selection', {})
+    current = draft or effective
+    description = next((item for item in catalog if item['id'] == current.get('algorithm')), {})
+    source = config.get('sources', {}).get('selection', 'unknown')
+    lines = [' CONTEXTOPUS · SEARCH SELECTION', '', ' Scope ' + json.dumps(scope),
+             ' Inherited effective ' + json.dumps(effective), ' Sources ' + json.dumps(source),
+             '', ' Pending ' + json.dumps(current), '', description.get('purpose', ''),
+             ' When to use: ' + description.get('when_to_use', ''),
+             ' How to adjust: ' + description.get('how_to_adjust', ''),
+             ' Parameter schema: ' + json.dumps(description.get('parameters_schema', {})),
+             ' Preview: ' + ('Ready' if preview else 'Required'), '']
+    actions = ['Scope', 'Algorithm', 'Parameters JSON', 'Preview selection', 'Apply selection', 'Back']
+    wrapped = []
+    for line in lines:
+        wrapped.extend(textwrap.wrap(line, max(10, width - 1)) or [''])
+    wrapped.extend(('▶ ' if i == selected else '  ') + action for i, action in enumerate(actions))
+    if message:
+        wrapped.extend(['', *textwrap.wrap(str(message), max(10, width - 1))])
+    wrapped.extend(['', ' ↑↓ Select   ←→ Algorithm   Enter Apply   Q Back'])
+    return '\n'.join(wrapped), actions

@@ -10,6 +10,7 @@ from .runtime import PCWError
 DEFAULTS = {
     "allow_implicit_updates": False,
     "knowledge_approval_required": True,
+    "instructions_approval_required": True,
     "git_history_enabled": False,
     "material_max_tokens": None,
     "create_required_sources": False,
@@ -65,7 +66,7 @@ def policies(content: str, *, creation: bool = False) -> dict:
                 result[name] = value.value.lower() == "true"
     if creation and supplied != set(DEFAULTS):
         raise PCWError(
-            "Creation requires all five settings explicitly supplied in INSTRUCTIONS, including the source-link choice: "
+            "Creation requires all six settings explicitly supplied in INSTRUCTIONS, including the source-link choice: "
             + ", ".join(DEFAULTS)
         )
     return result

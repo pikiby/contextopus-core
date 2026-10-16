@@ -58,6 +58,8 @@ class ServerOwner:
 
 def create_server(root, host="127.0.0.1", port=8765):
     owner = ServerOwner(root)
+    owner.application()
+    owner.resources.start_services()
     mcp = FastMCP(
         "Contextopus",
         host=host,

@@ -36,3 +36,23 @@ The existing socket was absent, so daemon status remained unavailable. The
 installed TUI opened and exited with Q (exit 0), showing saved counts while its
 indexer was stopped. This preflight started no indexing work and migrated no
 data. The demo frames remain synthetic examples.
+
+## 1.2.0 selection and modules
+
+`selection-1.2-wide.svg/png` and `modules-1.2-wide.svg/png` capture the actual
+current Textual application headlessly. `capture_1_2.py` supplies an explicitly
+synthetic settings/module fixture and uses the real bundled algorithm catalog.
+The EXAMPLE label is part of each screen. A ready preview is fixture state;
+no settings or modules are applied, and no live root, daemon or MCP connection
+is represented.
+
+Regenerate only these new captures:
+
+```sh
+env -u NO_COLOR PYTHONPATH=src .venv/bin/python docs/media/tui/capture_1_2.py
+.venv/bin/python docs/media/tui/render_png.py docs/media/tui/selection-1.2-wide.svg docs/media/tui/modules-1.2-wide.svg
+```
+
+The renderer accepts optional SVG paths, leaving earlier published captures
+unchanged. These are static render examples, not evidence of keyboard operation
+or a live installation.

@@ -31,6 +31,12 @@ Persistent data belongs in an explicit root or the platform's user-data director
 
 Relocation copies files, checks a manifest, validates SQLite where applicable and leaves a receipt/redirect. Source deletion requires separate authorization. Settings previews identify consequences; saving does not silently reindex existing data.
 
+Folder modules live under `modules/<id>/`: replaceable package code is separate from persistent data and configuration. Discovery reads manifests; explicit prepare/enable actions activate contributions to the common registry. Module operations, procedures, skills and filtering algorithms use the same Core contracts. See [module lifecycle](modules.md).
+
+Search selection is a shared Core service. Algorithm descriptions and JSON schemas sit beside implementations; effective settings are resolved for the selected scope and may be overridden for one query. [Selection diagnostics](search-selection.md) explain cuts and limits. [Bounded search evidence](search-analysis.md) supports historical analysis without duplicating source bodies.
+
+The [base documentation context](base-context.md) is an ordinary Workspace populated during explicit setup after model configuration. Its documentation role can point at another context. Reading it supplies reference material and never replaces the active context's instructions.
+
 ## Explicit embedding setup
 
 `contextopus setupmodel --hardware` performs a PyTorch/CUDA/MPS diagnostic without loading weights. `contextopus setupmodel --device auto` previews validated provider/profile, chunking and device selection. Auto chooses an observed available CUDA device, then MPS, then CPU; an unavailable explicitly requested device fails. A GPU existing in a machine is not proof that this installed PyTorch can use it.

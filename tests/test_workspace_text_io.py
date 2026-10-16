@@ -55,7 +55,7 @@ def test_unicode_root_upgrade_receipt_replays_after_reopen(tmp_path):
     root.mkdir()
     sparse(root)
     rules = (
-        "---\nallow_implicit_updates: false\nknowledge_approval_required: true\n"
+        "---\nallow_implicit_updates: false\nknowledge_approval_required: true\ninstructions_approval_required: true\n"
         "git_history_enabled: true\nmaterial_max_tokens: null\n"
         "create_required_sources: false\n---\n# Правила\n"
         "Сохранять исходные данные без изменений.\n"

@@ -28,7 +28,7 @@ Use the destination explicitly for subsequent requests and run `core.index_upgra
 
 Install native per-user autostart with `contextopus --root <new root> service install`, then verify the single owner. `service start/stop/restart/status` and the TUI use the same lifecycle controls. Bind the persistent default with `contextopus root --set <new root>`; also pass the exact destination during rollout verification. Do not infer a shared Workspace selection from a process/session ID.
 
-Choose and preserve one Codex delivery mode. For literal `$w`, `$w-search`, `$w-create`, `$w-settings`, `$w-find`, `$w-analyze`, use the existing direct integration:
+Choose and preserve one Codex delivery mode. For literal `$w`, `$w-search`, `$w-create`, `$w-settings`, `$w-context`, `$w-analyze`, use the existing direct integration:
 
 ```console
 contextopus integrate codex --user
@@ -75,4 +75,4 @@ If the user also requested filling the project description, follow the [work cyc
 
 ## Unified records (format 3)
 
-Current is no longer separate storage. Upgrade migrates every task ID, field and body into typed searchable records, and PROJECT into the canonical project record. Existing knowledge receives a type where absent. The shared index, links and technical proposal paths are reconciled together. Pending original proposal/approval documents stay immutable; their technical overlays do not approve or apply them. Resume old project proposals through ordinary `proposal_apply` using the original revision and required confirmation. After verified migration old Current/PROJECT sources exist only in recovery snapshots, not as competing active files. A missing project description remains missing; do not fabricate project content. Preserve custom INSTRUCTIONS and use their explicit approval procedure for substantive rule edits.
+Current is no longer separate storage. Upgrade migrates every task ID, field and body into typed searchable records, and PROJECT into the canonical project record. Existing knowledge receives a type where absent. The shared index, links and technical proposal paths are reconciled together. Pending original proposal/approval documents stay immutable; their technical overlays do not approve or apply them. Resume old project proposals through ordinary `proposal_apply` using the original revision and required confirmation. After verified migration old Current/PROJECT sources exist only in recovery snapshots, not as competing active files. A missing project description remains missing; do not fabricate project content. Preserve custom INSTRUCTIONS and use the instructions procedure under their current approval policy for substantive rule edits.

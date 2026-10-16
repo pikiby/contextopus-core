@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contextopus-core"
-version = "1.1.0"
+version = "1.2.0"
 description = "Standalone persistent context for people and coding agents"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
-dependencies = ["lancedb>=0.20,<1", "mcp>=1.10,<2", "PyYAML>=6,<7", "pydantic>=2.11,<3", "textual==8.2.8", "platformdirs>=4,<5", "tomlkit>=0.13,<1", "jsonschema>=4,<5", "wsproto>=1.2,<2"]
+dependencies = ["lancedb>=0.20,<1", "mcp>=1.10,<2", "PyYAML>=6,<7", "pydantic>=2.11,<3", "textual==8.2.8", "platformdirs>=4,<5", "tomlkit>=0.13,<1", "jsonschema>=4,<5", "wsproto>=1.2,<2", "packaging>=24"]
 
 [project.optional-dependencies]
 local = ["sentence-transformers>=3,<6"]
@@ -29,7 +29,7 @@ include = ["contextopus*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-contextopus = ["resources/**/*.md", "resources/**/*.yaml", "resources/**/*.json", "modules/workspace/default_instructions.md"]
+contextopus = ["resources/**/*.md", "resources/**/*.yaml", "resources/**/*.json", "core/filtering/algorithms/**/*.json", "modules/workspace/default_instructions.md"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "plugins/persistent-context-workspace"]

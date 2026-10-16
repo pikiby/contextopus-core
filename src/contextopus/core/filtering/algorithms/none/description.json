@@ -1,0 +1,26 @@
+{
+  "id": "none",
+  "version": "1.0.0",
+  "purpose": "Return a stable page without a relevance cut.",
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "offset": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "page_size": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      }
+    },
+    "additionalProperties": false
+  },
+  "defaults": {
+    "offset": 0,
+    "page_size": 20
+  },
+  "when_to_use": "Use for inspection and pagination. Increase offset to get the next page.",
+  "how_to_adjust": "Use for inspection and pagination. Increase offset to get the next page."
+}

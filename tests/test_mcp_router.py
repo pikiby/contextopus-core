@@ -51,7 +51,6 @@ def test_two_small_tools_and_storage_free_discovery(tmp_path):
     (server.pcw_query, "read", {"workspace": "another"}, ValidationError),
     (server.pcw_execute, "proposal_apply", {"cycle_id": "c", "proposal_id": "p", "expected_revision": "r",
                                             "knowledge_approval_required": False}, ValidationError),
-    (server.pcw_execute, "instructions_apply", {"cycle_id": "c", "proposal_id": "p", "expected_revision": "r"}, ValidationError),
 ])
 def test_bad_input_never_opens_storage(tmp_path, entry, operation, arguments, error):
     with patch.object(server, "runtime", side_effect=AssertionError("invalid call opened storage")):

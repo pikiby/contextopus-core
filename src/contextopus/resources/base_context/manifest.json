@@ -1,0 +1,64 @@
+{
+  "version": "1.2.0",
+  "documents": [
+    {
+      "key": "installed-version",
+      "file": "installed-version.md",
+      "type": "reference",
+      "links": [
+        "workspace-guide",
+        "module-guide",
+        "algorithm-guide",
+        "rules-template"
+      ]
+    },
+    {
+      "key": "workspace-guide",
+      "file": "workspace-guide.md",
+      "type": "guide",
+      "links": [
+        "rules-template"
+      ]
+    },
+    {
+      "key": "module-guide",
+      "file": "module-guide.md",
+      "type": "guide",
+      "links": [
+        "module-template"
+      ]
+    },
+    {
+      "key": "algorithm-guide",
+      "file": "algorithm-guide.md",
+      "type": "guide",
+      "links": [
+        "algorithm-template"
+      ]
+    },
+    {
+      "key": "module-template",
+      "file": "module-template.md",
+      "type": "template",
+      "links": [
+        "module-guide"
+      ]
+    },
+    {
+      "key": "algorithm-template",
+      "file": "algorithm-template.md",
+      "type": "template",
+      "links": [
+        "algorithm-guide"
+      ]
+    },
+    {
+      "key": "rules-template",
+      "file": "rules-template.md",
+      "type": "template",
+      "links": [
+        "workspace-guide"
+      ]
+    }
+  ]
+}

@@ -31,6 +31,14 @@ def _digest(content: bytes | None) -> str:
     return hashlib.sha256(content).hexdigest() if content is not None else "missing"
 
 
+def _encoded_content(content):
+    try:
+        return {"content": content.decode('utf-8')}
+    except UnicodeDecodeError:
+        import base64
+        return {"content_base64": base64.b64encode(content).decode('ascii')}
+
+
 def plan(
     client: str,
     project: str | Path,
@@ -40,9 +48,11 @@ def plan(
     native_plugin: bool = False,
     legacy_skills: str | Path | None = None,
     endpoint: str = "http://127.0.0.1:8765/mcp",
+    root: str | Path | None = None,
 ) -> dict:
     if client not in CLIENTS:
         raise ValueError(f"Unknown client: {client}")
+    module_skills_requested = install_skills and root is not None
     project = Path(project).expanduser().resolve()
     if scope not in {"project", "user"}:
         raise ValueError("Integration scope must be project or user")
@@ -156,6 +166,33 @@ def plan(
         ):
             raise IntegrationConflict(f"Skill name collision: {skill.name} at {target}")
         writes.append((target, prior, skill_content))
+    module_hashes = {}
+    module_errors = []
+    if module_skills_requested:
+        from contextopus.core.module_management import ModuleManifestReader
+        from contextopus.core.storage import StorageLayout
+        directories, _, module_errors = ModuleManifestReader(StorageLayout(root)).inspect_sources('skills')
+        occupied_names = {item.name.casefold() for item in source.iterdir() if item.is_dir()}
+        for directory in directories:
+            if not directory.is_dir():
+                continue
+            for skill in sorted(directory.iterdir()):
+                if not skill.is_dir() or not (skill / 'SKILL.md').is_file():
+                    continue
+                if skill.name.casefold() in occupied_names:
+                    raise IntegrationConflict('Module skill name collision: ' + skill.name)
+                occupied_names.add(skill.name.casefold())
+                for asset in sorted(skill.rglob('*')):
+                    if not asset.is_file():
+                        continue
+                    target = skills_root / skill.name / asset.relative_to(skill)
+                    content = asset.read_bytes()
+                    prior = target.read_bytes() if target.exists() else None
+                    relative = target.relative_to(project).as_posix() if target.is_relative_to(project) else str(target)
+                    if prior is not None and prior != content and managed.get('skills', {}).get(relative) != _digest(prior):
+                        raise IntegrationConflict('Module skill file collision: ' + str(target))
+                    hashes[relative] = module_hashes[relative] = _digest(content)
+                    writes.append((target, prior, content))
     retired, preserved = [], []
     canonical_names = {item.name for item in source.iterdir() if item.is_dir()}
     legacy_roots = {skills_root} if install_skills or native_plugin else set()
@@ -191,8 +228,24 @@ def plan(
                 continue
             retired.append({"path": str(target), "expected": _digest(prior)})
             hashes.pop(relative, None)
+    if module_skills_requested:
+        for relative in sorted(set(managed.get('module_skills', {})) - set(module_hashes)):
+            target = Path(relative) if Path(relative).is_absolute() else project / relative
+            if not target.is_relative_to(skills_root):
+                raise IntegrationConflict('Managed module skill path escapes skill directory')
+            if not target.is_file():
+                hashes.pop(relative, None)
+                continue
+            prior = target.read_bytes()
+            if _digest(prior) != managed['module_skills'][relative]:
+                preserved.append({'path': str(target), 'reason': 'user_modified_or_unrecognized'})
+            else:
+                retired.append({'path': str(target), 'expected': _digest(prior)})
+                hashes.pop(relative, None)
+    else:
+        module_hashes = dict(managed.get('module_skills', {}))
     managed_content = (
-        json.dumps({"skills": hashes}, sort_keys=True, indent=2) + "\n"
+        json.dumps({"skills": hashes, "module_skills": module_hashes}, sort_keys=True, indent=2) + "\n"
     ).encode()
     writes.append((managed_path, managed_prior, managed_content))
     return {
@@ -201,11 +254,12 @@ def plan(
         "project": str(project),
         "removals": retired,
         "preserved": preserved,
+        "module_errors": module_errors,
         "writes": [
             {
                 "path": str(path),
                 "expected": _digest(prior),
-                "content": content.decode(),
+                **_encoded_content(content),
                 "changed": prior != content,
             }
             for path, prior, content in writes
@@ -228,8 +282,12 @@ def integrate(preview: dict) -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp = tempfile.mkstemp(prefix=".contextopus-", dir=path.parent)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-                stream.write(item["content"])
+            with os.fdopen(fd, "wb") as stream:
+                if "content_base64" in item:
+                    import base64
+                    stream.write(base64.b64decode(item["content_base64"]))
+                else:
+                    stream.write(item["content"].encode("utf-8"))
             os.replace(temp, path)
         finally:
             if os.path.exists(temp):
