@@ -159,7 +159,8 @@ def test_update_keeps_previous_python_environment_and_fingerprint(tmp_path, monk
     result = app.app.registry.dispatch('query', 'sample.status')
     assert result['interpreter'] == str(path / '.venv' / executable)
     attempted = [argv[4] for argv in calls if argv[:3] == ['uv','pip','install'] and argv[-1] == 'broken==2']
-    assert len(attempted) == 1 and '/.releases/' in attempted[0]
+    assert len(attempted) == 1
+    assert Path(attempted[0]).is_relative_to(path / '.releases')
 
 
 def test_source_reader_does_not_activate_or_prepare(tmp_path, monkeypatch):
