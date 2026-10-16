@@ -1,8 +1,6 @@
 """Instruction approvals are independent and bound to the prior revision."""
 import hashlib
 import json
-from pathlib import Path
-import subprocess
 
 import pytest
 from contextopus.integrations import integrate, plan
@@ -73,12 +71,24 @@ def test_context_skill_migration_preserves_foreign(tmp_path, managed):
     assert not plan('codex', tmp_path)['removals']
 
 
-def test_known_outgoing_context_skill_migrates_without_metadata(tmp_path):
-    repo = Path(__file__).resolve().parents[1]
-    original = subprocess.check_output(['git', 'show', 'HEAD:src/contextopus/resources/skills/w-find/SKILL.md'], cwd=repo)
+@pytest.mark.parametrize('line_ending', [b'\n', b'\r\n'])
+def test_known_outgoing_context_skill_migrates_without_metadata(tmp_path, line_ending):
+    # Exact shipped pre-rename bytes. Explicit escapes keep the fixture stable
+    # with shallow checkouts and Windows source-file newline conversion.
+    original = (
+        b'---\n'
+        b'name: w-find\n'
+        b'description: Find Contextopus projects by name, path or meaning before choosing a context.\n'
+        b'---\n\n'
+        b'Call `contextopus_query` with `operation: "procedure"` and `arguments: {"name": "find"}`. '
+        b'Follow the returned procedure. Preserve the user-selected memory root and context; '
+        b'discovery does not switch them. Describe only unknown operation signatures. '
+        b'If MCP is unavailable, report the connection failure.\n'
+    )
+    assert hashlib.sha256(original).hexdigest() == '61445e2cb00828b58123e8ec1d093a6611a4830ef02dd0b60c3a1463a8d8bc36'
     old = tmp_path / '.agents/skills/w-find/SKILL.md'
     old.parent.mkdir(parents=True)
-    old.write_bytes(original)
+    old.write_bytes(original.replace(b'\n', line_ending))
     preview = plan('codex', tmp_path)
     assert [entry['path'] for entry in preview['removals']] == [str(old)]
     integrate(preview)

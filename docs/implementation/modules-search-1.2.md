@@ -4,7 +4,7 @@
 
 The 1.2.0 checkout implements folder-module lifecycle and native skill contributions; independent instruction approval; `w-context` discovery; five shared selection algorithms with scoped settings; derived algorithm discovery; bounded search evidence/replay; and bundled Workspace documentation with recovery-aware setup and updates.
 
-The work used delegated implementation and independent integration review. Existing unrelated working-tree changes were preserved. No live data-root migration, installed-client replacement, Git push or release publication is part of this verification.
+The work used delegated implementation and independent integration review. Existing working-tree changes were preserved. The local implementation checks below preceded publication; they did not migrate the live data root or replace installed clients.
 
 ## Local verification
 
@@ -19,8 +19,12 @@ Verified on Linux with Python 3.12:
 
 The logs used for this check are local temporary artifacts, not a permanent project history. Re-run the documented checks for another revision; this report records their scope and outcome.
 
-## Delivery boundaries
+## Publication checks and delivery boundaries
 
-The CI matrix is configured for Linux/macOS/Windows and Python 3.12/3.13, but this checkout has not been pushed to run that matrix. Native OS startup and model-driven client turns were not revalidated on all hosts. Installation into the user's working root and public release remain separate authorized delivery work.
+Publication review fixed case-insensitive module skill collisions and resolved bundled executable paths before subprocess launch on Windows. The module lifecycle/native suite passed all 20 tests. New actual Textual screenshots use explicitly synthetic fixtures; their capture helper and PNG renderer completed successfully outside the restricted sandbox.
+
+The first [publication CI run](https://github.com/pikiby/contextopus-core/actions/runs/38844011702) exposed a test fixture reading the removed `w-find` file from `HEAD`: 551 other tests and 64 subtests passed on Linux. The fixture now uses exact shipped bytes with a fixed digest and exercises both LF and CRLF, independently of checkout history. This correction does not weaken the production migration checks.
+
+Publication requires all six [CI matrix jobs](https://github.com/pikiby/contextopus-core/actions/workflows/ci.yml) to pass on the release revision: Linux/macOS/Windows with Python 3.12/3.13, tests, package build, asset verification, wheel installation and CLI. The workflow's recorded result is the evidence for that revision. Native OS startup and model-driven client turns are not covered on all hosts. Publishing the release does not upgrade the user's working installation.
 
 Prepared assets are under `dist/`. See [1.2.0 notes](../releases/1.2.0.md) for the upgrade sequence and [base context](../base-context.md) for setup outcomes and conflict handling.
