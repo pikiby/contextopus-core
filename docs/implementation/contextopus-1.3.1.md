@@ -23,12 +23,19 @@ preview/apply/read/replay, retaining Unicode aliases, stable IDs, graph endpoint
 content/revisions and both vault directories without document reembedding.
 Evidence: `/tmp/contextopus-v131-nested-vault-fix-evidence.json`.
 
-The 1.3.1 change requires its own focused link/migration checks, an installed-wheel
-MCP reproduction with a nested vault and ancestor vault, and the existing
-platform CI. Source test counts must remain separate from installed-wheel and
-native platform results. Unchanged model scenarios are not rerun automatically.
+The packaged 1.3.1 patch completed its installed-wheel nested-vault MCP check and
+[all seven platform CI jobs](https://github.com/pikiby/contextopus-core/actions/runs/39002613425)
+at `4107050440054c9eaa43f58a54c920fdfac1d3d8`. Its wheel SHA-256 is
+`39a0aa09ccc256f50001bcfd907367eb767fe0b2db9a17f3069d3f919313bce9`.
+[Release 1.3.1](https://github.com/pikiby/contextopus-core/releases/tag/v1.3.1)
+was published and installed after a second verified whole-set snapshot. The live
+migration then completed with the existing root, CPU profile, both vault markers,
+rules, IDs, graph and pending work preserved. Source, installed-wheel and native
+platform counts remain separate; the focused counts above are historical.
 
-This file currently records preparation, not completed 1.3.1 acceptance. Exact
-source/artifact identities, executed checks and any live result will be recorded
-after the reviewed fix is packaged. Publication and live installation remain
-separate steps.
+The [delivery record](contextopus-1.3.md#final-delivery-released-and-installed-131)
+records preservation and native-client outcomes, including the remaining model
+behavior limits. Live still runs 1.3.1. The later 1.3.2 candidate has separate
+technical verification; native model retests of its final `8b00620` runtime have
+not run pending explicit synthetic payload/provider consent. It does not replace
+or relabel the 1.3.1 evidence.

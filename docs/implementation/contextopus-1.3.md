@@ -441,9 +441,17 @@ The [1.3.2 release draft](../releases/1.3.2.md) separates first complete rule
 reading from conditional project reading and makes native MCP routing explicit.
 The initial search inherits the selected algorithm and limits unless the user
 provided alternatives. Protocol tests can establish delivery of these
-instructions, not model compliance. The native 1.3.1 observations above remain
-the behavioral evidence until the exact 1.3.2 candidate is tested with clients.
-Publication, installation and final-artifact acceptance are not claimed here.
+instructions, not model compliance. The native 1.3.1 observations above retain
+their own scope. Publication, installation and final-artifact acceptance are not
+claimed here.
+
+An earlier synthetic OpenCode model turn on 1.3.2 source `2add7fa` made five
+successful main provider requests and retrieved the fixture record, but skipped
+the ordinary procedure, policy settings and full INSTRUCTIONS, using N=10
+instead of the configured N=2. This observation motivated the `8b00620`
+help/schema-description reminder. The early synthetic Crush attempt on
+`2add7fa` never reached the provider because of the harness transport and has no
+model-behavior verdict. These are separate from the earlier 1.3.1 observations.
 
 The candidate also adds reviewed context/path mappings for colliding legacy
 format-0/1 filename identities. Format-2-and-later canonical YAML IDs remain
@@ -476,6 +484,33 @@ metadata rebuilt as 1.3.2, the complete contract and release-readiness files
 passed: **40 passed and two passed subtests** in 19.35 s. Non-project dependencies
 and the host installation were unchanged. This focused run closes those two
 version failures without rerunning or relabeling the earlier full suite.
-The full run is not reported as a fully passing release gate. No native 1.3.2 client behavior,
-Windows/macOS platform result, installed wheel or live migration is established
-by these source tests.
+That earlier full run remains recorded with its two version failures. Later
+[cross-platform CI](https://github.com/pikiby/contextopus-core/actions/runs/39037424175)
+passed all seven jobs at runtime commit
+`2add7faab18da4333ab7d8ab314142d27cc6ab57`: each Windows full-suite job passed
+777 tests with 30 skips, each macOS job passed 796 with 11 skips, and each Linux
+job passed 797 with 10 skips. The Windows early gates and all six build,
+release-verification, exact-wheel installation and installed MCP checks passed;
+the seventh job exercised the real 1.1 writer transition.
+
+The current candidate runtime is
+`8b00620b9a8a1c07672bda0eebbb0e9110d59d27`, wheel SHA-256
+`d4e83f2bdacc3e95c813131beb443808e1ed9dfedb5815efaee8bc461231b7f0`.
+Its subsequent metadata-only help/schema-description change passed 28 MCP
+contract tests and two Core/release checks. Independent review found all 47
+operation argument schemas unchanged except the search N description, with
+unchanged validation and dispatch. Its exact installed wheel passed MCP,
+module-storage write/read/restart and guide-metadata checks; all 120 application
+members matched the wheel. The full OS matrix belongs to `2add7fa`, not this
+later SHA. A separate real installed 1.2 writer transition against this exact
+final wheel passed one test in 25.81 s, preserving two temporary contexts,
+pending approval bytes and search settings without model calls.
+
+Live remains 1.3.1; 1.3.2 is not published or installed. Native model retests of
+the final `8b00620` candidate have not run while explicit consent for the
+synthetic payload and providers is pending. No corrected model behavior is
+claimed. Observed proof is also missing
+for delegation, context switches, lost rule text and plugin refresh, and for a
+paired same-fixture measurement of MCP calls, repeated rule loads and tokens.
+The earlier JSON-payload comparison retains its own scope. These acceptance
+coverage limits do not themselves identify an additional source defect.
