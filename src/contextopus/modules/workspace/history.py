@@ -14,7 +14,7 @@ from .runtime import PCWError, _id, _revision
 from .policies import policies
 from .workspaces import encode
 from .history_events import event_from_plan, commit_message
-from .history_queries import HistoryQueriesMixin, excerpt
+from .history_queries import HistoryQueriesMixin, excerpt, PERMANENT_PATHS, SETTINGS_HISTORY_PATH
 from .history_catalog import HistoryCatalogMixin
 
 
@@ -36,7 +36,20 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
                 result[path.relative_to(self.engine.root).as_posix()] = (
                     path.read_bytes().decode("utf-8")
                 )
+        from .settings import configuration_text
+        configuration = configuration_text(self.control.layout, self.engine.workspace)
+        from contextopus.core.settings import WORKSPACE_POLICY_DEFAULTS
+        if configuration is not None and set(WORKSPACE_POLICY_DEFAULTS) <= json.loads(configuration).keys():
+            result[SETTINGS_HISTORY_PATH] = self._settings_history_text()
         return result
+
+    def _settings_history_text(self):
+        """Historical representation only; live settings exist solely in Core."""
+        virtual = self.engine.root / SETTINGS_HISTORY_PATH
+        self.engine._assert_safe(virtual)
+        if virtual.exists():
+            raise PCWError("Reserved historical settings path must not contain a live file")
+        return encode(self._settings_snapshot())
 
     def _history_git(self, *args, text=None, index=None, check=True):
         self.engine._assert_safe(self.engine.root / ".git")
@@ -80,7 +93,7 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
         """Called under the workspace lock immediately after verified file writes."""
         if (
             not force
-            and not policies(self._instructions()["content"])["git_history_enabled"]
+            and not self._policies()["git_history_enabled"]
         ):
             return None
         root = self._history_root()
@@ -219,6 +232,8 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
                         snapshot["status"] = "committed"
                 # Keep the workspace's regular index consistent without changing any file.
                 self._history_git("read-tree", "HEAD")
+                if self._history_blob("HEAD", SETTINGS_HISTORY_PATH):
+                    self._history_git("update-index", "--skip-worktree", "--", SETTINGS_HISTORY_PATH)
                 self.control.write(path, encode(snapshot))
                 self._history_compact_snapshot(path, snapshot)
                 pending.remove(operation_id)
@@ -265,7 +280,7 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
             return
         commit = self._history_revision(snapshot["commit"])
         paths = self._history_git("ls-tree", "-r", "--name-only", "-z", commit,
-                                  "--", "knowledge/", "INSTRUCTIONS.md", "PROJECT.md").stdout.split("\0")
+                                  "--", *PERMANENT_PATHS).stdout.split("\0")
         if set(filter(None, paths)) != set(snapshot["files"]):
             raise PCWError("Git snapshot paths differ; retry body preserved")
         for relative, text in snapshot["files"].items():
@@ -299,13 +314,13 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
         ):
             raise PCWError("Supply exact permanent-data paths")
         for path in paths:
-            if path in {"INSTRUCTIONS.md", "PROJECT.md"}:
+            if path in {"INSTRUCTIONS.md", "PROJECT.md", SETTINGS_HISTORY_PATH}:
                 self.engine._assert_safe(self.engine.root / path)
             elif path.startswith("knowledge/"):
                 self.engine._knowledge_path(path[len("knowledge/") :])
             else:
                 raise PCWError(
-                    "History includes only INSTRUCTIONS.md, PROJECT.md and knowledge/*.md"
+                    "History includes INSTRUCTIONS.md, PROJECT.md, knowledge/*.md and .contextopus-settings.json"
                 )
         return paths
 
@@ -327,7 +342,7 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
             selected = (
                 self._history_paths(paths)
                 if paths is not None
-                else ["knowledge/", "INSTRUCTIONS.md", "PROJECT.md"]
+                else PERMANENT_PATHS
             )
             return {
                 "before": old,

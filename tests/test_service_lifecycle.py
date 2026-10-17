@@ -80,5 +80,5 @@ def test_upgrade_removes_only_managed_retired_skills_and_rejects_stale_plan(tmp_
     old.write_bytes(managed_content)
     result = integrate(preview)
     assert not old.exists() and modified.read_text() == "My custom rework"
-    assert set(path.name for path in root.iterdir()) == {"w", "w-search", "w-create", "w-settings", "w-context", "w-analyze", "wr"}
+    assert set(path.name for path in root.iterdir()) == {"w", "w-search", "w-create", "w-settings", "w-context", "w-analyze", "m", "wr"}
     assert result["removed"] == [str(old)]

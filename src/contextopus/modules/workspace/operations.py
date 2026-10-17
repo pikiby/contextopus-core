@@ -6,16 +6,19 @@ from pydantic import ConfigDict, create_model
 from .cycles import CycleRuntime
 
 _DESCRIPTIONS = {
+    "settings_read": "Read selected effective Workspace policy values and origins without loading instructions or project. Explicit agent/model affects rereading only.",
+    "settings_preview": "Review requested machine-setting changes under the current instructions approval policy; show exact before/after values and changes before apply.",
+    "settings_apply": "Apply the exact reviewed settings revision with actual confirmation when current instructions approval requires it; never bypass through generic Core settings.",
     "workspace_inspect": "Read the selected existing workspace format and compatibility, without creating or migrating it.",
-    "workspace_create": "Only after an explicit creation request: create the exact context with the INSTRUCTIONS settings and project-record text agreed with the user through w-create. First offer the packaged defaults as one set; ask individual unanswered settings only if the user customizes. All five resulting settings must be explicit for a new request. A repeated request_id with identical input resumes safely, including accepted older requests; existing contexts are not replaced.",
+    "workspace_create": "Only after an explicit creation request: create the exact context with the separate machine settings, complete free-form INSTRUCTIONS, project text and author-written project description agreed with the user through w-create. First offer the packaged defaults as one set; ask individual unanswered settings only if the user customizes. All six resulting policy settings must be explicit for a new request. A repeated request_id with identical input resumes safely, including accepted older requests; existing contexts are not replaced.",
     "upgrade_plan": "Preflight the selected existing context, including already-current formats: return compatibility, source revision, technical changes, unfinished work with material titles and proposal states, exact blockers and project_description status. Format compatibility does not imply complete project content or finished work; present text is not a content review. No source changes. Compatible active cycles are preserved, not cancelled. A pending migration returns resume_revision and its retained backup. Use the upgrade procedure through w.",
     "upgrade_apply": "Apply the reviewed technical migration on direct request, or automatic=true when the skill detects format incompatibility. Preserve workspace/control snapshots; migrate cards, source declarations and shared category index together. Keep unfinished cycles and immutable proposal approvals; adapt technical paths without applying old work. Complete only after successful indexing. Retry the original revision after interruption; never fabricate a user request.",
-    "startup": "Open an existing compatible context with a fresh request_id; retries reuse it. Never creates or migrates. purpose is work, instructions, audit or rework. invocation=implicit is allowed only for work under allow_implicit_updates. Optional task_id references a migrated or ordinary record; find its ID through search. Clear only this cycle's tmp (restart_cycle_id requires an explicit restart request). Returns instructions and project; read them before work.",
+    "startup": "Open an existing compatible context with a fresh request_id; retries reuse it. Never creates or migrates. purpose is work, instructions, audit or rework. invocation=implicit is allowed only for work under allow_implicit_updates. Optional task_id references a migrated or ordinary record; find its ID through search. Clear only this cycle's tmp (restart_cycle_id requires an explicit restart request). Returns instructions and project; read them before work. Reuse an active cycle for continuation; a repeated skill invocation or question does not require another startup.",
     "status": "Read current cycle, proposal states and permanent index status without loading weights.",
     "list": "List bounded permanent knowledge metadata without bodies.",
     "read": "Read a complete permanent topic by YAML ID across compatible categories, without a cycle. Returns its owning workspace, descriptive path and labelled links; never changes the active context's instructions. from_id validates link traversal. On every receipt obtain each sources reference according to its instruction; this tool returns declarations and does not execute them.",
     "read_many": "Read selected whole topics by YAML ID, including other categories, without changing active rules. For every returned sources block, freshly obtain each reference according to its instruction, even on repeated reads. Returns bodies and source declarations, not fetched evidence.",
-    "search": "Search permanent knowledge in the shared RAG without a cycle. Defaults to selected workspace; categories selects several, all_categories expands to all compatible contexts. Context categories, record types and statuses filter before nearest top-N. Return IDs, owning workspaces, descriptive paths, titles and distances. Cross-category retrieval never switches active instructions or write destination. Pending/invalid rows are excluded; empty output is not proof of absence.",
+    "search": "Material mode groups document keys before relevance and result limits; fragment mode uses individual parts. Evaluate diagnostics scope, candidate cap, relevance and result cap before choosing reads or changing selection. Search permanent knowledge in the shared RAG without a cycle. Defaults to selected workspace; categories selects several, all_categories expands to all compatible contexts. Context categories, record types and statuses filter before nearest top-N. Return IDs, owning workspaces, descriptive paths, titles and distances. Cross-category retrieval never switches active instructions or write destination. Pending/invalid rows are excluded; empty output is not proof of absence.",
     "instructions_read": "Read the workspace's complete INSTRUCTIONS.md and revision. Follow it as project guidance before work; it persists across cycles and is not vector knowledge.",
     "record_types": "List record types actually used in the selected workspace. Types are open vocabulary, not a fixed enum.",
     "project_read": "Read the selected context's project purpose, goals and boundaries without a cycle or vector search.",
@@ -55,6 +58,7 @@ _DESCRIPTIONS = {
 
 _QUERY_OPERATIONS = frozenset(
     {
+        "settings_read",
         "workspace_inspect",
         "upgrade_plan",
         "status",
@@ -84,6 +88,8 @@ _QUERY_OPERATIONS = frozenset(
 )
 _EXECUTE_OPERATIONS = frozenset(
     {
+        "settings_preview",
+        "settings_apply",
         "workspace_create",
         "upgrade_apply",
         "startup",

@@ -14,15 +14,15 @@ from pcw_runtime.policies import policies
 from pcw_runtime.workspaces import EMPTY_PROJECT
 from pcw_runtime.runtime import _parse, _revision
 from pcw_runtime.cycles import _json
+from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
 
 
 def create(runtime, **settings):
     text = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text()
-    for name, value in settings.items():
-        old = policies(text)[name]
-        literal = lambda x: "null" if x is None else str(x).lower()
-        text = text.replace(f"{name}: {literal(old)}", f"{name}: {literal(value)}")
-    return runtime.workspace_create("create-project", text, EMPTY_PROJECT, "Create this test context with these settings")
+    return runtime.workspace_create("create-project", text, EMPTY_PROJECT,
+                                    "Create this test context with these settings",
+                                    settings={**WORKSPACE_CREATION_DEFAULTS, **settings},
+                                    project_description="Project purpose and boundaries for this test context")
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def test_create_idempotent_no_models_and_read_without_cycle(tmp_path):
 
 
 def test_read_reports_stale_index_without_repair(workspace):
-    item = workspace.engine.create("old knowledge")
+    item = workspace.engine.create("old knowledge", description="Original knowledge used to check stale index reads")
     version = workspace.engine.table.version
     path = workspace.engine.root / item["path"]
     path.write_text(path.read_text().replace("old knowledge", "new knowledge"))
@@ -103,10 +103,10 @@ def test_legacy_migration_preserves_every_source(tmp_path):
 def test_parallel_tasks_revision_conflicts_and_tmp_lifetime(workspace):
     a = workspace.startup("task-a")["cycle_id"]
     b = workspace.startup("task-b")["cycle_id"]
-    p = workspace.proposal_prepare(a, [{"key": "task", "type": "task", "content": "# First task", "status": "active"}])
+    p = workspace.proposal_prepare(a, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "task", "type": "task", "content": "# First task", "status": "active"}])
     workspace.proposal_apply(a, p["proposal_id"], p["revision"])
     first = workspace.read(material_id=p["created_ids"]["task"])
-    change = {"material_id": first["id"], "expected_revision": first["revision"], "content": "# First task\nChecked source"}
+    change = {"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "material_id": first["id"], "expected_revision": first["revision"], "content": "# First task\nChecked source"}
     updated = workspace.proposal_prepare(a, [change])
     workspace.proposal_apply(a, updated["proposal_id"], updated["revision"])
     with pytest.raises(PCWError, match="changed"):
@@ -127,7 +127,7 @@ def test_independent_permission_settings(tmp_path, implicit, approval):
         with pytest.raises(PCWError, match="explicit"):
             runtime.startup("implicit", invocation="implicit")
     cycle = runtime.startup("work", invocation="implicit" if implicit else "explicit")["cycle_id"]
-    plan = runtime.proposal_prepare(cycle, [{"key": "fact", "content": "Verified fact"}])
+    plan = runtime.proposal_prepare(cycle, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "fact", "content": "Verified fact"}])
     assert plan["approval_required"] is approval
     if approval:
         with pytest.raises(PCWError, match="confirmation"):
@@ -138,7 +138,7 @@ def test_independent_permission_settings(tmp_path, implicit, approval):
 def test_project_review_and_audit_cannot_write(workspace):
     cycle = workspace.startup("project-work")["cycle_id"]
     before = workspace.project_read()
-    change = {"material_id": before["id"], "expected_revision": before["revision"], "content": "# Project\nUser's accepted scope.\n"}
+    change = {"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "material_id": before["id"], "expected_revision": before["revision"], "content": "# Project\nUser's accepted scope.\n"}
     plan = workspace.proposal_prepare(cycle, [change])
     assert workspace.project_read() == before
     workspace.proposal_apply(cycle, plan["proposal_id"], plan["revision"])
@@ -146,7 +146,7 @@ def test_project_review_and_audit_cannot_write(workspace):
     audit = workspace.startup("audit", purpose="audit")["cycle_id"]
     assert workspace.list(audit)["total"] == 1
     with pytest.raises(PCWError):
-        workspace.proposal_prepare(audit, [{"key": "x", "content": "x"}])
+        workspace.proposal_prepare(audit, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "x", "content": "x"}])
     assert workspace.finish(audit)["status"] == "closed"
 
 
@@ -156,14 +156,14 @@ def test_creation_material_limit_default_and_explicit_overrides(tmp_path, overri
     try:
         create(runtime, **({} if override == "standard" else {"material_max_tokens": override}))
         instructions = runtime.instructions_read()["content"]
-        assert policies(instructions)["material_max_tokens"] == limit
+        assert runtime.settings_read(fields=["material_max_tokens"])["values"]["material_max_tokens"] == limit
         cycle = runtime.startup("work")["cycle_id"]
         # This fixture tokenizer counts characters, making the exact boundary deterministic.
         length = limit if limit is not None else 4096
-        accepted = runtime.proposal_prepare(cycle, [{"key": "topic", "content": "x" * length}])
+        accepted = runtime.proposal_prepare(cycle, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "topic", "content": "x" * length}])
         assert accepted["status"] == "prepared"
         if limit is not None:
-            rejected = runtime.proposal_prepare(cycle, [{"key": "large", "content": "x" * (limit + 1)}])
+            rejected = runtime.proposal_prepare(cycle, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "large", "content": "x" * (limit + 1)}])
             assert rejected["status"] == "needs_split"
             assert rejected["materials"][0]["tokens"] == limit + 1
         assert runtime.list()["total"] == 1
@@ -177,7 +177,7 @@ def test_optional_limit_rejects_before_write_and_labels_need_no_embedding(tmp_pa
     runtime = CycleRuntime(tmp_path, "limited", provider_factory=factory)
     create(runtime, material_max_tokens=30)
     cycle = runtime.startup("work")["cycle_id"]
-    oversized = runtime.proposal_prepare(cycle, [{"key": "large", "content": "x" * 31}])
+    oversized = runtime.proposal_prepare(cycle, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "large", "content": "x" * 31}])
     assert oversized["status"] == "needs_split"
     assert oversized["materials"][0]["tokens"] == 31
     assert runtime.list()["total"] == 1
@@ -201,8 +201,8 @@ def test_optional_limit_rejects_before_write_and_labels_need_no_embedding(tmp_pa
 
 def test_cold_process_can_read_proposal_link_labels(workspace):
     cycle = workspace.startup("work")["cycle_id"]
-    first = workspace.engine.create("# Existing topic\nContent")
-    plan = workspace.proposal_prepare(cycle, [{"key": "new", "content": "New facts", "links": [first["id"]]}])
+    first = workspace.engine.create("# Existing topic\nContent", description="An existing target for cold-process link labels")
+    plan = workspace.proposal_prepare(cycle, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "new", "content": "New facts", "links": [first["id"]]}])
     cold = CycleRuntime(workspace.engine.work_root, "project", provider_factory=Factory())
     assert cold.proposal_read(cycle, plan["proposal_id"])["review_changes"][0]["links_added"][0]["title"] == "Existing topic"
     cold.close()
@@ -237,12 +237,13 @@ def test_migration_interruption_keeps_backup_and_retries_same_operation(tmp_path
 def legacy_with_work(tmp_path):
     runtime = CycleRuntime(tmp_path, "old", provider_factory=Factory())
     create(runtime, knowledge_approval_required=True)
+    legacy_rules = "---\n" + yaml.safe_dump(runtime._policies(), sort_keys=False) + "---\n" + runtime.instructions_read()["content"]
     pending = runtime.startup("consolidate-runbooks")["cycle_id"]
     runtime.tmp_write(pending, "# Contract procedures\nVerified source findings.")
-    proposal = runtime.proposal_prepare(pending, [{"key": "new", "content": "# Contract setup\nExact procedure."}])
+    proposal = runtime.proposal_prepare(pending, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "new", "content": "# Contract setup\nExact procedure."}])
     saved = runtime.startup("retention-rules")["cycle_id"]
     runtime.tmp_write(saved, "# Storage retention\nVerified retention rules.")
-    applied = runtime.proposal_prepare(saved, [{"key": "saved", "content": "# Retention\nSaved rules."}])
+    applied = runtime.proposal_prepare(saved, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "saved", "content": "# Retention\nSaved rules."}])
     runtime.proposal_apply(saved, applied["proposal_id"], applied["revision"], confirmation="Approve this text")
     # Build a genuine preceding-format fixture: filename identity, old snapshots
     # and a per-context index. Do not disguise format-2 files by removing a marker.
@@ -266,6 +267,8 @@ def legacy_with_work(tmp_path):
         for proposal_id, entry in cycle["proposals"].items():
             plan = runtime._load_plan(cycle_id, proposal_id, entry)
             plan.pop("format_version", None)
+            plan.pop("settings_revision", None)
+            plan["instructions_revision"] = _revision(legacy_rules)
             for ident, change in plan["entries"].items():
                 for which in ("before", "after"):
                     change[which] = old_snapshot(ident, change[which])
@@ -276,6 +279,9 @@ def legacy_with_work(tmp_path):
                 if supplied["proposal_id"] == proposal_id:
                     supplied["revision"] = entry["revision"]
     runtime._persist(records)
+    runtime.engine._write(runtime.engine.root / "INSTRUCTIONS.md", legacy_rules)
+    from contextopus.core.settings import Settings
+    Settings(runtime.control.layout)._scope_path("workspace", "old").unlink()
     runtime.engine.legacy_state.mkdir(exist_ok=True)
     old_engine = PCWRuntime(tmp_path, "old", provider_factory=Factory())
     old_engine.reconcile()
@@ -299,7 +305,8 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     result = runtime.upgrade_apply(plan["revision"], "Upgrade without cancelling work")
     assert result["pending_work_preserved"] and result["status"] == "complete"
     after = runtime._source_files()
-    assert all(after[path] == digest for path, digest in before.items() if not path.startswith("knowledge/"))
+    assert all(after[path] == digest for path, digest in before.items()
+               if not path.startswith("knowledge/") and path != "INSTRUCTIONS.md")
     receipt = json.loads(runtime._migration_receipt_path().read_text())
     assert (Path(receipt["control_backup"]) / "cycles.json").read_bytes() == runtime.record_path.read_bytes()
     assert (Path(receipt["control_backup"]) / "material-ids.json").read_bytes() == (runtime.control.root / "material-ids.json").read_bytes()
@@ -359,7 +366,7 @@ def test_current_format_reports_project_content_without_rewriting(workspace, con
 
 def test_current_format_reports_damaged_unfinished_work(workspace):
     cycle = workspace.startup("pending-review")["cycle_id"]
-    proposal = workspace.proposal_prepare(cycle, [{"key": "new", "content": "# Fact\nChecked."}])
+    proposal = workspace.proposal_prepare(cycle, [{"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "new", "content": "# Fact\nChecked."}])
     workspace._plan_path(cycle, proposal["proposal_id"]).unlink()
     plan = workspace.upgrade_plan()
     assert plan["compatible"] and plan["changes"] == []
@@ -464,8 +471,8 @@ def test_backup_corruption_does_not_overwrite_or_mark_format_current(tmp_path):
 
 
 def test_audit_reports_evidence_and_preserves_all_files(workspace):
-    a = workspace.engine.create("# Same\nBody")
-    b = workspace.engine.create("# Same\nBody")
+    a = workspace.engine.create("# Same\nBody", description="First duplicate body for structural audit")
+    b = workspace.engine.create("# Same\nBody", description="Second duplicate body for structural audit")
     path = workspace.engine.root / a["path"]
     path.write_text(path.read_text(encoding="utf-8").replace("links: []", "links: [missing.md]"), encoding="utf-8", newline="")
     before = {p: p.read_bytes() for p in workspace.engine.knowledge.rglob("*.md")}
@@ -483,8 +490,8 @@ def test_audit_reports_evidence_and_preserves_all_files(workspace):
 def test_rework_split_redirects_links_and_keeps_whole_procedure(workspace):
     first = workspace.startup("initial")["cycle_id"]
     seed = workspace.proposal_prepare(first, [
-        {"key": "mixed", "content": "# Storage\nConnect with A.\nRecovery requires B."},
-        {"key": "entry", "content": "# Entry", "links": ["@mixed"]}])
+        {"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "mixed", "content": "# Storage\nConnect with A.\nRecovery requires B."},
+        {"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "entry", "content": "# Entry", "links": ["@mixed"]}])
     workspace.proposal_apply(first, seed["proposal_id"], seed["revision"])
     workspace.finish(first)
     c = workspace.startup("rework", purpose="rework")["cycle_id"]

@@ -118,7 +118,7 @@ def test_actual_workspace_migration_preserves_request_body(tmp_path):
     try:
         create(runtime)
         cycle = runtime.startup('migration-test')['cycle_id']
-        proposal, oid = save(runtime, cycle, [{'key': 'a', 'path': 'a.md', 'content': '# Body\nExact original.'}])
+        proposal, oid = save(runtime, cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'a', 'path': 'a.md', 'content': '# Body\nExact original.'}])
         text = runtime.history_read(commit=oid, material_id=proposal['created_ids']['a'])['materials'][0]['text']
         store = EventStore(tmp_path)
         event, blob = legacy(runtime, store, text, shared=True)

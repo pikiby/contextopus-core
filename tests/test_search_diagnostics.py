@@ -170,3 +170,30 @@ def test_public_disabled_algorithm_remains_visible_and_can_be_repaired(tmp_path)
         assert repaired['settings']['values']['selection']['algorithm']=='nearest_n'
         assert app.query('core.search',{'query':'offline','module':'demo','collection':'one'})['results']
         assert not marker.exists()
+
+
+def test_core_material_limit_and_candidate_limit_have_separate_units(tmp_path):
+    from contextopus.core.embeddings import default_config
+    with ProcessResources(Factory()) as resources:
+        index = RagIndex(StorageLayout(tmp_path), resources, embeddings=default_config())
+        index.index(IndexDocument(DocumentKey('demo', 'one', 'a'), 'r1', 'a' * 6000, 'a.md', {}))
+        index.index(IndexDocument(DocumentKey('demo', 'one', 'b'), 'r1', 'second document', 'b.md', {}))
+        # Query the exact first indexed part; repeated complete parts of a rank
+        # equally, but must occupy only one material slot.
+        parts = index.read_rows(index._generic_table(), ['object_id', 'text'])
+        query = next(part['text'] for part in parts if part['object_id'] == 'a')
+        selection = {'algorithm': 'nearest_n', 'parameters': {'N': 2}}
+        complete = index.search_detailed(query, module='demo', collection='one', selection=selection)
+        assert {row['key'][-1] for row in complete['results']} == {'a', 'b'}
+        counts = complete['diagnostics']['counts']
+        assert counts['considered_fragments'] > counts['considered_documents'] == 2
+        assert complete['diagnostics']['completeness']['selection_input_complete'] is True
+        capped = index.search_detailed(query, module='demo', collection='one', selection=selection,
+                                       candidate_limit=1)
+        diag = capped['diagnostics']
+        assert len(capped['results']) == 1
+        assert diag['limits']['candidate_limit'] == 1
+        assert diag['limits']['result']['limit'] == 2
+        assert diag['completeness']['selection_input_complete'] is False
+        assert diag['completeness']['reasons'] == ['candidate_limit']
+        assert diag['completeness']['candidate_snapshot_complete'] is True

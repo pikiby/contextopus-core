@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from .runtime import PCWError, _id, _parse, _revision
+from .records import validate_description
 
 
 class AuditMixin:
     def audit(self, cycle_id: str | None = None, offset: int = 0, limit: int = 50):
-        self._require_format()
+        # Audit must inspect repairable source defects rather than requiring the
+        # very checks it reports to pass before enumeration.
+        self._require_format(storage=False)
         if (
             type(offset) is not int
             or offset < 0
@@ -29,11 +32,14 @@ class AuditMixin:
                 try:
                     metadata, body = _parse(text)
                     ident = _id(metadata["id"])
-                    links = metadata.get("links", [])
-                    if not isinstance(links, list) or any(
-                        not isinstance(value, str) for value in links
-                    ):
-                        raise PCWError("links must be a list of YAML material IDs")
+                    links = self.engine.link_codec().decode(metadata.get("links", []), ident)
+                    try:
+                        validate_description(metadata, required=True)
+                    except PCWError:
+                        issues.append({
+                            "problem": "missing_description" if not metadata.get("description") else "invalid_description",
+                            "basis": "Read the entire material and author its content and applicability description through an ordinary proposal",
+                        })
                     digest = _revision(body)
                     if digest in bodies and body.strip():
                         issues.append(
@@ -91,6 +97,6 @@ class AuditMixin:
                 "materials": selected,
                 "total": len(rows),
                 "next_offset": offset + limit if offset + limit < len(rows) else None,
-                "scope": "literal format, YAML identity, exact duplicates and cross-context link existence",
+                "scope": "literal format, descriptions, YAML identity, exact duplicates and cross-context link existence",
                 "semantic_audit": "Agent must assess requested meaning against current instructions and evidence; no automatic semantic verdict",
             }

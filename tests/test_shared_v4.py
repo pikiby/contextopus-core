@@ -23,7 +23,9 @@ def context(root, name, factory=None):
 
 def save(runtime, text, links=None):
     cycle = runtime.startup("save-" + str(len(runtime._records()["cycles"])))["cycle_id"]
-    prepared = runtime.proposal_prepare(cycle, [{"key": "new", "content": text, "links": links or []}])
+    prepared = runtime.proposal_prepare(cycle, [{"key": "new", "content": text,
+                                               "description": "Facts used to verify shared context retrieval and links",
+                                               "links": links or []}])
     assert runtime.proposal_apply(cycle, prepared["proposal_id"], prepared["revision"])["status"] == "applied"
     return runtime.read(material_id=prepared["created_ids"]["new"])
 
@@ -142,7 +144,8 @@ def test_missing_yaml_or_legacy_sources_detected_with_current_marker(tmp_path):
 def test_old_source_syntax_is_normalized_before_review(tmp_path):
     runtime = context(tmp_path, "one")
     cycle = runtime.startup("legacy-author")["cycle_id"]
-    p = runtime.proposal_prepare(cycle, [{"key": "a", "content": "# Fact\n```yaml\nrequired_sources:\n- url: file:///tmp/example\n  extract: Specific field\n```\n"}])
+    p = runtime.proposal_prepare(cycle, [{"key": "a", "content": "# Fact\n```yaml\nrequired_sources:\n- url: file:///tmp/example\n  extract: Specific field\n```\n",
+        "description": "Explains the fact's source dependency and the specific field that must be obtained before use."}])
     shown = p["review_changes"][0]["body_changes"][0]["after"]
     assert "sources:" in shown and "reference:" in shown and "instruction:" in shown
     assert "required_sources:" not in shown
@@ -208,7 +211,8 @@ def test_duplicate_yaml_ids_and_paths_are_rejected(tmp_path):
         (b.engine.knowledge / "Different-name.md").unlink()
         cycle = a.startup("collision")["cycle_id"]
         with pytest.raises(PCWError, match="destination path"):
-            a.proposal_prepare(cycle, [{"key": "x", "path": "same.md", "content": "X"}, {"key": "y", "path": "same.md", "content": "Y"}])
+            a.proposal_prepare(cycle, [{"key": "x", "path": "same.md", "content": "X", "description": "Records the first independent fact used to check destination collisions."},
+                                      {"key": "y", "path": "same.md", "content": "Y", "description": "Records the second independent fact used to check destination collisions."}])
     finally:
         a.close(); b.close()
 

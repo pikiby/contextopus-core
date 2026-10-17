@@ -21,7 +21,7 @@ def workspace(tmp_path):
 
 def save(call, cycle, text, **extra):
     proposal = call("proposal_prepare", cycle_id=cycle,
-                    changes=[{"key": "one", "content": text, **extra}])
+                    changes=[{"description": "Verified behavior used to test historical replay and policy evidence", "key": "one", "content": text, **extra}])
     call("proposal_apply", cycle_id=cycle, proposal_id=proposal["proposal_id"], expected_revision=proposal["revision"])
     return proposal["created_ids"]["one"]
 
@@ -74,7 +74,7 @@ def test_cross_context_read_keeps_owner_and_active_rules(workspace):
     other = CycleRuntime(runtime.engine.work_root, "other", provider_factory=Factory())
     create(other)
     cycle = other.startup("other-cycle")["cycle_id"]
-    proposal = other.proposal_prepare(cycle, [{"key": "other", "content": "# Other context\nForeign fact."}])
+    proposal = other.proposal_prepare(cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "other", "content": "# Other context\nForeign fact."}])
     other.proposal_apply(cycle, proposal["proposal_id"], proposal["revision"])
     read = call("read", material_id=proposal["created_ids"]["other"])
     event = runtime.analytics_read(read["analytics"]["event_id"])
@@ -147,14 +147,14 @@ def test_reference_pagination_and_replay_beyond_default_page(workspace):
     with EventStore(runtime.engine.work_root).connect() as db:
         reference = db.execute("SELECT reference FROM event_references WHERE event_id=? AND ordinal=0", (event_id,)).fetchone()[0]
         db.executemany("INSERT INTO event_references VALUES (?,?,?)",
-                       [(event_id, ordinal, reference) for ordinal in range(1, 52)])
+                       [(event_id, ordinal, reference) for ordinal in range(2, 53)])
     first = runtime.analytics_read(event_id)
     assert len(first["references"]) == 50
-    assert first["references_count"] == 52 and first["next_offset"] == 50
-    penultimate = runtime.analytics_read(event_id, offset=first["next_offset"], limit=1)
-    assert [ref["reference_index"] for ref in penultimate["references"]] == [50]
-    assert penultimate["next_offset"] == 51
+    assert first["references_count"] == 53 and first["next_offset"] == 50
+    penultimate = runtime.analytics_read(event_id, offset=first["next_offset"], limit=2)
+    assert [ref["reference_index"] for ref in penultimate["references"]] == [50, 51]
+    assert penultimate["next_offset"] == 52
     final = runtime.analytics_read(event_id, offset=penultimate["next_offset"], limit=1)
-    assert [ref["reference_index"] for ref in final["references"]] == [51]
+    assert [ref["reference_index"] for ref in final["references"]] == [52]
     assert final["next_offset"] is None
-    assert runtime.analytics_reference_read(event_id, reference_index=51)["text"] == text
+    assert runtime.analytics_reference_read(event_id, reference_index=52)["text"] == text

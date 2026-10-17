@@ -13,6 +13,10 @@ VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["versi
 def main():
     destination = ROOT / "dist"
     destination.mkdir(exist_ok=True)
+    runtime_assets = [destination / f"contextopus_core-{VERSION}-py3-none-any.whl",
+                      destination / f"contextopus_core-{VERSION}.tar.gz"]
+    if not all(path.is_file() for path in runtime_assets):
+        raise ValueError('Build the exact wheel and source archive before client bundles')
     skills = ROOT / "src/contextopus/resources/skills"
     for client in ("codex", "claude-code", "opencode", "crush"):
         archive = destination / f"contextopus-{client}-{VERSION}.zip"
@@ -24,13 +28,17 @@ def main():
                     bundle.write(path, "skills/" + path.relative_to(skills).as_posix())
             bundle.writestr(
                 "INSTALL.txt",
-                f"Install contextopus_core-{VERSION}-py3-none-any.whl first.\nRun: contextopus service install\nRun: contextopus integrate {client} --project <project>\nReview paths, then repeat with --apply.\nNative clients connect to http://127.0.0.1:8765/mcp.\n",
+                f"Verify contextopus_core-{VERSION}-py3-none-any.whl against SHA256SUMS before installation.\n"
+                f"For an existing root, follow docs/releases/{VERSION}.md: coherent backup, isolated migration test and reviewed client update.\n"
+                "Preserve the existing root, extras, user rules, IDs and pending work.\n"
+                f"Preview: contextopus integrate {client} --project <project>\n"
+                "Review paths before repeating with --apply; custom skills are never overwritten.\n"
+                "Native clients connect to http://127.0.0.1:8765/mcp.\n"
+                "Default tools: guide, read, write. Legacy aliases require explicit CONTEXTOPUS_LEGACY_TOOLS=1.\n",
             )
-    assets = sorted(
-        path
-        for path in destination.iterdir()
-        if path.name != "SHA256SUMS" and path.is_file() and (VERSION in path.name)
-    )
+    assets = sorted([*runtime_assets, *(
+        destination / f"contextopus-{client}-{VERSION}.zip"
+        for client in ("codex", "claude-code", "opencode", "crush"))])
     (destination / "SHA256SUMS").write_text(
         "".join(
             f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"

@@ -66,7 +66,7 @@ class WorkspaceEligibility:
                     json.loads((marker / "format.json").read_text()).get(
                         "format_version"
                     )
-                    in (2, 3)
+                    in (2, 3, 4)
                 ):
                     selected = name
                     break

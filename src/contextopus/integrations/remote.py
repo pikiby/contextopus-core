@@ -26,8 +26,9 @@ class RemoteServices:
 
 
 class RemoteApplication:
-    def __init__(self, root, context=None, endpoint="http://127.0.0.1:8765/mcp"):
+    def __init__(self, root, context=None, endpoint="http://127.0.0.1:8765/mcp", *, legacy_tools=False):
         self.root, self.context, self.endpoint = str(root), context, endpoint
+        self.legacy_tools = legacy_tools
         self.services = RemoteServices(self)
         self._executor = ThreadPoolExecutor(max_workers=1)
 
@@ -38,15 +39,17 @@ class RemoteApplication:
         async with streamable_http_client(self.endpoint) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                result = await session.call_tool(
-                    tool,
-                    {
-                        "operation": operation,
-                        "work_root": self.root,
-                        "workspace": self.context,
-                        "arguments": arguments or {},
-                    },
-                )
+                payload = {
+                    "operation": operation,
+                    "work_root": self.root,
+                    "workspace": self.context,
+                    "arguments": arguments or {},
+                }
+                if not self.legacy_tools:
+                    # CLI/TUI consume full operation contracts; only conversational
+                    # MCP tools default to compact presentation.
+                    payload['detail'] = 'full'
+                result = await session.call_tool(tool, payload)
                 if result.isError:
                     raise RuntimeError(
                         "; ".join(
@@ -68,10 +71,10 @@ class RemoteApplication:
         ).result()
 
     def query(self, operation, arguments=None):
-        return self._sync("contextopus_query", operation, arguments)
+        return self._sync("contextopus_query" if self.legacy_tools else "read", operation, arguments)
 
     def execute(self, operation, arguments=None):
-        return self._sync("contextopus_execute", operation, arguments)
+        return self._sync("contextopus_execute" if self.legacy_tools else "write", operation, arguments)
 
     def close(self):
         self._executor.shutdown()

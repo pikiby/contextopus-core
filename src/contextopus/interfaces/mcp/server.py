@@ -1,13 +1,15 @@
 """Native FastMCP transport with one process owner for all roots and modules."""
 
 import atexit
+import json
 import os
 import threading
 from functools import partial
+from typing import Any, Literal
 import anyio
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from mcp.types import TextContent, ToolAnnotations
 from starlette.responses import JSONResponse
 from contextopus.startup import Application
 from contextopus.core.resources import ProcessResources
@@ -56,7 +58,7 @@ class ServerOwner:
         self.resources.close()
 
 
-def create_server(root, host="127.0.0.1", port=8765):
+def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
     owner = ServerOwner(root)
     owner.application()
     owner.resources.start_services()
@@ -65,9 +67,10 @@ def create_server(root, host="127.0.0.1", port=8765):
         host=host,
         port=port,
         instructions=(
-            "Use contextopus_query and contextopus_execute. describe lists module-owned operations. "
-            "Core operations require no Workspace. Workspace operations use explicit context and retain their approval rules. "
-            "Read procedure(name=workspace) before Workspace work."
+            "Use guide for a procedure or an unknown operation signature; read for queries and write for changes. "
+            "Obtain and read the applicable procedure before acting. guide() returns the ordinary Workspace workflow. "
+            "Reuse a known procedure during the task; ordinary phases do not require another guide call. "
+            "Workspace operations require explicit context and preserve their approval rules."
         ),
     )
     atexit.register(owner.close)
@@ -89,32 +92,77 @@ def create_server(root, host="127.0.0.1", port=8765):
             operation = "workspace." + operation
         return getattr(app, kind)(operation, arguments)
 
+    def normalize(operation):
+        from contextopus.modules.workspace.operations import _DESCRIPTIONS
+        return 'workspace.' + operation if operation in _DESCRIPTIONS else operation
+
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
-    async def contextopus_query(
-        operation: str,
-        arguments: dict | None = None,
+    async def guide(
+        procedure: str | None = None,
+        operation: str | None = None,
+        catalog: bool = False,
         work_root: str | None = None,
         context: str | None = None,
         workspace: str | None = None,
     ) -> dict:
-        return await anyio.to_thread.run_sync(partial(route, "query", operation, arguments, work_root, context, workspace))
+        """Read one applicable procedure or one operation signature; catalog is opt-in."""
+        if sum((procedure is not None, operation is not None, catalog)) > 1:
+            raise ValueError('Choose procedure, operation or catalog')
+        if operation is not None or catalog:
+            return await anyio.to_thread.run_sync(partial(route, 'query', 'describe',
+                {'operation': normalize(operation)} if operation is not None else {}, work_root, context, workspace))
+        return await anyio.to_thread.run_sync(partial(route, 'query', 'procedure',
+            {'name': procedure or 'workspace'}, work_root, context, workspace))
+
+    async def dispatch(kind, operation, arguments, work_root, context, workspace, detail):
+        # Validate before executing a mutation. Presentation runs only after the
+        # existing registry has completed approval checks and observation.
+        if detail not in ('compact', 'full'):
+            raise ValueError('detail must be compact or full')
+        result = await anyio.to_thread.run_sync(partial(route, kind, operation, arguments, work_root, context, workspace))
+        from .presentation import present
+        result = present(result, operation=normalize(operation), arguments=arguments, detail=detail)
+        if isinstance(result, dict):
+            return result
+        # FastMCP otherwise expands a list into separate content blocks, losing
+        # its JSON shape (and making empty/multiple results undecodable).
+        return [TextContent(type='text', text=json.dumps(result, ensure_ascii=False))]
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    async def read(
+        operation: str, arguments: dict | None = None,
+        work_root: str | None = None, context: str | None = None,
+        workspace: str | None = None, detail: Literal['compact', 'full'] = 'compact',
+    ) -> Any:
+        """Run a query; compact metadata is standard, full detail preserves all evidence."""
+        return await dispatch('query', operation, arguments, work_root, context, workspace, detail)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=False))
-    async def contextopus_execute(
-        operation: str,
-        arguments: dict | None = None,
-        work_root: str | None = None,
-        context: str | None = None,
-        workspace: str | None = None,
-    ) -> dict:
-        return await anyio.to_thread.run_sync(partial(route, "execute", operation, arguments, work_root, context, workspace))
+    async def write(
+        operation: str, arguments: dict | None = None,
+        work_root: str | None = None, context: str | None = None,
+        workspace: str | None = None, detail: Literal['compact', 'full'] = 'compact',
+    ) -> Any:
+        """Run an authorized mutation under its existing review and approval policy."""
+        return await dispatch('execute', operation, arguments, work_root, context, workspace, detail)
 
-    mcp.tool(name="pcw_query", annotations=ToolAnnotations(readOnlyHint=True))(
-        contextopus_query
-    )
-    mcp.tool(name="pcw_execute", annotations=ToolAnnotations(readOnlyHint=False))(
-        contextopus_execute
-    )
+    # Explicit temporary compatibility for old clients. It preserves full legacy
+    # responses and is never advertised by the default server.
+    if legacy_tools is None:
+        legacy_tools = os.environ.get('CONTEXTOPUS_LEGACY_TOOLS') == '1'
+    if legacy_tools:
+        async def legacy_query(operation: str, arguments: dict | None = None,
+                               work_root: str | None = None, context: str | None = None,
+                               workspace: str | None = None) -> Any:
+            return await dispatch('query', operation, arguments, work_root, context, workspace, 'full')
+        async def legacy_execute(operation: str, arguments: dict | None = None,
+                                 work_root: str | None = None, context: str | None = None,
+                                 workspace: str | None = None) -> Any:
+            return await dispatch('execute', operation, arguments, work_root, context, workspace, 'full')
+        for name in ('contextopus_query', 'pcw_query'):
+            mcp.tool(name=name, annotations=ToolAnnotations(readOnlyHint=True))(legacy_query)
+        for name in ('contextopus_execute', 'pcw_execute'):
+            mcp.tool(name=name, annotations=ToolAnnotations(readOnlyHint=False))(legacy_execute)
     return mcp
 
 

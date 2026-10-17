@@ -1,7 +1,7 @@
 {
   "id": "none",
-  "version": "1.0.0",
-  "purpose": "Return a stable page without a relevance cut.",
+  "version": "2.0.0",
+  "purpose": "Return a stable page of materials or explicit fragments without a relevance cut.",
   "parameters_schema": {
     "type": "object",
     "properties": {
@@ -21,6 +21,6 @@
     "offset": 0,
     "page_size": 20
   },
-  "when_to_use": "Use for inspection and pagination. Increase offset to get the next page.",
-  "how_to_adjust": "Use for inspection and pagination. Increase offset to get the next page."
+  "when_to_use": "Use for inspection and pagination.",
+  "how_to_adjust": "Offset and page_size count materials in materials mode and parts in fragments mode. Stable pagination requires the same corpus and ranking."
 }

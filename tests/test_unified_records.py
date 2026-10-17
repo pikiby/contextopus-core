@@ -1,11 +1,13 @@
 """Exercise the shipped Workspace, not the retained PCW compatibility package."""
 from importlib.resources import files
 import json
+import yaml
 from unittest.mock import patch
 
 import pytest
 
 from contextopus.modules.workspace.cycles import CycleRuntime
+from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
 from contextopus.modules.workspace.runtime import _parse, PCWError
 from contextopus.core.resources import ProcessResources
 from contextopus.startup import Application
@@ -60,14 +62,16 @@ def test_recovers_interrupted_preceding_format_before_v3(tmp_path, interruption,
 def workspace(root, name="alpha", factory=None):
     runtime = CycleRuntime(root, name, provider_factory=factory or Factory())
     rules = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text().replace("material_max_tokens: 1024", "material_max_tokens: null")
-    created = runtime.workspace_create("create", rules, f"# {name}\nProject for shared observability", "Create this context")
+    project = f"---\ndescription: Defines shared observability goals and the project boundaries.\n---\n# {name}\nProject for shared observability"
+    created = runtime.workspace_create("create", rules, project, "Create this context",
+                                       settings={**WORKSPACE_CREATION_DEFAULTS, "material_max_tokens": None})
     assert created["status"] == "created", created
     return runtime
 
 
 def put(runtime, body, kind="knowledge", status=None, links=None):
     cycle = runtime.startup("write-" + str(len(runtime._records()["cycles"])))['cycle_id']
-    change = {"key": "new", "content": body, "type": kind, "links": links or []}
+    change = {"key": "new", "content": body, "description": "Records the verified state and the conditions for its use.", "type": kind, "links": links or []}
     if status is not None:
         change["status"] = status
     proposal = runtime.proposal_prepare(cycle, [change])
@@ -95,11 +99,20 @@ def test_migrate_current_preserves_ids_pending_proposal_and_retry(tmp_path):
     runtime = workspace(tmp_path)
     item = put(runtime, "# State\nVerified before migration")
     cycle = runtime.startup("pending")["cycle_id"]
-    proposal = runtime.proposal_prepare(cycle, [{"material_id": item["id"], "expected_revision": item["revision"], "content": "# State\nApproved later"}])
+    proposal = runtime.proposal_prepare(cycle, [{"material_id": item["id"], "expected_revision": item["revision"], "content": "# State\nApproved later", "description": "Records the state approved after migration."}])
+    project = runtime.project_read()
+    # Reconstruct the machine flags and proposal contract a real pre-v4 context used.
+    rules = runtime.engine.root / "INSTRUCTIONS.md"
+    rules.write_text("---\n" + yaml.safe_dump(runtime._policies()) + "---\n" + _parse(rules.read_text())[1])
+    with runtime._cycle(cycle) as (records, state):
+        old = runtime._load_plan(cycle, proposal["proposal_id"], state["proposals"][proposal["proposal_id"]])
+        old.pop("settings_revision", None)
+        from contextopus.modules.workspace.runtime import _revision
+        old["instructions_revision"] = _revision(rules.read_text())
+        proposal = runtime._save_plan(records, state, old, "prepared")
     proposal_path = runtime._tmp(cycle) / "proposals" / (proposal["proposal_id"] + ".json")
     original_proposal = proposal_path.read_bytes()
     root = runtime.engine.root
-    project = runtime.project_read()
     (root / "PROJECT.md").write_text(project["content"])
     (root / project["path"]).unlink()
     (root / "current").mkdir()

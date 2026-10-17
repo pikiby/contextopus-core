@@ -241,14 +241,14 @@ def settings(snapshot, width=79, selected=0, draft=None, preview=None, message=N
 
 def modules(items, width=79, selected=0, message=None):
     import textwrap
-    lines = [" CONTEXTOPUS · MODULES", "", " Root-local modules · explicit preparation and enablement", ""]
+    lines = [" CONTEXTOPUS · MODULES", "", " Install prepares dependencies, storage and operations", ""]
     actions = []
     for item in items:
         ident = item["id"]
         lines.append(" " + ident + " · " + item["state"] + " · " + item.get("version", "unknown version"))
         if item.get("error"):
             lines.extend(" " + line for line in textwrap.wrap(item["error"], max(10, width - 2)))
-        choices = ["Prepare", "Enable", "Update", "Disable"]
+        choices = ["Install", "Update", "Disable"]
         if item["state"] == "enabled" and item.get("open_tui"):
             choices.append("Open")
         for choice in choices:

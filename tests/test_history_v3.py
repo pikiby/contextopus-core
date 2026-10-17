@@ -17,17 +17,17 @@ def test_automatic_history_tracks_permanent_files_only(tmp_path):
     cycle = runtime.startup("work")["cycle_id"]
     runtime.tmp_write(cycle, "Some result")
     plan, result = apply(runtime, cycle, [
-        {"key": "a", "content": "# Fact\nFirst"},
-        {"key": "task", "type": "task", "status": "active", "content": "# Some task\nNext action"},
+        {"description": "Verified behavior used to test historical replay and policy evidence", "key": "a", "content": "# Fact\nFirst"},
+        {"description": "Verified behavior used to test historical replay and policy evidence", "key": "task", "type": "task", "status": "active", "content": "# Some task\nNext action"},
     ])
     assert result["history"]["status"] == "committed"
     item = runtime.read(cycle, plan["created_ids"]["a"])
-    _, unchanged = apply(runtime, cycle, [{"material_id": item["id"], "expected_revision": item["revision"], "content": item["content"]}])
+    _, unchanged = apply(runtime, cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", "material_id": item["id"], "expected_revision": item["revision"], "content": item["content"]}])
     assert unchanged["history"]["status"] == "unchanged"
     assert len(runtime.history_list()["versions"]) == 2
     paths = runtime.engine._git("ls-tree", "--name-only", "-r", "HEAD").stdout.splitlines()
     task = runtime.read(material_id=plan["created_ids"]["task"])
-    assert sorted(paths) == sorted([runtime.project_read()["path"], "INSTRUCTIONS.md", item["path"], task["path"]])
+    assert sorted(paths) == sorted([runtime.project_read()["path"], "INSTRUCTIONS.md", ".contextopus-settings.json", item["path"], task["path"]])
     assert not any(path.startswith("tmp/") for path in paths)
     diff = runtime.history_diff(initial["history"]["commit"], result["history"]["commit"])
     assert "+First" in diff["diff"]
@@ -46,10 +46,10 @@ def test_git_retry_uses_old_snapshot_and_commits_in_order(tmp_path):
         return git(*args, **kwargs)
 
     with patch.object(runtime, "_history_git", side_effect=fail):
-        first, saved = apply(runtime, cycle, [{"key": "first", "content": "First captured state"}])
+        first, saved = apply(runtime, cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "first", "content": "First captured state"}])
         assert saved["status"] == "applied"
         assert saved["history"]["status"] == "pending"
-        second, saved_later = apply(runtime, cycle, [{"key": "second", "content": "Later independent state"}])
+        second, saved_later = apply(runtime, cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "second", "content": "Later independent state"}])
         assert saved_later["history"]["status"] == "pending"
     # Uncommitted external change must not enter either captured operation.
     first_relative = runtime.read(material_id=first["created_ids"]["first"])["path"]

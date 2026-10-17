@@ -3,6 +3,27 @@
 import hashlib
 import json
 
+WORKSPACE_POLICY_DEFAULTS = {
+    "allow_implicit_updates": False,
+    "knowledge_approval_required": True,
+    "instructions_approval_required": True,
+    "git_history_enabled": False,
+    "material_max_tokens": None,
+    "create_required_sources": False,
+}
+WORKSPACE_SETTINGS = {
+    **WORKSPACE_POLICY_DEFAULTS,
+    "reread_instructions": False,
+    "instruction_profiles": [],
+}
+WORKSPACE_CREATION_DEFAULTS = {
+    **WORKSPACE_POLICY_DEFAULTS,
+    "knowledge_approval_required": False,
+    "git_history_enabled": True,
+    "material_max_tokens": 1024,
+}
+PROTECTED_FIELDS = frozenset(WORKSPACE_SETTINGS)
+
 DEFAULTS = {
     "include": ["**/*"],
     "exclude": [".git/**"],
@@ -16,6 +37,7 @@ DEFAULTS = {
     "searchN": 20,
     "distance": None,
     "selection": {"algorithm": "distance_jump", "parameters": {}},
+    **WORKSPACE_SETTINGS,
 }
 
 
@@ -42,7 +64,64 @@ class Settings:
             return self.layout.configuration / "modules" / (module + ".json")
         return self.path
 
-    def snapshot(self, module=None, context=None, request=None):
+    def _layers(self, module=None, context=None):
+        self._scope_path(module, context)
+        layers = [("root", self._read())]
+        if module is not None:
+            for origin, selected_context in (("module", None), ("context", context)):
+                if origin == "context" and context is None:
+                    continue
+                path = self._scope_path(module, selected_context)
+                layers.append((origin, json.loads(path.read_text()) if path.is_file() else {}))
+        return layers
+
+    def workspace_snapshot(self, module="workspace", context=None, fields=None,
+                           agent=None, agent_model=None):
+        """Read policies without opening rules, the vector index or algorithm modules."""
+        selected = list(WORKSPACE_SETTINGS) if fields is None else fields
+        if (not isinstance(selected, list) or any(key not in WORKSPACE_SETTINGS for key in selected)):
+            raise ValueError("Unknown workspace settings fields")
+        for value in (agent, agent_model):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError("Explicit agent/model selectors must be nonempty strings")
+        layers = self._layers(module, context)
+        effective = json.loads(json.dumps(WORKSPACE_SETTINGS))
+        sources = {key: "default" for key in effective}
+        for origin, layer in layers:
+            values = {key: value for key, value in layer.items() if key in WORKSPACE_SETTINGS}
+            self._validate_changes(values)
+            effective.update(values)
+            sources.update({key: origin + ".configuration" for key in values})
+        matches = []
+        for profile in effective["instruction_profiles"]:
+            if (("agent" not in profile or profile["agent"] == agent)
+                    and ("model" not in profile or profile["model"] == agent_model)):
+                matches.append((int("agent" in profile) + int("model" in profile), profile))
+        if matches:
+            specificity = max(score for score, _ in matches)
+            winners = [profile for score, profile in matches if score == specificity]
+            if len(winners) != 1:
+                raise ValueError("Ambiguous instruction profiles; select an explicit agent/model pair")
+            effective["reread_instructions"] = winners[0]["reread_instructions"]
+            sources["reread_instructions"] = sources["instruction_profiles"] + ".profile"
+        policy_layers = [(origin, {key: value for key, value in layer.items() if key in WORKSPACE_SETTINGS})
+                         for origin, layer in layers]
+        revision = hashlib.sha256(json.dumps([policy_layers, module, context], sort_keys=True).encode()).hexdigest()
+        return {"values": {key: effective[key] for key in selected},
+                "sources": {key: sources[key] for key in selected}, "revision": revision,
+                "selected_scope": {"module": module, "context": context},
+                "profile": {"agent": agent, "model": agent_model}}
+
+    def snapshot(self, module=None, context=None, request=None, fields=None,
+                 agent=None, agent_model=None):
+        if fields is not None and (not isinstance(fields, list) or any(key not in DEFAULTS for key in fields)):
+            raise ValueError("Unknown configuration fields")
+        if fields is not None and set(fields) <= PROTECTED_FIELDS:
+            if request and set(request) & PROTECTED_FIELDS:
+                raise ValueError("Workspace policy request overrides are forbidden")
+            return self.workspace_snapshot(module, context, fields, agent, agent_model)
+        if request and set(request) & PROTECTED_FIELDS:
+            raise ValueError("Workspace policy request overrides are forbidden")
         self._scope_path(module, context)
         root = self._read()
         active_path = self.layout.workspace_rag / "active.json"
@@ -120,6 +199,9 @@ class Settings:
         for key in effective["selection"]["parameters"]:
             selection_sources.setdefault("parameters." + key, "algorithm.default")
         sources.update({"selection." + key: value for key, value in selection_sources.items()})
+        policy = self.workspace_snapshot(module, context, agent=agent, agent_model=agent_model)
+        effective.update(policy["values"])
+        sources.update(policy["sources"])
         if active:
             current = {
                 "provider": active["config"]["provider"]["type"],
@@ -129,10 +211,11 @@ class Settings:
             effective.update(current)
             sources.update({key: "root.active_index" for key in current})
         encoded = json.dumps(
-            [layers, active, request, {"module": module, "context": context}, registry.catalog()],
+            [layers, active, request, {"module": module, "context": context,
+                                      "agent": agent, "agent_model": agent_model}, registry.catalog()],
             sort_keys=True,
         ).encode()
-        return {
+        result = {
             "values": effective,
             "selection_status": selection_status,
             "scope": str(self.layout.root),
@@ -151,10 +234,38 @@ class Settings:
             },
             "revision": hashlib.sha256(encoded).hexdigest(),
         }
+        if fields is not None:
+            return {"values": {key: effective[key] for key in fields},
+                    "sources": {key: sources[key] for key in fields},
+                    "revision": result["revision"], "selected_scope": result["selected_scope"]}
+        return result
 
     def _validate_changes(self, changes, allow_unavailable=False):
         if not isinstance(changes, dict) or set(changes) - set(DEFAULTS):
             raise ValueError("Unknown configuration fields")
+        for key in PROTECTED_FIELDS - {"material_max_tokens", "instruction_profiles"}:
+            if key in changes and type(changes[key]) is not bool:
+                raise ValueError(f"{key} must be boolean")
+        if "material_max_tokens" in changes:
+            value = changes["material_max_tokens"]
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError("material_max_tokens must be a positive integer or null")
+        if "instruction_profiles" in changes:
+            profiles = changes["instruction_profiles"]
+            if not isinstance(profiles, list):
+                raise ValueError("instruction_profiles must be a list")
+            seen = set()
+            for profile in profiles:
+                if (not isinstance(profile, dict) or set(profile) - {"agent", "model", "reread_instructions"}
+                        or not (set(profile) & {"agent", "model"})
+                        or type(profile.get("reread_instructions")) is not bool
+                        or any(not isinstance(profile[key], str) or not profile[key].strip()
+                               for key in ("agent", "model") if key in profile)):
+                    raise ValueError("An instruction profile needs explicit agent/model and boolean reread_instructions")
+                identity = (profile.get("agent"), profile.get("model"))
+                if identity in seen:
+                    raise ValueError("Duplicate instruction profile")
+                seen.add(identity)
         if "selection" in changes:
             from .filtering import registry_for_layout
             value = changes['selection']
@@ -200,6 +311,8 @@ class Settings:
     def preview(self, changes, module=None, context=None, request_only=False):
         self._scope_path(module, context)
         self._validate_changes(changes)
+        if set(changes) & PROTECTED_FIELDS:
+            raise ValueError("Use workspace.settings_preview/settings_apply for workspace policies")
         before = self.snapshot(module, context)
         revision = hashlib.sha256(
             json.dumps([before["revision"], changes, {"request_only":request_only}], sort_keys=True).encode()
@@ -224,6 +337,8 @@ class Settings:
         preview = self._previews.get(revision)
         if preview is None:
             raise ValueError("Preview is absent; preview changes before applying")
+        if set(preview["changes"]) & PROTECTED_FIELDS:
+            raise ValueError("Use workspace.settings_apply for workspace policies")
         scope = preview["selected_scope"]
         if preview["request_only"]:
             if self.snapshot(**scope)["revision"] != preview["base_revision"]:

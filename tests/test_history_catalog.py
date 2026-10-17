@@ -118,12 +118,12 @@ def test_real_workspace_catalog_flush_and_retained_split(tmp_path):
     try:
         create(runtime)
         cycle = runtime.startup('catalog-test')['cycle_id']
-        first, old = save(runtime, cycle, [{'key': 'a', 'content': '# Source\nOriginal body.'}])
+        first, old = save(runtime, cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'a', 'content': '# Source\nOriginal body.'}])
         ident = first['created_ids']['a']
         source = runtime.read(material_id=ident)
         result, new = save(runtime, cycle, [
-            {'material_id': ident, 'expected_revision': source['revision'], 'content': '# Source\nRetained body.'},
-            {'key': 'b', 'content': '# Target\nSplit body.'}],
+            {"description": "Verified behavior used to test historical replay and policy evidence", 'material_id': ident, 'expected_revision': source['revision'], 'content': '# Source\nRetained body.'},
+            {"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'b', 'content': '# Target\nSplit body.'}],
             transformations=[dict(kind='split', sources=[ident], targets=[ident, '@b'])])
         graph = runtime.history_lineage(result['created_ids']['b'])
         edge = next(e for e in graph['edges'] if e['kind'] == 'split')
@@ -283,7 +283,7 @@ def test_automatic_history_preserves_crlf_bytes_despite_git_eol_filters(tmp_path
     try:
         create(runtime)
         cycle = runtime.startup('raw-history-test')['cycle_id']
-        proposal, _ = save(runtime, cycle, [{'key': 'a', 'content': '# Body\nRaw snapshot body.'}])
+        proposal, _ = save(runtime, cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'a', 'content': '# Body\nRaw snapshot body.'}])
         material = runtime.read(material_id=proposal['created_ids']['a'])
         path = runtime.engine.root / material['path']
         raw = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')

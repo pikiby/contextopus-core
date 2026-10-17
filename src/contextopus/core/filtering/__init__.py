@@ -76,6 +76,51 @@ class AlgorithmRegistry:
         return {'algorithm': ident, 'parameters': parameters}, description, function
 
 
+def document_identity(row):
+    """Stable identity shared by grouping, counts and retained evidence."""
+    return json.dumps(row.get('key', row.get('id', row.get('object_id', row.get('material_id')))), sort_keys=True)
+
+
+def annotate_candidate_limit(diagnostics, candidate_limit=None):
+    """Describe retrieval separately from relevance, response and evidence limits."""
+    diagnostics['limits']['nearest'] = candidate_limit  # compatibility alias
+    diagnostics['limits']['candidate_limit'] = candidate_limit
+    counts = diagnostics['counts']
+    omitted = max(0, counts['eligible_fragments'] - counts['considered_fragments'] - counts.get('invalid_distance_fragments', 0))
+    capped = bool(diagnostics.get('candidate_pool_truncated') or
+                  (candidate_limit is not None and omitted))
+    diagnostics['candidate_pool_truncated'] = capped
+    invalid = counts.get('invalid_distance_fragments', 0)
+    reasons = []
+    if capped:
+        reasons.append('candidate_limit')
+    if invalid:
+        reasons.append('invalid_distances')
+    result_cap = diagnostics['boundary'].get('result_cap')
+    if result_cap and result_cap.get('omitted'):
+        reasons.append('result_cap')
+    if result_cap and result_cap.get('offset'):
+        reasons.append('pagination_offset')
+    if diagnostics.get('truncated'):
+        reasons.append('candidate_snapshot_limit')
+    diagnostics['completeness'] = {
+        'retrieval_complete': not capped,
+        'selection_input_complete': not capped and not invalid,
+        'candidate_snapshot_complete': not diagnostics.get('truncated', False),
+        'result_window_complete': (not result_cap.get('omitted') and not result_cap.get('offset')
+                                   if result_cap is not None else None),
+        'reasons': reasons,
+    }
+    return diagnostics
+
+
+def compact_diagnostics(diagnostics):
+    """Public selection evidence; full candidates remain available in search history."""
+    from copy import deepcopy
+    return {key: deepcopy(value) for key, value in diagnostics.items()
+            if key not in ('candidates', 'nearby_rejected', 'settings_sources')}
+
+
 def select(rows, selection=None, *, eligible_count=None, eligible_documents=None, eligible_fragments=None, output='materials', legacy=None, registry=None):
     registry = registry or registry_for_layout()
     if legacy is not None and selection is None:
@@ -83,30 +128,55 @@ def select(rows, selection=None, *, eligible_count=None, eligible_documents=None
     effective, description, function = registry.resolve(selection)
     if output not in ('materials','fragments'):
         raise ValueError('output must be materials or fragments')
+    rows = list(rows)
     candidates = []
-    for index,row in enumerate(rows):
+    for index, row in enumerate(rows):
         distance = row.get('distance', row.get('_distance'))
-        if type(distance) not in (float,int) or not math.isfinite(distance):
+        if type(distance) not in (float, int) or not math.isfinite(distance):
             continue
         candidates.append({**row, 'distance': distance, '_input_index': index})
-    ordered = sorted(candidates, key=lambda r:(r['distance'],r['_input_index']))
-    kept, boundary = function(ordered, effective['parameters'])
-    chosen = []
-    seen = set()
-    for row in kept:
-        key = row.get('key', row.get('id', row.get('object_id', row.get('material_id'))))
-        identity = json.dumps(key, sort_keys=True)
-        if output == 'materials' and identity in seen:
-            continue
-        seen.add(identity)
-        chosen.append(row)
+    ordered = sorted(candidates, key=lambda r: (r['distance'], r['_input_index']))
+    # Every algorithm receives the requested unit. The nearest fragment represents
+    # a material before any relevance boundary, result cap or page is evaluated.
+    representatives = {}
+    for row in ordered:
+        representatives.setdefault(document_identity(row), row)
+    units = list(representatives.values()) if output == 'materials' else ordered
+    chosen, boundary = function(units, effective['parameters'])
+    boundary = {**boundary, 'unit': output,
+                'grouping': 'document_key_before_cut' if output == 'materials' else 'none'}
     chosen_indices = {r['_input_index'] for r in chosen}
     pool_limit = 1000
-    snapshot = [{'input_index':r['_input_index'], 'key':r.get('key', r.get('id',r.get('object_id',r.get('material_id')))), 'revision':r.get('revision'), 'part_index':r.get('part_index'), 'distance':r['distance'], 'selected':r['_input_index'] in chosen_indices} for r in ordered[:pool_limit]]
-    identity = lambda r: json.dumps(r.get('key',r.get('id',r.get('object_id',r.get('material_id')))),sort_keys=True)
-    counts = {'eligible':eligible_count if eligible_count is not None else len(rows), 'considered':len(ordered), 'selected':len(chosen), 'eligible_documents':eligible_documents if eligible_documents is not None else len({identity(r) for r in rows}), 'eligible_fragments':eligible_fragments if eligible_fragments is not None else len(rows), 'considered_fragments':len(ordered), 'selected_fragments':len(kept), 'selected_materials':len({identity(r) for r in kept})}
-    diagnostics = {'algorithm':description['id'], 'version':description['version'], 'effective_settings':effective, 'counts':counts, 'boundary':boundary, 'limits':{'candidate_snapshot':pool_limit}, 'truncated':len(ordered)>pool_limit, 'candidates':snapshot, 'nearby_rejected':[r for r in snapshot if not r['selected']][:5], 'output':output, 'deduplication_order':'before_selection' if boundary.get('grouping') == 'document_key_before_cut' else 'after_selection', 'legacy_migration':legacy is not None}
-    return {'results':[{k:v for k,v in row.items() if k != '_input_index'} for row in chosen], 'diagnostics':diagnostics}
+    snapshot = [{'input_index':r['_input_index'],
+                 'key':r.get('key', r.get('id',r.get('object_id',r.get('material_id')))),
+                 'revision':r.get('revision'), 'part_index':r.get('part_index'),
+                 'distance':r['distance'], 'selected':r['_input_index'] in chosen_indices}
+                for r in ordered[:pool_limit]]
+    counts = {
+        'eligible': eligible_count if eligible_count is not None else len(rows),
+        'considered': len(ordered), 'selected': len(chosen),
+        'eligible_documents': eligible_documents if eligible_documents is not None else len({document_identity(r) for r in rows}),
+        'eligible_fragments': eligible_fragments if eligible_fragments is not None else len(rows),
+        'considered_fragments': len(ordered), 'considered_documents': len(representatives),
+        'selection_units': len(units), 'selected_fragments': len(chosen),
+        'selected_materials': len({document_identity(r) for r in chosen}),
+        'invalid_distance_fragments': len(rows) - len(ordered),
+    }
+    diagnostics = {
+        'evidence_format': 2, 'selection_contract': 2,
+        'algorithm': description['id'], 'version': description['version'],
+        'effective_settings': effective, 'counts': counts, 'boundary': boundary,
+        'limits': {'candidate_snapshot': pool_limit,
+                   'result': boundary.get('result_cap')},
+        'truncated': len(ordered) > pool_limit, 'candidates': snapshot,
+        'nearby_rejected': [r for r in snapshot if not r['selected']][:5],
+        'output': output,
+        'deduplication_order': 'before_selection' if output == 'materials' else 'not_applied',
+        'legacy_migration': legacy is not None,
+    }
+    annotate_candidate_limit(diagnostics)
+    return {'results': [{k:v for k,v in row.items() if k != '_input_index'} for row in chosen],
+            'diagnostics': diagnostics}
 
 
 class AlgorithmCatalog:

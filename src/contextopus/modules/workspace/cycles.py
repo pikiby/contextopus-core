@@ -19,22 +19,50 @@ import os
 from pathlib import Path
 import shutil
 import uuid
+from typing import TypedDict, get_type_hints
 
 import yaml
 
-from .runtime import PCWRuntime, PCWError, _id, _revision, _parse
+from .runtime import PCWRuntime, PCWError, Material, _id, _revision, _parse
 from .shared import SharedRuntime
 from .sources import migrate_sources
 from .control import RecoveryRequired
-from .policies import policies
+from .policies import policies, extract_settings
 from .workspaces import WorkspaceMixin
 from .migration import FormatMigrationMixin
 from .documents import DocumentsMixin
-from .records import validate_metadata, record_revision
+from .records import validate_metadata, validate_description, record_revision
 from .history import HistoryMixin
 from .history_events import transformations as validate_transformations
 from .analytics import AnalyticsMixin
 from .audit import AuditMixin
+
+
+
+class ProposalChange(TypedDict, total=False):
+    """One final record change. Create with key/content/description; update with
+    material_id/expected_revision and changed fields. Delete with only
+    material_id/expected_revision/delete:true. Title comes from the Markdown
+    heading in content; there is no separate title field. Paths are relative
+    to knowledge. Types/statuses are open vocabulary; null status clears it.
+    """
+
+    __pydantic_config__ = {"extra": "forbid"}
+
+    key: str
+    material_id: str | None
+    expected_revision: str
+    content: str
+    description: str
+    links: list[str]
+    path: str
+    delete: bool
+    type: str
+    status: str | None
+
+
+# The runtime guard and generated operation schema share this contract.
+PROPOSAL_CHANGE_FIELDS = frozenset(get_type_hints(ProposalChange))
 
 
 def _json(value):
@@ -163,7 +191,7 @@ class CycleRuntime(
             )
         if (
             cycle.get("invocation") == "implicit"
-            and not policies(self._instructions()["content"])["allow_implicit_updates"]
+            and not self._policies()["allow_implicit_updates"]
         ):
             raise PCWError("Implicit updates are disabled by current instructions")
 
@@ -184,7 +212,7 @@ class CycleRuntime(
             raise PCWError("invocation must be explicit or implicit")
         if invocation == "implicit" and (
             purpose != "work"
-            or not policies(self._instructions()["content"])["allow_implicit_updates"]
+            or not self._policies()["allow_implicit_updates"]
         ):
             raise PCWError("This procedure requires an explicit user invocation")
         if task_id is not None:
@@ -379,11 +407,21 @@ class CycleRuntime(
             path = self._tmp(cycle_id) / "materials" / ident
             self.engine._assert_safe(path)
             if material_id is not None:
-                if not path.is_file() or expected_revision != _revision(
-                    path.read_bytes().decode("utf-8")
-                ):
+                if not path.is_file():
                     raise PCWError(
-                        "Temporary material changed or is missing; read its current revision"
+                        "Temporary material is missing in this cycle; use tmp_list with the same cycle_id "
+                        "to find existing material IDs before writing"
+                    )
+                if (not isinstance(expected_revision, str) or len(expected_revision) != 64
+                        or any(char not in "0123456789abcdef" for char in expected_revision)):
+                    raise PCWError(
+                        "Temporary material expected_revision must be exactly 64 lowercase hexadecimal characters; "
+                        "use tmp_read with the same cycle_id and material_id and copy its revision unchanged"
+                    )
+                if expected_revision != _revision(path.read_bytes().decode("utf-8")):
+                    raise PCWError(
+                        "Temporary material changed: revision is stale; use tmp_read with the same cycle_id "
+                        "and material_id, then retry with its current expected_revision"
                     )
             self.engine._write(path, content)
             if path.read_bytes().decode("utf-8") != content:
@@ -432,7 +470,8 @@ class CycleRuntime(
         path = self.engine.root / material.path
         self.engine._assert_safe(path)
         text = path.read_bytes().decode("utf-8")
-        return {"path": material.path, "text": text, "fingerprint": _revision(text)}
+        return {"path": material.path, "text": text, "fingerprint": _revision(text),
+                "link_ids": list(material.links)}
 
     def _plan_path(self, cycle_id, proposal_id):
         path = self._tmp(cycle_id) / "proposals" / (_id(proposal_id) + ".json")
@@ -502,12 +541,12 @@ class CycleRuntime(
             **self._review_policy(plan, state),
         }
 
-    @staticmethod
-    def _review_policy(plan, state):
-        required = plan.get(
-            "instructions_approval_required" if plan.get("kind") == "instructions"
-            else "knowledge_approval_required", True
-        )
+    def _review_policy(self, plan, state):
+        key = ("instructions_approval_required" if plan.get("kind") == "instructions"
+               else "knowledge_approval_required")
+        required = plan.get(key, True)
+        if state == "prepared":
+            required = required or self._policies()[key]
         return {
             "approval_required": required,
             "next_action": "report_no_changes"
@@ -529,7 +568,8 @@ class CycleRuntime(
         _text(user_request, "user's direct request to change instructions")
         if not isinstance(content, str):
             raise PCWError("content must be ordinary Markdown text")
-        policies(content)
+        if extract_settings(content)[1] != content:
+            raise PCWError("Machine policy keys belong in Core configuration; use workspace.settings_preview/settings_apply")
         with self._cycle(cycle_id) as (records, cycle):
             if cycle.get("purpose") == "audit":
                 raise PCWError("Audit cannot change instructions")
@@ -553,7 +593,8 @@ class CycleRuntime(
                 "cycle_id": cycle_id,
                 "proposal_id": ident,
                 "kind": "instructions",
-                "instructions_approval_required": policies(current["content"])["instructions_approval_required"],
+                "instructions_approval_required": self._policies()["instructions_approval_required"],
+                "settings_revision": self._settings_snapshot()["revision"],
                 "user_request": user_request,
                 "created_ids": {},
                 "entries": {"INSTRUCTIONS.md": {"before": before, "after": after}},
@@ -590,8 +631,13 @@ class CycleRuntime(
                     "status": "applied",
                     "replayed": True,
                 }
+            if (entry["state"] == "prepared" and plan.get("settings_revision") is not None
+                    and plan["settings_revision"] != self._settings_snapshot()["revision"]):
+                raise PCWError("Settings changed; read instructions and use instructions_prepare again")
+            plan = self._execution_plan(plan)
             change = plan["entries"]["INSTRUCTIONS.md"]
-            if policies(change["before"]["text"])["instructions_approval_required"]:
+            if (plan.get("instructions_approval_required", True)
+                    or entry["state"] == "prepared" and self._policies()["instructions_approval_required"]):
                 _text(confirmation, "current user's explicit confirmation")
             retry = entry["state"] != "prepared"
             if not (retry and self._matches(change["after"])) and not self._matches(
@@ -608,7 +654,7 @@ class CycleRuntime(
                     raise PCWError("Instructions write verification failed")
                 history = self._history_record(
                     proposal_id,
-                    force=policies(change["before"]["text"])["git_history_enabled"],
+                    force=self._policies()["git_history_enabled"],
                     plan=plan,
                 )
                 entry["state"] = "applied"
@@ -636,7 +682,7 @@ class CycleRuntime(
     def proposal_prepare(
         self,
         cycle_id: str,
-        changes: list[dict],
+        changes: list[ProposalChange],
         replacements: dict[str, str] | None = None,
         proposal_id: str | None = None,
         no_changes_reason: str | None = None,
@@ -653,7 +699,7 @@ class CycleRuntime(
         with self._cycle(cycle_id) as (records, cycle), self.engine._guard():
             self._require_work(cycle)
             instructions = self._instructions()
-            approval_required = _knowledge_approval_required(instructions["content"])
+            approval_required = self._policies()["knowledge_approval_required"]
             if summary is not None and (not isinstance(summary, str) or not summary.strip()
                                         or len(summary) > 240 or any(ord(c) < 32 for c in summary)):
                 raise PCWError("summary must be one nonempty line of at most 240 characters")
@@ -673,18 +719,7 @@ class CycleRuntime(
             ident = self._proposal_id(cycle_id, cycle, proposal_id, "knowledge")
             aliases, entries, touched = {}, {}, set()
             for change in changes:
-                if not isinstance(change, dict) or set(change) - {
-                    "key",
-                    "material_id",
-                    "expected_revision",
-                    "content",
-                    "description",
-                    "links",
-                    "path",
-                    "delete",
-                    "type",
-                    "status",
-                }:
+                if not isinstance(change, dict) or set(change) - PROPOSAL_CHANGE_FIELDS:
                     raise PCWError("Unknown change fields")
                 existing = change.get("material_id")
                 if existing is not None:
@@ -755,9 +790,12 @@ class CycleRuntime(
                             metadata[field] = change[field]
                 validate_metadata(metadata)
                 if "description" in change:
-                    if not isinstance(change["description"], str):
-                        raise PCWError("description must be text")
                     metadata["description"] = change["description"]
+                body_changed = before is None or content != _parse(before["text"])[1]
+                if body_changed and "description" not in change:
+                    raise PCWError("Supply description for a new or changed body after reviewing its content and applicability")
+                if body_changed or "description" in change:
+                    validate_description(metadata, required=True)
                 if "path" in change:
                     destination = self.engine._knowledge_path(change["path"])
                     path = destination.relative_to(self.engine.root).as_posix()
@@ -779,11 +817,14 @@ class CycleRuntime(
             if project_count > 1:
                 raise PCWError("Keep one canonical project record; update or consolidate the existing description")
 
-            limit = policies(instructions["content"])["material_max_tokens"]
+            limit = self._policies()["material_max_tokens"]
             if limit is not None:
                 exceeded = []
                 for target_id, entry in entries.items():
                     if entry["after"] is not None:
+                        if (entry["before"] is not None and
+                                entry["after"]["content"] == _parse(entry["before"]["text"])[1]):
+                            continue
                         count = self.engine._get_chunker().count(
                             entry["after"]["content"]
                         )
@@ -827,6 +868,10 @@ class CycleRuntime(
             mapping = {_id(k): resolve(v) for k, v in (replacements or {}).items()}
             deleted = {key for key, entry in entries.items() if entry["after"] is None}
             self.engine.assert_no_foreign_incoming(deleted)
+            moved = {key for key, entry in entries.items()
+                     if entry["before"] and entry["after"] and
+                     entry["before"]["path"] != entry["after"]["path"]}
+            self._assert_no_foreign_rename_incoming(moved)
             survivors = (set(self.engine.catalog) | set(entries)) - deleted
             if any(
                 old not in deleted or new not in survivors
@@ -838,7 +883,7 @@ class CycleRuntime(
             # Mechanical incoming-link consequences are part of the same review.
             for material in self.engine.materials.values():
                 if material.id not in entries and any(
-                    link in deleted for link in material.links
+                    link in deleted or link in moved for link in material.links
                 ):
                     entries[material.id] = {
                         "before": self._snapshot(material),
@@ -866,14 +911,24 @@ class CycleRuntime(
                 after["metadata"]["links"] = list(
                     dict.fromkeys(link for link in links if link != key)
                 )
-                after["text"] = (
-                    "---\n"
-                    + yaml.safe_dump(
-                        after["metadata"], sort_keys=False, allow_unicode=True
-                    )
-                    + "---\n"
-                    + after.pop("content")
-                )
+            final_catalog = {i: m for i, m in self.engine.catalog.items() if i not in deleted}
+            final_owners = dict(self.engine.owners)
+            for key, entry in entries.items():
+                after = entry["after"]
+                if after:
+                    final_catalog[key] = Material(key, after["path"], after["metadata"], after["content"])
+                    final_owners[key] = self.engine.workspace
+            codec = self.engine.link_codec(final_catalog, final_owners)
+            previous_codec = self.engine.link_codec()
+            for key, entry in entries.items():
+                after = entry["after"]
+                if after is None:
+                    continue
+                display_aliases = previous_codec.display_aliases(
+                    _parse(entry['before']['text'])[0].get('links', []), key
+                ) if entry['before'] else {}
+                after['link_ids'] = list(after['metadata']['links'])
+                after["text"] = codec.record_text(after["metadata"], after.pop("content"), aliases=display_aliases)
                 after.pop("metadata")
                 after["fingerprint"] = _revision(after["text"])
             plan = {
@@ -884,8 +939,22 @@ class CycleRuntime(
                 "entries": entries,
                 "tmp_revision": self._tmp_revision(cycle_id),
                 "instructions_revision": instructions["revision"],
+                "settings_revision": self._settings_snapshot()["revision"],
                 "knowledge_approval_required": approval_required,
             }
+            linked_ids = {target for entry in entries.values() for side in ('before', 'after')
+                          for target in (entry.get(side) or {}).get('link_ids', [])}
+            plan['link_targets'] = {}
+            for target in linked_ids:
+                material = final_catalog.get(target) or self.engine.catalog.get(target)
+                if material:
+                    plan['link_targets'][target] = {
+                        'id': target,
+                        'title': next((line[2:].strip() for line in material.content.splitlines()
+                                       if line.startswith('# ')), target),
+                        'path': material.path,
+                        'workspace': final_owners.get(target, self.engine.owners.get(target)),
+                    }
             if transformations is not None or mapping:
                 plan["transformations"] = validate_transformations(transformations, entries, resolve, mapping)
             if summary is not None:
@@ -895,9 +964,32 @@ class CycleRuntime(
             state = "prepared" if changes else "no_changes"
             return self._save_plan(records, cycle, plan, state)
 
-    @staticmethod
-    def _effects(plan):
+    def _plan_codec(self, plan, side):
+        catalog, owners = dict(self.engine.catalog), dict(self.engine.owners)
+        for ident, entry in plan["entries"].items():
+            snapshot = entry.get(side)
+            if snapshot:
+                metadata, body = _parse(snapshot["text"])
+                catalog[ident] = Material(ident, snapshot["path"], metadata, body)
+                owners[ident] = self.engine.workspace
+            else:
+                catalog.pop(ident, None)
+                owners.pop(ident, None)
+        return self.engine.link_codec(catalog, owners)
+
+    def _assert_no_foreign_rename_incoming(self, moved):
+        for material in self.engine.catalog.values():
+            if self.engine.owners[material.id] != self.engine.workspace and set(material.links) & moved:
+                raise PCWError(
+                    f"Rename would change links in material {material.id} in context "
+                    f"{self.engine.owners[material.id]}; explicitly update that context through its own reviewed proposal first"
+                )
+
+    def _effects(self, plan):
         result = []
+        instructions = plan.get("kind") in {"instructions", "project"}
+        old_codec = self._plan_codec(plan, "before") if not instructions else None
+        new_codec = self._plan_codec(plan, "after") if not instructions else None
         for ident, entry in sorted(plan["entries"].items()):
             before, after = entry["before"], entry["after"]
             instructions = plan.get("kind") in {"instructions", "project"}
@@ -911,6 +1003,9 @@ class CycleRuntime(
                 if after and not instructions
                 else []
             )
+            if not instructions:
+                old_links = before.get('link_ids') if before and 'link_ids' in before else old_codec.decode(old_links, ident)
+                new_links = after.get('link_ids') if after and 'link_ids' in after else new_codec.decode(new_links, ident)
             result.append(
                 {
                     "id": ident,
@@ -950,6 +1045,8 @@ class CycleRuntime(
             if snapshot:
                 text, path = body(snapshot), snapshot["path"]
             else:
+                if ident in plan.get('link_targets', {}):
+                    return dict(plan['link_targets'][ident])
                 material = self.engine.materials.get(ident)
                 text, path = (
                     (material.content, material.path)
@@ -1016,6 +1113,10 @@ class CycleRuntime(
                         "before": old_description,
                         "after": new_description,
                     }
+                old_navigation = _parse(before["text"])[0].get("links", []) if before else []
+                new_navigation = _parse(after["text"])[0].get("links", []) if after else []
+                if old_navigation != new_navigation:
+                    changes[-1]["navigation_changes"] = {"before": old_navigation, "after": new_navigation}
         return changes
 
     @staticmethod
@@ -1101,6 +1202,27 @@ class CycleRuntime(
         )
 
     def _preflight(self, plan, retry):
+        if plan.get('kind') not in {'instructions', 'project'}:
+            codec = self._plan_codec(plan, 'after')
+            for ident, change in plan['entries'].items():
+                after = change['after']
+                if after is None:
+                    continue
+                try:
+                    links = codec.decode(_parse(after['text'])[0].get('links', []), ident)
+                    if any(target not in codec.catalog for target in links) or (
+                        'link_ids' in after and links != after['link_ids']
+                    ):
+                        raise PCWError('Navigation target identity changed')
+                except PCWError as exc:
+                    raise PCWError('Proposal conflict: navigation target changed; read it and prepare and present again') from exc
+        moved = {ident for ident, entry in plan["entries"].items()
+                 if entry["before"] and entry["after"] and
+                 entry["before"]["path"] != entry["after"]["path"]}
+        self._assert_no_foreign_rename_incoming(moved)
+        for material in self.engine.materials.values():
+            if material.id not in plan["entries"] and set(material.links) & moved:
+                raise PCWError("Proposal conflict: a new incoming rename link appeared; prepare and present again")
         for ident, entry in plan["entries"].items():
             before, after = entry["before"], entry["after"]
             material = self.engine.materials.get(ident)
@@ -1166,6 +1288,7 @@ class CycleRuntime(
                     "status": "applied",
                     "replayed": True,
                 }
+            plan = self._execution_plan(plan)
             # Finish an already-started authorized write before reviewing it under
             # new rules; otherwise a mid-recovery edit could strand partial data.
             if (
@@ -1176,9 +1299,12 @@ class CycleRuntime(
                 raise PCWError(
                     "Instructions changed; read them and prepare the knowledge proposal again"
                 )
-            if plan.get("knowledge_approval_required", True):
+            if (entry["state"] == "prepared" and plan.get("settings_revision") is not None
+                    and plan["settings_revision"] != self._settings_snapshot()["revision"]):
+                raise PCWError("Settings changed; read settings and use proposal_prepare again")
+            if (plan.get("knowledge_approval_required", True)
+                    or entry["state"] == "prepared" and self._policies()["knowledge_approval_required"]):
                 _text(confirmation, "current user's explicit confirmation")
-            plan = self._execution_plan(plan)
             self.engine.assert_no_foreign_incoming(
                 [i for i, e in plan["entries"].items() if e["after"] is None]
             )
@@ -1278,7 +1404,7 @@ class CycleRuntime(
                 if not cancel and cycle.get("purpose") != "audit":
                     temporary_revision = self._tmp_revision(cycle_id)
                     plans = [
-                        self._load_plan(cycle_id, key, entry)
+                        self._execution_plan(self._load_plan(cycle_id, key, entry))
                         for key, entry in cycle["proposals"].items()
                     ]
                     instructions_only = cycle.get("purpose") == "instructions"
@@ -1289,6 +1415,8 @@ class CycleRuntime(
                         else plan.get("kind", "knowledge") == "knowledge"
                         and plan.get("tmp_revision") == temporary_revision
                         and plan.get("instructions_revision") == instructions_revision
+                        and (plan.get("settings_revision") is None
+                             or plan["settings_revision"] == self._settings_snapshot()["revision"])
                         for plan in plans
                     )
                     if not reviewed:

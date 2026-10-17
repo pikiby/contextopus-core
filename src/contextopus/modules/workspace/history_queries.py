@@ -5,7 +5,8 @@ from .runtime import PCWError, _id, _parse
 from .history_events import read_event
 
 
-PERMANENT_PATHS = ["knowledge/", "INSTRUCTIONS.md", "PROJECT.md"]
+SETTINGS_HISTORY_PATH = ".contextopus-settings.json"
+PERMANENT_PATHS = ["knowledge/", "INSTRUCTIONS.md", "PROJECT.md", SETTINGS_HISTORY_PATH]
 
 
 def page(offset, limit):

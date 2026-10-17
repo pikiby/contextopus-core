@@ -14,8 +14,8 @@ def base(tmp_path):
     factory = Factory()
     bundle = packaged_bundle()
     bundle['documents'] = [
-        {'key': 'guide', 'type': 'guide', 'content': '# Product guide\n\nVerified product documentation.\n'},
-        {'key': 'template', 'type': 'template', 'content': '# Product template\n\nPurpose: ...\n'}]
+        {'key': 'guide', 'type': 'guide', 'description': 'Explains the verified product workflow and where its requirements apply.', 'content': '# Product guide\n\nVerified product documentation.\n'},
+        {'key': 'template', 'type': 'template', 'description': 'Provides the fields to review when authoring product instructions.', 'content': '# Product template\n\nPurpose: ...\n'}]
     return BaseContext(tmp_path, runtime_factory=lambda root, context:
         CycleRuntime(root, context, provider_factory=factory), bundle=bundle)
 
@@ -24,6 +24,15 @@ def install(service):
     result = service.install(service.plan()['plan_revision'])
     assert result['status'] == 'installed', result
     return result
+
+
+def settings(service, changes):
+    runtime = service.runtime_factory(service.layout.root, service.status()['managed_context'])
+    try:
+        preview = runtime.settings_preview(changes, 'Update the documentation context policy for this test')
+        runtime.settings_apply(preview['preview_revision'], 'Approve the exact shown documentation settings')
+    finally:
+        runtime.close()
 
 
 def test_passive_preview_then_shared_index_and_history(base):
@@ -78,7 +87,8 @@ def test_preserve_custom_instructions_role_and_ids(base):
     instructions.write_text(custom)
     other = base.runtime_factory(base.layout.root, 'other')
     try:
-        other.workspace_create('other-create', base.bundle['instructions'], '# Other project', 'Create another context')
+        other.workspace_create('other-create', base.bundle['instructions'], '# Other project', 'Create another context',
+                               settings=base.bundle['settings'], project_description='Defines the independent context used to verify documentation role selection.')
     finally:
         other.close()
     base.select('other')
@@ -104,7 +114,7 @@ def test_stale_plan_and_unmanaged_collision(base):
 def test_changed_approval_requires_real_confirmation(base):
     install(base)
     instructions = base._context_path(base.status()['context']) / 'INSTRUCTIONS.md'
-    instructions.write_text(instructions.read_text().replace('knowledge_approval_required: false', 'knowledge_approval_required: true'))
+    settings(base, {'knowledge_approval_required': True})
     base.bundle['documents'][0]['content'] += '\nNew documentation\n'
     preview = base.plan()
     assert preview['approval_required'] is True
@@ -116,7 +126,7 @@ def test_changed_approval_requires_real_confirmation(base):
 def test_changed_limit_needs_split_preserves_docs(base):
     install(base)
     instructions = base._context_path(base.status()['context']) / 'INSTRUCTIONS.md'
-    instructions.write_text(instructions.read_text().replace('material_max_tokens: null', 'material_max_tokens: 20'))
+    settings(base, {'material_max_tokens': 20})
     custom = instructions.read_text()
     before = copy.deepcopy(base._read()['managed'])
     base.bundle['documents'][0]['content'] += '\n' + 'long text ' * 100
@@ -162,7 +172,7 @@ def test_managed_update_preserves_user_added_links(base):
     runtime = base.runtime_factory(base.layout.root, state['context'])
     try:
         cycle = runtime.startup('custom-links')['cycle_id']
-        created = runtime.proposal_prepare(cycle, [{'key': 'custom', 'content': '# User reference\nAdditional context'}])
+        created = runtime.proposal_prepare(cycle, [{'key': 'custom', 'content': '# User reference\nAdditional context', 'description': 'Explains the user reference conditions needed by the product guide.'}])
         runtime.proposal_apply(cycle, created['proposal_id'], created['revision'])
         user_id = created['created_ids']['custom']
         guide_id = state['managed']['documents']['guide']['id']
@@ -199,3 +209,80 @@ def test_crash_after_preparation_recovers_saved_proposal(base):
     assert saved['stage'] == 'prepare'
     assert base.install(preview['plan_revision'])['status'] == 'installed'
     assert len(base._read()['managed']['documents']) == 2
+
+
+def test_bundle_descriptions_are_authored_and_description_only_updates_are_reviewed(base):
+    assert all(item.get('description', '').strip() for item in packaged_bundle()['documents'])
+    install(base)
+    state = base._read()
+    entry = state['managed']['documents']['guide']
+    runtime = base.runtime_factory(base.layout.root, state['context'])
+    try:
+        original = runtime.read(material_id=entry['id'])
+        assert original['description'] == base.bundle['documents'][0]['description']
+    finally:
+        runtime.close()
+    incoming = 'Explains the product workflow, verified limits and newly documented applicability.'
+    base.bundle['documents'][0]['description'] = incoming
+    preview = base.plan()
+    assert preview['status'] == 'ready' and preview['changes'][0]['description'] == incoming
+    install(base)
+    runtime = base.runtime_factory(base.layout.root, state['context'])
+    try:
+        updated = runtime.read(material_id=entry['id'])
+        assert updated['description'] == incoming and updated['content'] == original['content']
+        assert updated['id'] == original['id']
+    finally:
+        runtime.close()
+
+
+def test_managed_update_preserves_user_description_as_conflict(base):
+    from contextopus.modules.workspace.runtime import _parse
+    import yaml
+    install(base)
+    state = base._read()
+    entry = state['managed']['documents']['guide']
+    path = base._context_path(state['managed']['context']) / entry['path']
+    metadata, body = _parse(path.read_text())
+    metadata['description'] = 'Describes the user-specific workflow and its verified exceptions.'
+    path.write_text('---\n' + yaml.safe_dump(metadata, allow_unicode=True) + '---\n' + body)
+    before = path.read_bytes()
+    base.bundle['documents'][0]['content'] += '\nUpstream behavior.\n'
+    plan = base.plan()
+    assert plan['status'] == 'conflicts' and plan['conflicts'][0]['reason'] == 'user_modified'
+    assert base.install(plan['plan_revision'])['status'] == 'conflicts'
+    assert path.read_bytes() == before
+
+
+def test_native_link_alias_reformat_does_not_look_like_user_content_change(base):
+    from contextopus.modules.workspace.runtime import _parse
+    import yaml
+    base.bundle['documents'][0]['links'] = ['template']
+    install(base)
+    state = base._read()
+    entry = state['managed']['documents']['guide']
+    path = base._context_path(state['managed']['context']) / entry['path']
+    metadata, body = _parse(path.read_text())
+    assert all(link.startswith('[[') for link in metadata['links'])
+    metadata['links'] = [link.split('|', 1)[0] + '|Readable user display]]' for link in metadata['links']]
+    path.write_text('---\n' + yaml.safe_dump(metadata, allow_unicode=True) + '---\n' + body)
+    assert base.plan()['status'] == 'current'
+    base.bundle['documents'][0]['content'] += '\nUpstream behavior.\n'
+    assert base.plan()['conflicts'] == []
+    install(base)
+    assert base.plan()['status'] == 'current'
+
+
+def test_missing_native_target_is_a_reviewable_conflict_with_no_rewrite(base):
+    base.bundle['documents'][0]['links'] = ['template']
+    install(base)
+    state = base._read()
+    root = base._context_path(state['managed']['context'])
+    guide = root / state['managed']['documents']['guide']['path']
+    target = root / state['managed']['documents']['template']['path']
+    target.unlink()
+    before = guide.read_bytes()
+    plan = base.plan()
+    assert any(item['reason'] == 'navigation_conflict' for item in plan['conflicts'])
+    assert base.install(plan['plan_revision'])['status'] == 'conflicts'
+    assert guide.read_bytes() == before and not target.exists()

@@ -1,7 +1,7 @@
 {
   "id": "distance_jump",
-  "version": "1.0.0",
-  "purpose": "Cut at the first unusually large positive distance gap.",
+  "version": "2.0.0",
+  "purpose": "Group material keys, evaluate the full distance-bounded pool, then cap results.",
   "parameters_schema": {
     "type": "object",
     "properties": {
@@ -31,6 +31,6 @@
     "min_jump": 0.02,
     "multiplier": 3.0
   },
-  "when_to_use": "Use for a compact relevance cluster. Raise multiplier or min_jump to retain more. Uses the arithmetic median of positive gaps for legacy compatibility.",
-  "how_to_adjust": "Use for a compact relevance cluster. Raise multiplier or min_jump to retain more. Uses the arithmetic median of positive gaps for legacy compatibility."
+  "when_to_use": "Use for a compact relevance cluster. Distances do not establish confidence.",
+  "how_to_adjust": "N caps results after the jump evaluation. Raise multiplier or min_jump to retain more; d_max bounds relevance before gap analysis. Materials use document representatives; fragments use individual parts. Arithmetic median of positive gaps is preserved."
 }

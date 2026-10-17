@@ -14,11 +14,11 @@ Core's `core/analytics/operations.sqlite3` records operation metadata. Its `sear
 
 Search text and source bodies are not copied into this table. Candidate metadata has one owner; the generic operation result links to it. Git remains the source of historical permanent text. Workspace events can link the search to exact Git versions; a fingerprint alone cannot recover missing historical instructions. Imports of a user-selected host transcript can supply the actual question, final answer, external work and token usage that Core does not observe.
 
-The response distinguishes the retrieval candidate limit from the evidence cap. An event can retain the full considered pool while retrieval itself was capped, or retain only part of a larger pool. Neither case supports a claim about all potentially relevant records.
+Compact responses omit the candidate snapshot; `core.search_event` exposes the full retained evidence separately. The evidence format and shared selection contract are versioned independently of the package and algorithm. The response distinguishes the retrieval candidate limit from the evidence cap. An event can retain the full considered pool while retrieval itself was capped, or retain only part of a larger pool. Neither case supports a claim about all potentially relevant records.
 
 ## Inspect a bounded episode
 
-The following are `contextopus_query` arguments. The selected root can be supplied as `work_root`.
+The following are `read` tool arguments. The selected root can be supplied as `work_root`.
 
 ```json
 {"operation":"core.search_events","arguments":{"context":"example","task_id":"task-id","limit":20}}
@@ -38,9 +38,11 @@ Inspect only the relevant events. Match their returned IDs and revisions to the 
 {"operation":"core.search_replay","arguments":{"event_id":"returned-event-id","selection":{"algorithm":"nearest_n","parameters":{"N":8}}}}
 ```
 
-Replay applies the **current implementation** of the requested algorithm to the recorded candidate pool. It does not generate embeddings or query today's corpus. The response reports original and alternative algorithm versions/settings, added/removed materials (or distinct fragments), and whether the snapshot or original retrieval was truncated. It cannot reconstruct an older algorithm implementation merely from its version string.
+Replay applies the **current implementation** of the requested algorithm to the recorded candidate pool. It does not generate embeddings or query today's corpus. The response reports original and alternative algorithm versions/settings, added/removed materials (or distinct fragments), and whether the snapshot or original retrieval was truncated. It cannot reconstruct an older algorithm implementation merely from its version string. `replay_kind: "current_counterfactual"` and `original_execution_reproduced: false` make this explicit. Recorded original versions, boundaries and grouping order are preserved. A missing historical selection contract stays unknown rather than being labelled as contract 2.
 
-Optional `relevant_keys` is a list of caller-labelled relevant material keys, for example `[["workspace","example","record-id"]]`. Replay then reports precision and recall against those labels. State who supplied the labels and what they cover. These are not automatic measurements of answer correctness or global recall. Fragment-mode replay reports changes but does not accept material-level relevance labels.
+`candidate_snapshot_truncated` and `retrieval_truncated` distinguish evidence loss from the original candidate cap; compatibility `snapshot_truncated` is true for either. `original_selection_complete` checks whether all originally returned units are represented by selected flags in the retained snapshot (null if the old selected count is unavailable). Original results outside the retained snapshot cannot appear in the removed list. `same_implementation` compares recorded algorithm version and shared selection contract; it does not establish result quality or recreate the historical execution. Even a complete retained snapshot describes only the structurally eligible indexed pool at the time.
+
+Optional `relevant_keys` is a list of caller-labelled relevant material keys, for example `[["workspace","example","record-id"]]`. Replay then reports precision and recall against those labels. State who supplied the labels and what they cover. When original selections are missing or their completeness is unknown, the original score is null; `original_recorded_subset` scores only observed selected flags. These are not automatic measurements of answer correctness or global recall. Fragment-mode replay reports changes but does not accept material-level relevance labels.
 
 ## Interpret the evidence
 

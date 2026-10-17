@@ -52,20 +52,40 @@ The Windows protocol holds the root advisory guard continuously, acquires legacy
 
 Windows directory-renaming restrictions are documented in Microsoft's [FILE_RENAME_INFORMATION remarks](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information).
 
-## Workspace records (format 3)
+## Workspace records (format 4)
 
-`modules/workspace/workspace_contexts/<context>/INSTRUCTIONS.md` owns that context's rules. `knowledge/*.md` contains all permanent record types. YAML `id` is the stable link target; descriptive filenames can change. `type` is open vocabulary (`knowledge`, `task`, `goal`, `project`, `decision` are examples); `status` is optional. Plans and goals remain intentions until evidence establishes completion.
+`modules/workspace/workspace_contexts/<context>/INSTRUCTIONS.md` owns that context's complete free-text rules. Machine policies use the existing Core configuration hierarchy, with migrated context values in `core/configuration/contexts/workspace/<context>.json`. `knowledge/*.md` contains all permanent record types. YAML `id` is the stable identity used by the API; on-disk YAML links are quoted Obsidian wikilinks to real vault paths. Descriptive filenames can change. `type` is open vocabulary (`knowledge`, `task`, `goal`, `project`, `decision` are examples); `status` is optional. Plans and goals remain intentions until evidence establishes completion.
 
 The project description is one indexed `type: project` record. Tasks use the same read/search/proposal/link/history operations. There is no separate Current or mutable duplicate PROJECT file. `tmp/<cycle>/` holds temporary results and exact pending proposals; cleanup still follows result review and the selected approval policy. Custom instructions are not silently replaced by new defaults.
 
 RAG belongs to Core. Context, type and status predicates narrow eligible records before vector top-N. Cross-context retrieval supplies evidence, not another context's rules. `workspace.contexts` lists actual directories, `workspace.project_read` reads one selected project, `workspace.projects_search` searches indexed project records and returns bounded excerpts. Discovery starts no work cycle and creates nothing.
 
-Migration snapshots sources/control, moves legacy Current fields and PROJECT into records, reconciles the shared index, then marks format 3 complete. Original pending proposal text/digests remain immutable; technical execution overlays adapt paths and metadata without granting approval. Interrupted transitions reuse their receipt. Git tracks permanent records and rules; tmp, indexes and service state stay outside memory history.
+Migration snapshots sources/control, moves legacy Current fields and PROJECT into records, extracts only known machine policy keys from instruction frontmatter into Core configuration, converts native navigation links, reconciles the shared index, then marks format 4 complete. The remaining instruction text and user frontmatter retain their original bytes. Original pending proposal text/digests remain immutable; technical execution overlays adapt paths and metadata without granting approval. A legacy instruction proposal that changes machine settings requires a separate settings review and renewed instruction preparation. Interrupted transitions reuse their receipt. Git tracks permanent records, rules and historical settings; tmp, indexes and service state stay outside memory history.
 
 ### Record provenance in Git
 
 Workspace proposes Git history in the standard creation settings. Reviewed transformations describe merge/split/replacement edges between stable record IDs. Their before/after paths and fingerprints, summary and cycle/operation are captured with the permanent snapshot and stored in ordinary Git commit trailers. Git parents provide version ordering; declared transformations provide material ancestry. Native Git query operations filter by ID/path/date/message, search removed text, describe commits and read bounded diffs or old records. Old commits without declarations remain navigable by path/text and are explicitly marked as lacking provenance.
 
+
+### Workspace settings history
+
+Machine policies live in Core configuration at
+`core/configuration/contexts/workspace/<context>.json`; `INSTRUCTIONS.md` keeps the
+complete free-form user rules. The Git-only path `.contextopus-settings.json`
+records effective settings and their origins. It has no live worktree copy, and
+the Git index marks it `skip-worktree`. History read, diff and search accept that
+path. Durable previews and apply receipts live in the Workspace control directory
+under `settings/`; retries retain the exact approved revision. Settings writes and
+pending Git commits have separate outcomes. Disabling history still records the
+final change under the prior policy.
+
+New analytics events retain a separate settings basis in
+`instructions_ref.settings_revision` and `instructions_ref.settings_ref`, plus a
+Git reference with `role: workspace_settings`. The free-text instruction revision
+retains its own meaning. Analysis distinguishes settings eras even when that
+instruction revision is unchanged. Missing historical settings remain unknown;
+today's configuration never supplies a replacement. Settings-only observations
+do not read the instructions and mark that part of their basis unknown.
 
 ### Operation evidence and analysis
 

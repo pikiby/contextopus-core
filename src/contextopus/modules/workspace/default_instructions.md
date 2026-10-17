@@ -1,20 +1,12 @@
----
-allow_implicit_updates: false
-knowledge_approval_required: false
-instructions_approval_required: true
-git_history_enabled: true
-material_max_tokens: 1024
-create_required_sources: false
----
 # Project instructions
 
 ## Knowledge approval
 
-Show the exact knowledge changes in chat before applying them. The `knowledge_approval_required` frontmatter setting controls whether to wait for user approval: `false` means apply after showing; `true` means wait for explicit approval of the shown revision. The independent `instructions_approval_required` setting controls approval of instruction edits: true (also the default when absent) waits for explicit approval; false applies the shown revision without another prompt. The current instructions determine approval even when an edit disables it. Edit instructions through `w-settings` (the canonical Contextopus `instructions` procedure).
+Show the exact knowledge changes in chat before applying them. The `knowledge_approval_required` effective machine setting controls whether to wait for user approval: `false` means apply after showing; `true` means wait for explicit approval of the shown revision. The independent `instructions_approval_required` setting controls approval of instruction edits: true (also the default when absent) waits for explicit approval; false applies the shown revision without another prompt. The current effective policy determines approval even when a proposed change disables it. Machine settings live in Core configuration; INSTRUCTIONS is this complete free-form text. Edit instructions through `w-settings` (the canonical Contextopus `instructions` procedure).
 
 `allow_implicit_updates` separately controls starting a work cycle without an explicit Workspace invocation such as `w`. When false, only independent reading is allowed without that invocation. Creation, switching context and changing instructions still require the user's clear direction. `git_history_enabled` enables local history of permanent data; `material_max_tokens` optionally limits each final knowledge body, with null disabling the limit.
 
-The standard material limit is 1024 tokens, counted with the indexing tokenizer. Reads load whole materials: five bodies at this limit contribute at most 5120 tokens before metadata. This is a practical starting bound on retrieval size, not a measured semantic optimum or a target to fill. Keep each material focused on one question; split larger topics into linked materials while retaining their conditions. The user may request a different limit or disable it through the instructions procedure.
+The standard material limit is 1024 tokens, counted with the indexing tokenizer. Reads load whole materials: five bodies at this limit contribute at most 5120 tokens before metadata. This is a practical starting bound on retrieval size, not a measured semantic optimum or a target to fill. Keep each material focused on one question; split larger topics into linked materials while retaining their conditions. The user may request a different limit or disable it through the Workspace settings review/apply procedure.
 
 ## Goals and limits
 
@@ -28,7 +20,7 @@ Action reports, intermediate calculations, working notes and unfinished investig
 
 ## Structure and maintenance
 
-Compare results with existing knowledge. Each material answers one independent question. Sections usually needed for different queries should become separate linked materials, retaining their conditions and evidence. Read a mixed material completely before splitting it; prepare its replacement topics and the treatment of its original ID and incoming links together. Add a concise description of each topic so an agent can choose useful links without loading every neighbor. Do not create a separate material for every individual fact.
+Compare results with existing knowledge. Each material answers one independent question. Sections usually needed for different queries should become separate linked materials, retaining their conditions and evidence. Read a mixed material completely before splitting it; prepare its replacement topics and the treatment of its original ID and incoming links together. Supply an author-written description of the subject, useful conditions and applicability for every new record and actual body change; review it against the body. A title or clipped opening does not replace it. Readers use descriptions to choose materials and useful links before reading whole bodies. Do not create a separate material for every individual fact.
 
 Keep accurate current descriptions, replacing outdated claims and consolidating repetition. All permanent content lives in typed records under knowledge/. The project record describes current purpose and boundaries; task records retain the goal, constraints, verified state, next step, blockers, results and status as needed. Goals and decisions may have their own types. Choose the appropriate type and reuse existing categories when they fit; types are not limited to these examples. Search for existing state before creating another record, and link related records across types. A task or goal is not evidence of completed work. Maintain current state rather than a task-by-task change log. Git, when enabled, retains earlier permanent revisions.
 

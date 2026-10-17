@@ -379,7 +379,7 @@ class RagIndex:
             raise ValueError("Invalid result limit")
         if candidate_limit is not None and (type(candidate_limit) is not int or not 1 <= candidate_limit <= 100000):
             raise ValueError('candidate_limit must be between 1 and 100000')
-        from .filtering import select, registry_for_layout
+        from .filtering import select, registry_for_layout, annotate_candidate_limit
         registry = self.algorithm_registry or registry_for_layout(self.layout)
         from .settings import Settings, matches_location
         request = dict(request or {})
@@ -409,7 +409,7 @@ class RagIndex:
                        'status':status, 'include_archived':include_archived,
                        'include':snapshot['values']['include'], 'exclude':snapshot['values']['exclude']},
                 candidate_pool_truncated=False)
-            result['diagnostics']['limits']['nearest'] = candidate_limit
+            annotate_candidate_limit(result['diagnostics'], candidate_limit)
             return result
         table = self._generic_table()
         if table is None:
@@ -498,6 +498,7 @@ class RagIndex:
         answer = finish(result, len(eligible))
         answer['diagnostics']['limits']['nearest'] = candidate_limit
         answer['diagnostics']['candidate_pool_truncated'] = candidate_limit is not None and len(eligible) > len(found)
+        annotate_candidate_limit(answer['diagnostics'], candidate_limit)
         return answer
 
     @staticmethod

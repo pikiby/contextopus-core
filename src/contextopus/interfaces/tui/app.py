@@ -249,6 +249,15 @@ class ContextopusApp(App):
             return False
         return True
 
+    async def perform_module_action(self, action, module, source=None):
+        try:
+            return await self.backend.module_action(action, module, source)
+        finally:
+            # A failed install/update can disable the old package. Never keep
+            # a stale enabled row if the mutation or its status refresh fails.
+            self.module_items = []
+            self.module_items = await self.backend.modules()
+
     async def update_module_source(self, module, source):
         if not source:
             return
@@ -256,9 +265,8 @@ class ContextopusApp(App):
         self.message = "Updating " + module + "…"
         self.draw()
         try:
-            result = await self.backend.module_action("update", module, source)
+            result = await self.perform_module_action("update", module, source)
             self.message = module + ": " + result["state"]
-            self.module_items = await self.backend.modules()
         except Exception as exc:
             self.message = str(exc)
         finally:
@@ -405,9 +413,8 @@ class ContextopusApp(App):
                 else:
                     self.message = verb + " " + module + "…"
                     self.draw()
-                    result = await self.backend.module_action(verb.lower(), module)
+                    result = await self.perform_module_action(verb.lower(), module)
                     self.message = module + ": " + result["state"]
-                    self.module_items = await self.backend.modules()
             elif action == "Error details":
                 self.page = "errors"
                 self.selected = 0

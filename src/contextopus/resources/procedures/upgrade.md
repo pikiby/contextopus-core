@@ -1,6 +1,6 @@
 # Upgrade PCW installation, data and skills
 
-This is the canonical Workspace upgrade procedure. It covers the old installation, selected data roots, context formats and host skills. Fetch referenced procedures through `procedure`; use `describe` only for unknown signatures. An upgrade does not authorize substantive changes to project knowledge or instructions.
+This is the canonical Workspace upgrade procedure. It covers the old installation, selected data roots, context formats and host skills. Fetch needed procedures through `guide(procedure=...)`; use `guide(operation=...)` only for unknown signatures. An upgrade does not authorize substantive changes to project knowledge or instructions.
 
 ## Resolve scope and preserve state
 
@@ -28,7 +28,7 @@ Use the destination explicitly for subsequent requests and run `core.index_upgra
 
 Install native per-user autostart with `contextopus --root <new root> service install`, then verify the single owner. `service start/stop/restart/status` and the TUI use the same lifecycle controls. Bind the persistent default with `contextopus root --set <new root>`; also pass the exact destination during rollout verification. Do not infer a shared Workspace selection from a process/session ID.
 
-Choose and preserve one Codex delivery mode. For literal `$w`, `$w-search`, `$w-create`, `$w-settings`, `$w-context`, `$w-analyze`, use the existing direct integration:
+Choose and preserve one Codex delivery mode. For literal `$w`, `$w-search`, `$w-create`, `$w-settings`, `$w-context`, `$w-analyze`, `$m`, use the existing direct integration:
 
 ```console
 contextopus integrate codex --user
@@ -40,7 +40,7 @@ Before switching from plugin delivery to direct integration, set only the known
 and `plugins."contextopus@contextopus".enabled` declarations to `false` in the
 native Codex TOML configuration, preserving unrelated values and both caches.
 Do not uninstall plugins to achieve this. The direct integration supplies one
-central HTTP MCP server and six bare user skills. Verify these exact bare names
+central HTTP MCP server and seven bare user skills. Verify these exact bare names
 in a fresh native session. Updating this installation uses the same direct mode;
 do not turn its plugin back on as an automatic upgrade step.
 
@@ -61,18 +61,26 @@ For manually installed native skills/configuration, preview `contextopus integra
 
 Avoid duplicate skill copies across roots a client already discovers. For example, Claude's user skills are also discoverable by OpenCode and Crush: after installing that shared copy, use `--config-only` for those clients. For Codex choose either enabled plugin skills plus its MCP, or bare user skills plus manual MCP; do not enable both copies. If switching modes, review previously managed user skills before removing them and never overwrite user edits. Genuine JSONC comments/trailing commas require the client's supported editor rather than destructive rewriting. Preserve unrelated MCP servers, settings and credentials, and never print whole configurations.
 
-Verify each actual fresh client connection: tools/list and a read such as `procedure(name="upgrade")` or `core.status` through that client. File presence, direct Python checks and the old session's working tools are not this proof. Verify that new requests reach the destination root and new process, while the old cache remains available. Report per-client verification separately and list remaining blockers honestly.
+Verify each actual fresh client connection: tools/list and a read such as `guide(procedure="upgrade")` or `core.status` through that client. File presence, direct Python checks and the old session's working tools are not this proof. Verify that new requests reach the destination root and new process, while the old cache remains available. Report per-client verification separately and list remaining blockers honestly.
 
 ## Context format procedure
 
-1. Resolve the user's exact context, list of contexts or bounded directories. Follow [context selection](procedure:workspace#context-selection). Enumerate only those directories, never the whole computer.
+1. Resolve the user's exact context, list of contexts or bounded directories. Follow [context selection](procedure:workspace). Enumerate only those directories, never the whole computer.
 2. Call `upgrade_plan` for each selected existing context. It returns compatibility, the source revision, technical changes, saved unfinished work, blockers and `project_description`. If a recognized never-initialized legacy context lacks INSTRUCTIONS, provide the exact human-reviewed full `instructions_content` to both plan and apply, together with the actual `instructions_confirmation` on apply. Never infer missing rules from old goals or substitute bundled defaults without approval. Lost rules from an initialized context remain a restoration blocker. Inspect these even when the format is already current; compatibility does not mean that work is finished or project content is complete. Explain each unfinished work item using its request/task and material titles; distinguish prepared proposals from applied changes awaiting closure. An open record does not prove that an agent is running. An unknown structure requires inspection/restoration; do not guess its version. An already compatible format requires no rewrite merely because the plugin was updated.
 3. Show affected paths and explain that the snapshot retains the entire workspace, including tmp, plus its control state. Format 2 places stable IDs in YAML, gives knowledge files descriptive names, converts legacy source blocks, and indexes them in the common category-aware RAG. Compatible unfinished work keeps its IDs, immutable proposals and approval states; the migration retains technical path/format mappings for later application. Do not apply, discard or cancel that work. If `ready` is false, describe the exact blocker and affected work. Otherwise call `upgrade_apply(expected_revision, user_request)` for a direct request, or `upgrade_apply(expected_revision, automatic=true)` for detected incompatibility. Do not invent a user request or approval. Use `resume_revision` for a pending migration.
 4. Report verified format, backup paths, preservation of unfinished work, project-description status and any pending index repair. `missing`, `empty` or `placeholder` means the project record still needs content; state that explicitly. `present` does not establish accuracy or completeness. Retry interrupted migration using its original revision and retained snapshot. Source conflicts require inspection. Format completion requires both file conversion and successful shared indexing; `index_pending` is not completion. Resume the original Contextopus operation after success, under its original active context's instructions.
-5. Preserve custom INSTRUCTIONS verbatim. A new default template does not authorize replacement. Reclassifying old goals, splitting mixed knowledge and revising instructions are separate requested rework/instructions procedures. Do not turn format migration into substantive editing.
+5. Preserve the complete custom INSTRUCTIONS free-form body and unrelated frontmatter verbatim; move only recognized machine policy keys into Core configuration, retaining effective values. A new default template does not authorize replacing user rules. Reclassifying old goals, splitting mixed knowledge and revising instructions are separate requested rework/instructions procedures. Do not turn format migration into substantive editing.
 
-If the user also requested filling the project description, follow the [work cycle](procedure:workspace#work-cycle): read workspace instructions and relevant existing knowledge, verify missing facts from permitted project sources, then prepare the supported description with `proposal_prepare` and `type: project`. Show its actual text and apply through `proposal_apply` under the workspace approval policy. Do not invent goals or apply another task's pending proposal. Otherwise report the unfilled description as remaining content work.
+If the user also requested filling the project description, follow the [work cycle](procedure:workspace): read workspace instructions and relevant existing knowledge, verify missing facts from permitted project sources, then prepare the supported description with `proposal_prepare` and `type: project`. Show its actual text and apply through `proposal_apply` under the workspace approval policy. Do not invent goals or apply another task's pending proposal. Otherwise report the unfilled description as remaining content work.
 
 ## Unified records (format 3)
 
 Current is no longer separate storage. Upgrade migrates every task ID, field and body into typed searchable records, and PROJECT into the canonical project record. Existing knowledge receives a type where absent. The shared index, links and technical proposal paths are reconciled together. Pending original proposal/approval documents stay immutable; their technical overlays do not approve or apply them. Resume old project proposals through ordinary `proposal_apply` using the original revision and required confirmation. After verified migration old Current/PROJECT sources exist only in recovery snapshots, not as competing active files. A missing project description remains missing; do not fabricate project content. Preserve custom INSTRUCTIONS and use the instructions procedure under their current approval policy for substantive rule edits.
+
+## Direct 1.1 or 1.2 to 1.3
+
+Package release 1.3 and Workspace format 4 are separate versions. Apply all required format transitions directly; an intermediate 1.2 installation is not required. Preview/preserve policy values, free-form rules, YAML IDs, graph endpoints, required sources, descriptions, history, cycles, tmp, immutable proposals and approval revisions. Test the same transition and idempotent/interrupted retry on a coherent copy before live cutover; restore package, data and client configuration together on rollback. Do not run old code directly against incompatible converted data.
+
+Format 4 moves machine flags into Core configuration and makes Obsidian navigation explicit while retaining stable YAML identity. Inspect unresolved/ambiguous links rather than inventing targets. Description gaps require a separate author-reviewed repair proposal from actual content; a format-ready context can still have missing descriptions. Do not overwrite custom rules with defaults or cancel pending work. A non-equivalent pending proposal blocks only its apply with a reprepare path; old approval does not authorize different meaning.
+
+After an authorized package update, refresh managed skills and the used procedures, restart one shared MCP owner, and verify guide/read/write plus a real context search/read from each targeted actual client. Compatibility aliases are explicit temporary CONTEXTOPUS_LEGACY_TOOLS=1 mode, not the default tool inventory. Published artifacts, installed package, running process, discovered skills/tools and successful client calls are separate checks. Keep evidence tied to the same release; do not infer model compliance from textual rules or unit tests.

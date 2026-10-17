@@ -8,7 +8,7 @@ def rows(distances):
     return [dict(id=str(i), revision='r1',distance=d,excerpt='private body',vector=[1,2]) for i,d in enumerate(distances)]
 
 
-def test_legacy_jump_and_dedup_order():
+def test_legacy_parameters_use_current_material_grouping():
     candidates=rows([.10,.11,.12,.60,.61,.62])
     candidates[1]['id']='0'
     result=select(candidates,legacy={'N':20,'d_max':.8,'min_jump':.02,'multiplier':3})
@@ -110,7 +110,9 @@ def test_count_units_distinguish_fragments_from_documents():
     result=select(candidates,{'algorithm':'nearest_n'},eligible_documents=2,eligible_fragments=3)
     counts=result['diagnostics']['counts']
     assert counts['eligible_documents']==2
-    assert counts['eligible_fragments']==counts['considered_fragments']==counts['selected_fragments']==3
+    assert counts['eligible_fragments']==counts['considered_fragments']==3
+    assert counts['selected_fragments']==2
+    assert counts['considered_documents']==2
     assert counts['selected_materials']==2
 
 

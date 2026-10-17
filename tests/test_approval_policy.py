@@ -7,6 +7,7 @@ from pcw_runtime import PCWError
 from pcw_runtime.server import pcw_query
 from test_cycles import workspace
 from test_instructions import edit, apply as apply_instructions
+from pcw_runtime.policies import policies
 
 
 def policy(required):
@@ -14,7 +15,13 @@ def policy(required):
 
 
 def prepare(r, c, text="# Facts\nAccurate project description"):
-    return r.proposal_prepare(c, [{"key": "topic", "content": text}])
+    return r.proposal_prepare(c, [{"key": "topic", "content": text,
+                                  "description": "Project facts used to test approval and partial-write recovery"}])
+
+
+def set_policy(r, required):
+    preview = r.settings_preview({"knowledge_approval_required": required}, "Change knowledge approval policy")
+    return r.settings_apply(preview["preview_revision"], "Approve the shown settings revision")
 
 
 def apply_knowledge(r, c, p, **kwargs):
@@ -25,7 +32,7 @@ def test_default_shows_changes_then_applies_indexes_and_closes_without_confirmat
     r, _ = workspace
     opened = r.startup("auto")
     c = opened["cycle_id"]
-    assert "knowledge_approval_required: false" in opened["instructions"]["content"]
+    assert r.settings_read(fields=["knowledge_approval_required"])["values"]["knowledge_approval_required"] is False
     r.tmp_write(c, "Verified result")
     p = prepare(r, c)
     assert p["approval_required"] is False
@@ -41,10 +48,11 @@ def test_default_shows_changes_then_applies_indexes_and_closes_without_confirmat
     assert r.finish(c)["tmp_cleared"]
 
 
-@pytest.mark.parametrize("content", [policy(True), "# Existing custom rules", "", "# Rules\nknowledge_approval_required: false"])
-def test_manual_or_missing_policy_requires_actual_confirmation_without_mutation(workspace, content):
+@pytest.mark.parametrize("content", ["# Explicit manual approval", "# Existing custom rules", "", "# Rules\nknowledge_approval_required: false"])
+def test_manual_policy_remains_authoritative_under_any_instruction_text(workspace, content):
     r, f = workspace
     c = r.startup("manual")["cycle_id"]
+    set_policy(r, True)
     apply_instructions(r, c, edit(r, c, content))
     p = prepare(r, c)
     assert p["approval_required"] is True
@@ -60,9 +68,10 @@ def test_manual_or_missing_policy_requires_actual_confirmation_without_mutation(
 def test_instructions_always_require_approval_and_cannot_use_knowledge_apply(workspace, required):
     r, _ = workspace
     c = r.startup("rules")["cycle_id"]
-    apply_instructions(r, c, edit(r, c, policy(required)))
+    set_policy(r, required)
+    apply_instructions(r, c, edit(r, c, "# Project\nCurrent user rules."))
     before = r.instructions_read(c)
-    p = edit(r, c, policy(not required))
+    p = edit(r, c, "# Project\nProposed user rules.")
     assert p["approval_required"] is True
     assert p["next_action"] == "present_changes_in_chat_for_approval"
     with pytest.raises(PCWError, match="confirmation"):
@@ -84,12 +93,8 @@ def test_invalid_policy_fails_without_saving_a_proposal_or_changing_instructions
     c = r.startup("invalid")["cycle_id"]
     before = r.instructions_read(c)
     with pytest.raises(PCWError):
-        edit(r, c, "---\n" + header + "\n---\n")
+        policies("---\n" + header + "\n---\n")
     assert r.instructions_read(c) == before
-    # Manual invalid files can still be read/repaired, but cannot authorize a write.
-    (r.engine.root / "INSTRUCTIONS.md").write_text("---\n" + header + "\n---\n")
-    with pytest.raises(PCWError):
-        prepare(r, c)
     assert r.status(c)["materials"] == 1
     assert r.status(c)["outstanding_proposal_count"] == 0
 
@@ -98,13 +103,14 @@ def test_invalid_policy_fails_without_saving_a_proposal_or_changing_instructions
 def test_policy_change_invalidates_old_preparation_in_both_directions(workspace, required):
     r, _ = workspace
     c = r.startup("change")["cycle_id"]
-    apply_instructions(r, c, edit(r, c, policy(required)))
+    set_policy(r, required)
     p = prepare(r, c)
-    apply_instructions(r, c, edit(r, c, policy(not required)))
-    with pytest.raises(PCWError, match="Instructions changed"):
+    set_policy(r, not required)
+    with pytest.raises(PCWError, match="Settings changed"):
         apply_knowledge(r, c, p, confirmation="yes")
     assert r.status(c)["materials"] == 1
-    renewed = r.proposal_prepare(c, [{"key": "topic", "content": "Fact"}], proposal_id=p["proposal_id"])
+    renewed = r.proposal_prepare(c, [{"key": "topic", "content": "Fact",
+                                     "description": "Reviewed fact under the changed approval policy"}], proposal_id=p["proposal_id"])
     assert renewed["approval_required"] is not required
 
 
@@ -119,7 +125,7 @@ def test_automatic_retry_recovers_same_partial_write_after_policy_changes(worksp
             raise OSError("write acknowledgement lost")
     with patch.object(r.engine, "_write", side_effect=fail):
         assert apply_knowledge(r, c, p)["status"] == "partial"
-    apply_instructions(r, c, edit(r, c, policy(True)))
+    set_policy(r, True)
     assert apply_knowledge(r, c, p)["status"] == "applied"
     assert r.status(c)["materials"] == 2
     assert r.finish(c)["status"] == "blocked"
@@ -133,7 +139,8 @@ def test_auto_mode_still_checks_file_conflicts_and_full_revision(workspace):
     seed = prepare(r, c)
     apply_knowledge(r, c, seed)
     material = r.read(c, seed["created_ids"]["topic"])
-    p = r.proposal_prepare(c, [{"material_id": material["id"], "expected_revision": material["revision"], "content": "Updated fact"}])
+    p = r.proposal_prepare(c, [{"material_id": material["id"], "expected_revision": material["revision"],
+                               "content": "Updated fact", "description": "Updated facts with a concurrent-write conflict"}])
     with pytest.raises(PCWError, match="exact presented"):
         r.proposal_apply(c, p["proposal_id"], "wrong")
     path = r.engine.root / material["path"]
@@ -149,3 +156,35 @@ def test_mcp_schema_allows_omitting_confirmation_under_runtime_policy():
     assert "confirmation" not in knowledge["required"]
     assert "confirmation" not in instructions["required"]
     assert "knowledge_approval_required" not in knowledge["properties"]
+
+
+@pytest.mark.parametrize("value", ["false", None, 0, "no", [False], {"required": False}])
+def test_invalid_canonical_policy_has_no_settings_or_proposal_effect(workspace, value):
+    r, _ = workspace
+    before = r.settings_read()
+    with pytest.raises(PCWError, match="boolean"):
+        r.settings_preview({"knowledge_approval_required": value}, "Change approval")
+    assert r.settings_read() == before
+    assert not list((r.control.root / "settings").glob("*.json"))
+
+
+def test_missing_canonical_policy_cannot_authorize_a_write(workspace):
+    from contextopus.core.settings import Settings
+    r, _ = workspace
+    cycle = r.startup("lost-policy")["cycle_id"]
+    files = {path: path.read_bytes() for path in r.engine.knowledge.rglob("*.md")}
+    Settings(r.control.layout)._scope_path("workspace", r.engine.workspace).unlink()
+    with pytest.raises(PCWError, match="settings are missing"):
+        prepare(r, cycle)
+    assert files == {path: path.read_bytes() for path in r.engine.knowledge.rglob("*.md")}
+    assert r._records()["cycles"][cycle]["proposals"] == {}
+
+
+def test_new_instruction_frontmatter_cannot_change_machine_policy(workspace):
+    r, _ = workspace
+    cycle = r.startup("reserved-policy")["cycle_id"]
+    before = r.instructions_read()
+    with pytest.raises(PCWError, match="workspace.settings_preview/settings_apply"):
+        edit(r, cycle, policy(True))
+    assert r.instructions_read() == before
+    assert not r.settings_read(fields=["knowledge_approval_required"])["values"]["knowledge_approval_required"]

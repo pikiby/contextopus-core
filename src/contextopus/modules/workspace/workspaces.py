@@ -13,10 +13,12 @@ import tempfile
 import uuid
 
 from .runtime import PCWError, _id, _revision, _parse
-from .policies import policies
+from .policies import policies, extract_settings
+from .settings import WorkspaceSettingsMixin, configuration_text, save_configuration
+from contextopus.core.settings import Settings, WORKSPACE_SETTINGS, WORKSPACE_POLICY_DEFAULTS
 
 
-FORMAT_VERSION = 3  # Workspace format, deliberately independent of plugin releases.
+FORMAT_VERSION = 4  # Workspace format, deliberately independent of plugin releases.
 EMPTY_PROJECT = "# Project\n\nPurpose, goals, requirements and boundaries have not been specified.\n"
 
 
@@ -29,7 +31,7 @@ def file_hash(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-class WorkspaceMixin:
+class WorkspaceMixin(WorkspaceSettingsMixin):
     def _format_path(self):
         path = self.control.root / "format.json"
         self.control.safe(path)
@@ -99,7 +101,6 @@ class WorkspaceMixin:
         if content is not None:
             if not isinstance(content, str) or not content.strip():
                 raise PCWError("Supply complete nonempty instructions")
-            policies(content, creation=True)
         return {
             "required": True,
             "status": "never_initialized",
@@ -154,6 +155,8 @@ class WorkspaceMixin:
         instructions_content: str,
         project_content: str,
         user_request: str,
+        settings: dict | None = None,
+        project_description: str | None = None,
     ):
         _id(request_id)
         if not isinstance(user_request, str) or not user_request.strip():
@@ -162,10 +165,18 @@ class WorkspaceMixin:
             )
         if not isinstance(project_content, str) or not project_content.strip():
             raise PCWError("Supply the project description agreed with the user")
-        settings = policies(instructions_content)
-        signature = _revision(
-            encode([request_id, instructions_content, project_content, user_request])
-        )
+        imported, instruction_text = extract_settings(instructions_content)
+        supplied_settings = settings
+        settings = imported if settings is None else settings
+        if not isinstance(settings, dict) or set(settings) - set(WORKSPACE_SETTINGS):
+            raise PCWError("Invalid Workspace settings")
+        Settings(self.control.layout)._validate_changes(settings)
+        if supplied_settings is not None and not set(WORKSPACE_POLICY_DEFAULTS) <= settings.keys():
+            raise PCWError("Creation requires all six Workspace policy settings")
+        signature_input = [request_id, instructions_content, project_content, user_request]
+        if supplied_settings is not None or project_description is not None:
+            signature_input += [supplied_settings, project_description]
+        signature = _revision(encode(signature_input))
         with self.control.guard():
             record = self.control.root / "creation.json"
             self.control.safe(record)
@@ -187,20 +198,35 @@ class WorkspaceMixin:
             else:
                 # New requests require the current choices. An identical older
                 # accepted request must remain resumable after a plugin update.
-                settings = policies(instructions_content, creation=True)
+                if supplied_settings is None:
+                    settings = policies(instructions_content, creation=True)
+                from .records import project_record
+                project_record(self.engine.workspace, project_content,
+                               description=project_description, require_description=True)
                 previous = {"signature": signature, "status": "creating"}
                 self.control.write(record, encode(previous))
             self.engine._assert_safe(self.engine.knowledge)
             self.engine.knowledge.mkdir(parents=True, exist_ok=True)
             self.engine.state.mkdir(parents=True, exist_ok=True)
+            old_configuration = configuration_text(self.control.layout, self.engine.workspace)
+            configured = json.loads(old_configuration) if old_configuration else {}
+            if any(key in configured and configured[key] != value for key, value in settings.items()):
+                raise PCWError("Interrupted creation conflicts with Workspace settings")
+            save_configuration(self.control.layout, self.engine.workspace,
+                               encode({**configured, **settings}))
             from .records import project_record
-            project_id, project_text = project_record(self.engine.workspace, project_content)
+            project_id, project_text = project_record(self.engine.workspace, project_content,
+                                                      description=project_description)
             for relative, content in {
-                "INSTRUCTIONS.md": instructions_content,
+                "INSTRUCTIONS.md": instruction_text,
                 "knowledge/Project.md": project_text,
             }.items():
                 path = self.engine.root / relative
                 self.engine._assert_safe(path)
+                if (relative == "INSTRUCTIONS.md" and path.is_file()
+                        and path.read_bytes().decode("utf-8") == instructions_content
+                        and instruction_text != instructions_content):
+                    self.engine._write(path, instruction_text)
                 if path.exists() and path.read_bytes().decode("utf-8") != content:
                     raise PCWError(
                         f"Interrupted creation conflicts with {relative}; inspect before continuing"

@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from contextopus.integrations.reconnect import select_read_tool
 import queue
 import subprocess
 import tempfile
@@ -127,7 +128,7 @@ def verify(cwd, expected_root, delivery="direct"):
                 and (
                     item.get("pluginId") == "contextopus@contextopus"
                     if delivery == "plugin"
-                    else item["name"] in {"w", "w-search", "w-create", "w-settings", "w-context", "w-analyze"}
+                    else item["name"] in {"w", "w-search", "w-create", "w-settings", "w-context", "w-analyze", "m"}
                     and not item.get("pluginId")
                     and Path(item["path"]).parent.parent
                     == Path.home() / ".agents/skills"
@@ -135,11 +136,11 @@ def verify(cwd, expected_root, delivery="direct"):
             ]
             expected_skills = {
                 ("contextopus:" if delivery == "plugin" else "") + name
-                for name in ("w", "w-search", "w-create", "w-settings", "w-context", "w-analyze")
+                for name in ("w", "w-search", "w-create", "w-settings", "w-context", "w-analyze", "m")
             }
             if {item["name"] for item in skills} != expected_skills:
                 raise RuntimeError(
-                    "Fresh Codex did not discover all six expected short skills"
+                    "Fresh Codex did not discover all seven expected short skills"
                 )
             if any(
                 item.get("pluginId")
@@ -176,16 +177,13 @@ def verify(cwd, expected_root, delivery="direct"):
                     )
                 time.sleep(1)
             server = servers[0]
-            tool = next(
-                (
-                    name
-                    for name in server["tools"]
-                    if name.endswith("contextopus_query")
-                ),
-                None,
-            )
+            tool = select_read_tool(server['tools'])
+            guide_tool = next((name for name in server['tools'] if name == 'guide' or name.endswith('__guide')), None)
+            write_tool = next((name for name in server['tools'] if name == 'write' or name.endswith('__write')), None)
+            if guide_tool is None or write_tool is None or len(server['tools']) != 3:
+                raise RuntimeError('Fresh Codex did not expose exactly guide/read/write')
             if tool is None:
-                raise RuntimeError("Fresh Codex did not expose Contextopus query tool")
+                raise RuntimeError("Fresh Codex did not expose Contextopus read tool")
             base = {"threadId": thread, "server": server["name"], "tool": tool}
             status = result_value(
                 request(
@@ -206,10 +204,8 @@ def verify(cwd, expected_root, delivery="direct"):
                     "mcpServer/tool/call",
                     {
                         **base,
-                        "arguments": {
-                            "operation": "procedure",
-                            "arguments": {"name": "upgrade"},
-                        },
+                        "tool": guide_tool,
+                        "arguments": {"procedure": "upgrade", "work_root": str(Path(expected_root).resolve())},
                     },
                 )
             )

@@ -1,4 +1,17 @@
-# PCW implementation
+# Contextopus implementation planning
+
+## Release in implementation: 1.3
+
+The [1.3 goal and detailed plan](docs/plans/contextopus-1.3.md) covers compact
+responses, descriptions and Obsidian links, search selection and diagnostics,
+instruction/settings separation, a shorter agent workflow and MCP interface,
+and a recoverable direct upgrade from installed 1.1 to 1.3. It distinguishes
+accepted requirements, fixed implementation contracts, and rejected approaches.
+The source implementation is under acceptance testing; publication and the
+live installation remain separate delivery steps. See the
+[verification evidence](docs/implementation/contextopus-1.3.md).
+
+## Historical PCW implementation
 
 Version 0.14.0 implements the [v4 design](docs/context-workspace-design-v4.md), extending the previous v3 work below.
 
@@ -22,3 +35,16 @@ The complete ordered work is tracked in [the upgrade plan](docs/context-workspac
 - Verify storage, permissions, errors, concurrency and full workflows before claiming completion.
 
 Publishing, installation and host-session refresh are separate actions. A source candidate is not a published or installed release. Deterministic tests establish tool behavior, not universal model compliance.
+
+## Permission settings separated from instructions in the 1.3 candidate
+
+Status: implemented in source; see the 1.3 acceptance and delivery status above.
+
+Before 1.3, the implicit-start permission check read the complete INSTRUCTIONS.md through `instructions_read` just to obtain `allow_implicit_updates`. This loaded unrelated rules before deciding whether to start a work cycle.
+
+- Store machine-checked permissions separately from instruction prose: `allow_implicit_updates`, `knowledge_approval_required`, and `instructions_approval_required`. Keep one authoritative value for each setting; do not duplicate it in INSTRUCTIONS.md.
+- Provide a read-only operation that returns only the requested effective permission settings, without loading instructions or knowledge into the agent's context.
+- Update the procedures to check permission through that operation and load the full instructions when entering an authorized work cycle. Keep project-specific working rules in INSTRUCTIONS.md.
+- Migrate existing permission values without changing the user's choices or weakening approval requirements.
+
+Acceptance: an implicit-start check returns only the needed permission; the work cycle still receives the complete instructions, and existing contexts retain their permission behavior.

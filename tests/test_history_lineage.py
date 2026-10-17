@@ -31,7 +31,8 @@ def save(runtime, cycle, changes, **kwargs):
 
 def test_new_default_enables_git_but_legacy_and_opt_out_stay_unchanged(tmp_path):
     template = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text()
-    assert policies(template)["git_history_enabled"] is True
+    from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
+    assert WORKSPACE_CREATION_DEFAULTS["git_history_enabled"] is True
     assert policies("Custom legacy instructions")["git_history_enabled"] is False
     runtime = CycleRuntime(tmp_path, "off", provider_factory=Factory())
     try:
@@ -43,13 +44,13 @@ def test_new_default_enables_git_but_legacy_and_opt_out_stay_unchanged(tmp_path)
 
 def test_rewritten_merge_split_and_renamed_record_history(history):
     r, c = history
-    original, before = save(r, c, [{"key": "a", "content": "# Authentication\nOld credential condition."},
-                                   {"key": "b", "content": "# Connection\nPrevious endpoint rule."}])
+    original, before = save(r, c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "a", "content": "# Authentication\nOld credential condition."},
+                                   {"description": "Verified behavior used to test historical replay and policy evidence", "key": "b", "content": "# Connection\nPrevious endpoint rule."}])
     a, b = [r.read(material_id=original["created_ids"][key]) for key in ("a", "b")]
     merged, commit = save(r, c, [
         {"material_id": a["id"], "expected_revision": a["revision"], "delete": True},
         {"material_id": b["id"], "expected_revision": b["revision"], "delete": True},
-        {"key": "combined", "content": "# Access\nEntirely rewritten project access procedure."},
+        {"description": "Verified behavior used to test historical replay and policy evidence", "key": "combined", "content": "# Access\nEntirely rewritten project access procedure."},
     ], replacements={a["id"]: "@combined", b["id"]: "@combined"},
         transformations=[{"kind": "merge", "sources": [a["id"], b["id"]], "targets": ["@combined"]}],
         summary="Consolidate access requirements without duplicated rules")
@@ -67,8 +68,8 @@ def test_rewritten_merge_split_and_renamed_record_history(history):
     assert r.history_search("Old credential condition")["versions"][0]["commit"] == commit
     combined = r.read(material_id=ident)
     split, split_commit = save(r, c, [
-        {"material_id": ident, "expected_revision": combined["revision"], "content": "# Access\nNew authentication rule."},
-        {"key": "connection", "content": "# Connection\nNew transport rule."}],
+        {"description": "Verified behavior used to test historical replay and policy evidence", "material_id": ident, "expected_revision": combined["revision"], "content": "# Access\nNew authentication rule."},
+        {"description": "Verified behavior used to test historical replay and policy evidence", "key": "connection", "content": "# Connection\nNew transport rule."}],
         transformations=[{"kind": "split", "sources": [ident], "targets": [ident, "@connection"]}],
         summary="Separate authentication and transport")
     assert r.history_changes(split_commit)["transformations"][0]["targets"] == [ident, split["created_ids"]["connection"]]
@@ -91,9 +92,9 @@ def test_rewritten_merge_split_and_renamed_record_history(history):
 
 def test_provenance_is_revision_bound_and_immutable_on_retry(history):
     r, c = history
-    plan = r.proposal_prepare(c, [{"key": "new", "content": "# Fact\nFirst state."}], summary="Record original evidence")
+    plan = r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "new", "content": "# Fact\nFirst state."}], summary="Record original evidence")
     revision = plan["revision"]
-    updated = r.proposal_prepare(c, [{"key": "new", "content": "# Fact\nFirst state."}],
+    updated = r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "new", "content": "# Fact\nFirst state."}],
                                  proposal_id=plan["proposal_id"], summary="Record corrected reason")
     assert updated["revision"] != revision
     with pytest.raises(PCWError, match="exact presented"):
@@ -124,13 +125,13 @@ def test_invalid_provenance_does_not_change_permanent_files(history, declaration
     r, c = history
     before = r._permanent_files()
     with pytest.raises(PCWError):
-        r.proposal_prepare(c, [{"key": "new", "content": "# Fact"}], transformations=[declaration])
+        r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "new", "content": "# Fact"}], transformations=[declaration])
     assert before == r._permanent_files()
 
 
 def test_legacy_commits_have_no_fabricated_lineage(history):
     r, c = history
-    plan, _ = save(r, c, [{"key": "new", "content": "# Fact\nHistorical evidence."}])
+    plan, _ = save(r, c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "new", "content": "# Fact\nHistorical evidence."}])
     r.engine._git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                   "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Old external commit")
     old = r.history_changes()
@@ -153,15 +154,15 @@ def test_pending_provenance_tampering_is_rejected(history):
 
 
 def save_without_commit(r, c):
-    plan = r.proposal_prepare(c, [{"key": "x", "content": "# X\nEvidence"}], summary="Approved meaning")
+    plan = r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "x", "content": "# X\nEvidence"}], summary="Approved meaning")
     return plan, r.proposal_apply(c, plan["proposal_id"], plan["revision"])
 
 
 def test_history_queries_are_available_through_mcp_and_paginate(history):
     from pcw_runtime import server
     r, c = history
-    plan, commit = save(r, c, [{"key": "a", "content": "# A\nFirst fact."},
-                              {"key": "b", "content": "# B\nSecond fact."}])
+    plan, commit = save(r, c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "a", "content": "# A\nFirst fact."},
+                              {"description": "Verified behavior used to test historical replay and policy evidence", "key": "b", "content": "# B\nSecond fact."}])
     with patch.object(server, "runtime", return_value=r):
         def query(operation, **arguments):
             return server.pcw_query(operation, str(r.engine.work_root), "history", arguments)
@@ -174,18 +175,16 @@ def test_history_queries_are_available_through_mcp_and_paginate(history):
         initial = r.history_list()["versions"][-1]["commit"]
         assert r.history_list(material_id=r.project_read()["id"])["versions"][-1]["commit"] == initial
         root = query("history_changes", commit=initial)
-        assert root["parents"] == [] and root["files_count"] == 2
+        assert root["parents"] == [] and root["files_count"] == 3
         assert query("history_read", commit=commit, material_id=plan["created_ids"]["a"])["materials"]
         for operation in ("history_search", "history_changes"):
             assert server.pcw_query("describe", arguments={"operation": operation})["tool"] == "pcw_query"
 
 
-def test_disabling_history_records_the_instruction_change(history):
+def test_disabling_history_records_the_settings_change(history):
     r, c = history
-    current = r.instructions_read()
-    plan = r.instructions_prepare(c, current["content"].replace("git_history_enabled: true", "git_history_enabled: false"),
-                                  current["revision"], "Disable local history")
-    applied = r.instructions_apply(c, plan["proposal_id"], plan["revision"], "Approve shown instructions")
+    plan = r.settings_preview({"git_history_enabled": False}, "Disable local history")
+    applied = r.settings_apply(plan["preview_revision"], "Approve shown settings")
     assert applied["history"]["status"] == "committed"
-    latest = r.history_list(material_id="INSTRUCTIONS.md")["versions"][0]
-    assert r.history_changes(latest["commit"])["changes"][0]["id"] == "INSTRUCTIONS.md"
+    latest = r.history_list(material_id="workspace-settings")["versions"][0]
+    assert r.history_changes(latest["commit"])["changes"][0]["id"] == "workspace-settings"

@@ -302,7 +302,10 @@ class LauncherTests(unittest.TestCase):
                         return json.loads(response["content"][0]["text"])
 
                     catalog = raw_call("pcw_query", {"operation": "describe"})["operations"]
-                    self.assertEqual(44, sum(map(len, catalog.values())))
+                    from contextopus.modules.workspace.operations import _DESCRIPTIONS
+                    self.assertEqual(set(_DESCRIPTIONS), set().union(*map(set, catalog.values())))
+                    self.assertIn('settings_read', catalog['pcw_query'])
+                    self.assertTrue({'settings_preview', 'settings_apply'} <= set(catalog['pcw_execute']))
                     operations = {name: raw_call("pcw_query", {
                         "operation": "describe", "arguments": {"operation": name}})["arguments_schema"]
                         for names in catalog.values() for name in names}
@@ -338,9 +341,11 @@ class LauncherTests(unittest.TestCase):
                     created = call("workspace_create", request_id="protocol-create", user_request="Create the protocol fixture",
                         # Protocol/approval coverage is strictly offline; the real
                         # model/tokenizer is replaced by the explicit test provider.
-                        instructions_content=(ROOT / "src/contextopus/modules/workspace/default_instructions.md").read_text()
-                            .replace("material_max_tokens: 1024", "material_max_tokens: null")
-                            .replace("git_history_enabled: false", "git_history_enabled: true"),
+                        instructions_content=(ROOT / "src/contextopus/modules/workspace/default_instructions.md").read_text(),
+                        settings={'allow_implicit_updates': False, 'knowledge_approval_required': False,
+                                  'instructions_approval_required': True, 'git_history_enabled': True,
+                                  'material_max_tokens': None, 'create_required_sources': False},
+                        project_description='Purpose and boundaries of this isolated stdio protocol fixture.',
                         project_content="# Protocol fixture\nA temporary test project.\n")
                     self.assertEqual("created", created["status"], created)
                     self.assertEqual([], call("search", query="empty", types=["knowledge"])["results"])
@@ -353,7 +358,7 @@ class LauncherTests(unittest.TestCase):
                     pending = call("tmp_write", content="Protocol fixture content")
                     self.assertEqual("blocked", call("finish")["status"])
                     self.assertEqual(1, call("status")["materials"])
-                    proposal = call("proposal_prepare", changes=[{"key": "fixture", "content": "Protocol fixture content"}])
+                    proposal = call("proposal_prepare", changes=[{"key": "fixture", "content": "Protocol fixture content", "description": "Persisted fact used by the isolated stdio contract fixture."}])
                     self.assertEqual("Protocol fixture content", proposal["review_changes"][0]["body_changes"][0]["after"])
                     review = call("proposal_read", proposal_id=proposal["proposal_id"])
                     self.assertIn("Protocol fixture content", review["review"])
@@ -363,7 +368,7 @@ class LauncherTests(unittest.TestCase):
                     item = applied["materials"][0]
                     self.assertRegex(item["id"], r"^[a-f0-9]{32}\.md$")
                     self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
-                    second = call("proposal_prepare", changes=[{"key": "related", "content": "Related fact", "links": [item["id"]]}])
+                    second = call("proposal_prepare", changes=[{"key": "related", "content": "Related fact", "description": "A related fact for testing links over stdio.", "links": [item["id"]]}])
                     other = call("proposal_apply", proposal_id=second["proposal_id"], expected_revision=second["revision"],
                                  confirmation="Apply the displayed related fact")["materials"][0]
                     self.assertEqual([item["id"]], call("read", material_id=other["id"])["links"])

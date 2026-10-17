@@ -249,7 +249,8 @@ def test_new_open_layout_preserves_real_pending_proposal_after_relocation(tmp_pa
     cycle = original.startup("work")["cycle_id"]
     original.tmp_write(cycle, content="a result")
     prepared = original.proposal_prepare(
-        cycle, [{"key": "new", "content": "# Pending\nanswer", "links": []}]
+        cycle, [{"key": "new", "content": "# Pending\nanswer", "links": [],
+                 "description": "Records the pending answer whose approved revision must survive root relocation."}]
     )
     revision = prepared["revision"]
     proposal_id = prepared["proposal_id"]

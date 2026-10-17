@@ -1,8 +1,8 @@
 # Required source reading
 
-This is an agent procedure, not a plugin fetcher or proof that a request occurred. Authoring criteria belong to the selected INSTRUCTIONS.md (`create_required_sources`); they are not inferred from ordinary citations. Existing marked sources are mandatory regardless of that setting, including in older contexts.
+This is an agent procedure, not a plugin fetcher or proof that a request occurred. Authoring criteria belong to the selected complete INSTRUCTIONS; effective `create_required_sources` controls authoring; they are not inferred from ordinary citations. Existing marked sources are mandatory regardless of that setting, including in older contexts.
 
-Store this block in the Markdown **body**, not the Contextopus-managed frontmatter or ID-only `links` metadata. It passes unchanged through `content` in normal proposals and reads:
+Store this block in the Markdown **body**, not the Contextopus-managed frontmatter or navigation `links` metadata. It passes unchanged through `content` in normal proposals and reads:
 
 ```yaml
 sources:

@@ -78,8 +78,9 @@ def test_unicode_root_upgrade_receipt_replays_after_reopen(tmp_path):
     reopened = CycleRuntime(root, "old", provider_factory=Factory())
     try:
         assert reopened.upgrade_apply(revision, automatic=True)["replayed"] is True
-        assert reopened.instructions_read()["content"] == rules
-        assert reopened.upgrade_plan()["from_version"] == 3
+        from contextopus.modules.workspace.policies import extract_settings
+        assert reopened.instructions_read()["content"] == extract_settings(rules)[1]
+        assert reopened.upgrade_plan()["from_version"] == 4
     finally:
         reopened.close()
 

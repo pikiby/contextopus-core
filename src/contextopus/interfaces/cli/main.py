@@ -24,7 +24,7 @@ def parser():
         commands.add_parser(name)
     modules = commands.add_parser("modules", help="List and manage root-local modules")
     module_actions = modules.add_subparsers(dest="module_action")
-    for action in ("prepare", "enable", "disable", "update"):
+    for action in ("install", "prepare", "enable", "disable", "update"):
         command = module_actions.add_parser(action)
         command.add_argument("module")
         if action == "update":

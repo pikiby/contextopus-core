@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import uuid
+from datetime import datetime, timezone
 
 import pyarrow as pa
 
@@ -27,6 +28,7 @@ from contextopus.modules.workspace.sources import (
     needs_source_upgrade,
     migrate_sources,
 )
+from .links import LinkCodec
 
 
 def topic_name(content, ident):
@@ -145,7 +147,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
             self._assert_safe(marker)
             compatible = (
                 marker.is_file()
-                and json.loads(read_utf8(marker)).get("format_version") in (2, 3)
+                and json.loads(read_utf8(marker)).get("format_version") in (2, 3, 4)
             )
             if root != self.root and not compatible:
                 self.incompatible.append(root.name)
@@ -182,7 +184,6 @@ class WorkspaceSourceAdapter(PCWRuntime):
                     raise PCWError(
                         f"Duplicate YAML material ID {ident}: {self.owners[ident]} and {root.name}"
                     )
-                metadata["links"] = _unique_links(metadata.get("links", []), ident)
                 declarations(body)
                 material = Material(
                     ident, path.relative_to(root).as_posix(), metadata, body
@@ -190,6 +191,12 @@ class WorkspaceSourceAdapter(PCWRuntime):
                 self.catalog[ident], self.owners[ident] = material, root.name
                 if root == self.root:
                     self.materials[ident] = material
+        # All destinations must exist before resolving paths across contexts.
+        codec = self.link_codec()
+        for ident, material in self.catalog.items():
+            material.metadata["links"] = codec.decode(
+                material.metadata.get("links", []), ident, self.owners[ident]
+            )
         self._content_signature = tuple(
             (i, m.path, m.revision) for i, m in self.materials.items()
         )
@@ -267,17 +274,34 @@ class WorkspaceSourceAdapter(PCWRuntime):
     def _save(self, material):
         material.metadata["id"] = material.id
         declarations(material.content)
-        super()._save(material)
+        material.metadata.setdefault("saved_at", datetime.now(timezone.utc).isoformat())
+        catalog = {**self.catalog, material.id: material}
+        owners = {**self.owners, material.id: self.workspace}
+        codec = self.link_codec(catalog, owners)
+        path = self.root / material.path
+        aliases = self.link_codec().display_aliases(_parse(path.read_text())[0].get('links', []), material.id) if path.is_file() else {}
+        self._write(path, codec.record_text(material.metadata, material.content, aliases=aliases))
+        observed, body = _parse((self.root / material.path).read_bytes().decode("utf-8"))
+        observed["links"] = codec.decode(observed.get("links", []), material.id)
+        if body != material.content or observed != material.metadata:
+            raise PCWError("Saved material read-back differs from requested content")
         self.catalog[material.id], self.owners[material.id] = material, self.workspace
 
-    def create(self, content, links=None):
+    def link_codec(self, catalog=None, owners=None):
+        return LinkCodec(self.work_root, self.catalog if catalog is None else catalog,
+                         self.owners if owners is None else owners)
+
+    def create(self, content, links=None, description=None):
         with self._guard():
+            from .records import validate_description
+            validate_description({"description": description}, required=True)
             content = migrate_sources(content)
             ident = self._allocate_material_id()
             material = Material(
                 ident,
                 self.new_path(content, ident),
-                {"id": ident, "type": "knowledge", "links": self._check_links(links or [], ident)},
+                {"id": ident, "type": "knowledge", "description": description,
+                 "links": self._check_links(links or [], ident)},
                 content,
             )
             try:
@@ -304,6 +328,10 @@ class WorkspaceSourceAdapter(PCWRuntime):
             target = self._knowledge_path(path)
             if target.exists() and target != self.root / material.path:
                 raise PCWError("Move destination already exists")
+            if target != self.root / material.path and any(
+                material.id in other.links for other in self.catalog.values()
+            ):
+                raise PCWError("Rename has incoming navigation links; use a reviewed record proposal to update affected paths")
             return self._move_same_id(material, target, path)
 
     def new_path(self, content, ident, occupied=()):

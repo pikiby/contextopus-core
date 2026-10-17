@@ -1,10 +1,11 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "documents": [
     {
       "key": "installed-version",
       "file": "installed-version.md",
       "type": "reference",
+      "description": "Explains how to inspect the installed documentation version, preview managed updates and preserve user changes.",
       "links": [
         "workspace-guide",
         "module-guide",
@@ -16,6 +17,7 @@
       "key": "workspace-guide",
       "file": "workspace-guide.md",
       "type": "guide",
+      "description": "Explains the ordinary Workspace work and reading procedures, record descriptions, native links and separate policy settings.",
       "links": [
         "rules-template"
       ]
@@ -24,6 +26,7 @@
       "key": "module-guide",
       "file": "module-guide.md",
       "type": "guide",
+      "description": "Explains one-action module installation, packaged SQL migrations, shared Core storage, handler protocols and verified lifecycle recovery.",
       "links": [
         "module-template"
       ]
@@ -32,6 +35,7 @@
       "key": "algorithm-guide",
       "file": "algorithm-guide.md",
       "type": "guide",
+      "description": "Explains retrieval algorithm interfaces, grouping by material, explicit fragment units and diagnostics needed to evaluate selection completeness.",
       "links": [
         "algorithm-template"
       ]
@@ -40,6 +44,7 @@
       "key": "module-template",
       "file": "module-template.md",
       "type": "template",
+      "description": "Provides the authoring checklist for module packages, schema compatibility, Core storage handlers and actual Application validation.",
       "links": [
         "module-guide"
       ]
@@ -48,6 +53,7 @@
       "key": "algorithm-template",
       "file": "algorithm-template.md",
       "type": "template",
+      "description": "Provides an algorithm descriptor and implementation scaffold for deterministic selection over ranked candidates with declared parameters and boundaries.",
       "links": [
         "algorithm-guide"
       ]
@@ -56,6 +62,7 @@
       "key": "rules-template",
       "file": "rules-template.md",
       "type": "template",
+      "description": "Provides a checklist for authoring complete context rules and separately reviewing effective machine settings without changing unrelated rules.",
       "links": [
         "workspace-guide"
       ]

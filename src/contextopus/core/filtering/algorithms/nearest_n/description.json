@@ -1,7 +1,7 @@
 {
   "id": "nearest_n",
-  "version": "1.0.0",
-  "purpose": "Keep the nearest N candidates.",
+  "version": "2.0.0",
+  "purpose": "Keep the nearest N materials or explicit fragments without estimating relevance.",
   "parameters_schema": {
     "type": "object",
     "properties": {
@@ -16,6 +16,6 @@
   "defaults": {
     "N": 20
   },
-  "when_to_use": "Use when a fixed nearest window is needed. Increase N to inspect a longer tail.",
-  "how_to_adjust": "Use when a fixed nearest window is needed. Increase N to inspect a longer tail."
+  "when_to_use": "Use when a fixed nearest window is needed.",
+  "how_to_adjust": "Increase N to inspect a longer tail. In materials mode a document occupies one position; in fragments mode every part occupies a position."
 }

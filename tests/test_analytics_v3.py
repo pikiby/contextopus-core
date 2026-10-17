@@ -44,7 +44,7 @@ def test_dispatch_records_calls_errors_and_actual_files(tmp_path):
     with patch("pcw_runtime.server.runtime", return_value=runtime):
         started = dispatch(str(tmp_path), "p", "startup", {"request_id": "work"})
         cycle = started["cycle_id"]
-        p = dispatch(str(tmp_path), "p", "proposal_prepare", {"cycle_id": cycle, "changes": [{"key": "fact", "content": "# Fact\nObserved mechanism"}]})
+        p = dispatch(str(tmp_path), "p", "proposal_prepare", {"cycle_id": cycle, "changes": [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "fact", "content": "# Fact\nObserved mechanism"}]})
         result = dispatch(str(tmp_path), "p", "proposal_apply", {"cycle_id": cycle, "proposal_id": p["proposal_id"], "expected_revision": p["revision"]})
         event = runtime.analytics_read(result["analytics"]["event_id"])
         assert event["state"] == "completed"
@@ -123,7 +123,7 @@ def test_large_result_is_retrievable_and_failed_ack_is_not_success(tmp_path):
     assert "Observed source text" in first["text"]
     with patch("pcw_runtime.server.runtime", return_value=runtime):
         cycle = dispatch(str(tmp_path), "p", "startup", {"request_id": "work"})["cycle_id"]
-        p = runtime.proposal_prepare(cycle, [{"key": "fact", "content": "Durable fact"}])
+        p = runtime.proposal_prepare(cycle, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "fact", "content": "Durable fact"}])
         with patch.object(EventStore, "end", side_effect=OSError("lost journal acknowledgement")):
             result = dispatch(str(tmp_path), "p", "proposal_apply", {"cycle_id": cycle, "proposal_id": p["proposal_id"], "expected_revision": p["revision"]})
         assert result["status"] == "applied"

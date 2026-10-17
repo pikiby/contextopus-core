@@ -1,6 +1,6 @@
 # Runtime setup and recovery
 
-Use this reference for actual tool or embedding failures. Resolve the workspace under [Context selection](procedure:workspace#context-selection); setup does not authorize creation or switching. Independent reading requires no startup. Work startup follows the selected workspace's invocation setting, uses a fresh request_id and returns instructions, project and bounded state. Retry with the same ID. Missing storage requires create or recovery as appropriate; incompatible format requires upgrade, never hidden migration. A new conversation is not a reason for diagnostics. Availability does not prove cached weights or working embeddings.
+Use this reference for actual tool or embedding failures. Resolve the workspace under [Context selection](procedure:workspace); setup does not authorize creation or switching. Independent reading requires no startup. Work startup follows the selected workspace's invocation setting, uses a fresh request_id and returns instructions, project and bounded state. Retry with the same ID. Missing storage requires create or recovery as appropriate; incompatible format requires upgrade, never hidden migration. A new conversation is not a reason for diagnostics. Availability does not prove cached weights or working embeddings.
 
 When diagnostics or repair are needed, the primary reuses existing authority and established observations and performs bounded Contextopus setup work itself. Ask only for authority that is actually missing. Setup does not discover agent models, reasoning capabilities or tool maps, and does not by itself assign a worker the full Contextopus cycle. A missing interpreter or distribution does not require broad source research or web diagnosis.
 
@@ -8,7 +8,7 @@ An exposed server with a broken workspace returns `recovery_required`. A small s
 
 ## Check the installed service
 
-Contextopus publishes primary `contextopus_query` and `contextopus_execute` entrypoints and may expose legacy compatibility entrypoints. First check actual host tool discovery, then the service tools/list and operation describe. A source function or generated config does not prove model-visible access. Use MCP for workspace operations; direct internal calls bypass validation and observation.
+Contextopus advertises `guide`, `read`, and `write`. Legacy aliases appear only with explicit CONTEXTOPUS_LEGACY_TOOLS=1 compatibility mode. First check actual host tool discovery, then the service tools/list and `guide(operation=...)` for one unknown signature. A source function or generated config does not prove model-visible access. Use MCP for workspace operations; direct internal calls bypass validation and observation.
 
 Run `contextopus --version`, `contextopus service status` and `contextopus doctor` using the installed runtime. The application requires Python 3.12+. uv manages the application environment from a verified local wheel or GitHub release asset. Runtime and persistent storage are independent of plugin caches. An old cache remains a compatibility source for active old sessions, not the new runtime owner.
 

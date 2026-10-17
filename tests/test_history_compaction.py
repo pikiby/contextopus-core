@@ -6,14 +6,14 @@ from test_history_lineage import history, save
 
 
 def pending_apply(r, c, content):
-    proposal = r.proposal_prepare(c, [{'key': 'new', 'content': content}])
+    proposal = r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'new', 'content': content}])
     result = r.proposal_apply(c, proposal['proposal_id'], proposal['revision'])
     return proposal, result
 
 
 def test_compact_receipt_and_noop_remove_all_snapshot_bodies(history):
     r, c = history
-    proposal, oid = save(r, c, [{'key': 'a', 'content': '# A\nUnique permanent body.'}])
+    proposal, oid = save(r, c, [{"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'a', 'content': '# A\nUnique permanent body.'}])
     path = r._history_root() / (proposal['proposal_id'] + '.json')
     compact = json.loads(path.read_text())
     assert set(compact) == {'status', 'commit', 'operation_id', 'revision'}
@@ -59,7 +59,7 @@ def test_two_pending_snapshots_keep_order_and_external_files(history):
 
 def test_legacy_completed_snapshot_is_verified_before_compaction(history):
     r, c = history
-    proposal, oid = save(r, c, [{'key': 'a', 'content': '# Body\nLegacy.'}])
+    proposal, oid = save(r, c, [{"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'a', 'content': '# Body\nLegacy.'}])
     from contextopus.modules.workspace.runtime import _revision
     from contextopus.modules.workspace.workspaces import encode
     files = r._permanent_files()
@@ -100,7 +100,7 @@ def test_compaction_verification_failure_keeps_body_and_queue(history):
     from contextopus.modules.workspace.runtime import PCWError, _revision
     from contextopus.modules.workspace.workspaces import encode
     r, c = history
-    proposal, oid = save(r, c, [{'key': 'a', 'content': '# A\nActual Git body.'}])
+    proposal, oid = save(r, c, [{"description": "Verified behavior used to test historical replay and policy evidence", 'key': 'a', 'content': '# A\nActual Git body.'}])
     files = r._permanent_files()
     relative = next(path for path in files if path.startswith('knowledge/'))
     files[relative] += '\nUnverified retry bytes.'

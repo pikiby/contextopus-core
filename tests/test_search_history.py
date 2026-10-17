@@ -92,3 +92,48 @@ def test_fragment_replay_preserves_distinct_parts_of_same_material(tmp_path):
         'algorithm': 'none', 'parameters': {'page_size': 1, 'offset': 1}})
     assert replay['added'][0]['part_index'] == 1
     assert replay['removed'][0]['part_index'] == 0
+
+
+def test_legacy_snapshot_preserves_recorded_version_and_original_selection(tmp_path):
+    journal, identifier = event(tmp_path)
+    with journal.connect() as db:
+        diag = json.loads(db.execute('SELECT diagnostics FROM search_evidence WHERE event_id=?', [identifier]).fetchone()[0])
+        diag.update(version='1.0.0', deduplication_order='after_selection')
+        diag.pop('selection_contract')
+        diag.pop('evidence_format')
+        db.execute('UPDATE search_evidence SET diagnostics=? WHERE event_id=?', [json.dumps(diag), identifier])
+    replay = SearchHistory(journal).replay(identifier, {'algorithm': 'nearest_n', 'parameters': {'N': 2}})
+    assert replay['original']['version'] == '1.0.0'
+    assert replay['original']['deduplication_order'] == 'after_selection'
+    assert replay['original']['selection_contract'] is None
+    assert replay['alternative']['version'] == '2.0.0'
+    assert replay['alternative']['selection_contract'] == 2
+    assert replay['same_implementation'] is False
+    assert replay['original_execution_reproduced'] is False
+    assert replay['replay_kind'] == 'current_counterfactual'
+    assert replay['original_selection_complete'] is True
+    assert replay['added'] == [['workspace', 'chosen', '1']]
+
+
+def test_replay_names_missing_original_selection_beyond_snapshot(tmp_path):
+    journal, identifier = event(tmp_path, 1001)
+    rows = [{'key': ['demo', 'one', str(i)], 'distance': i / 1001} for i in range(1001)]
+    original = select(rows, {'algorithm': 'none', 'parameters': {'offset': 1000, 'page_size': 1}})
+    journal.finish(identifier, result=original, duration=.1)
+    replay = SearchHistory(journal).replay(identifier, {'algorithm': 'nearest_n', 'parameters': {'N': 1}},
+                                           relevant_keys=[['demo', 'one', '1000']])
+    assert replay['label_comparison']['original'] is None
+    assert replay['label_comparison']['original_recorded_subset']['labelled_hits'] == 0
+    assert replay['candidate_snapshot_truncated'] is True
+    assert replay['retrieval_truncated'] is False
+    assert replay['original_selection_complete'] is False
+    assert replay['removed'] == []  # Missing original keys cannot be reconstructed.
+    assert replay['original']['counts']['selected'] == 1
+
+
+def test_empty_recorded_snapshot_can_be_replayed(tmp_path):
+    journal, identifier = event(tmp_path)
+    journal.finish(identifier, result=select([], {'algorithm': 'nearest_n'}), duration=.1)
+    replay = SearchHistory(journal).replay(identifier, {'algorithm': 'nearest_n'})
+    assert replay['added'] == replay['removed'] == []
+    assert replay['original_selection_complete'] is True

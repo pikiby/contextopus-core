@@ -58,7 +58,7 @@ class Backend:
         return await asyncio.to_thread(self.application.query, "core.modules")
 
     async def module_action(self, action, module, source=None):
-        if action not in {"prepare", "enable", "disable", "update"}:
+        if action not in {"install", "prepare", "enable", "disable", "update"}:
             raise ValueError("Unknown module action")
         arguments = {"module": module}
         if source is not None:

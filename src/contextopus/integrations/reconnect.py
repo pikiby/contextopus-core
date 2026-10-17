@@ -12,7 +12,13 @@ def initialize(rpc):
     rpc.send({"method": "initialized", "params": {}})
 
 
-def verify_codex_thread(rpc, thread_id, root, *, timeout=30):
+def select_read_tool(tool_names, *, legacy_tools=False):
+    """Choose the deliberate protocol; never retry a failed mutation under an alias."""
+    expected = 'contextopus_query' if legacy_tools else 'read'
+    return next((name for name in tool_names if name == expected or name.endswith('__' + expected)), None)
+
+
+def verify_codex_thread(rpc, thread_id, root, *, timeout=30, legacy_tools=False):
     deadline = time.monotonic() + timeout
     last_error = None
     while time.monotonic() < deadline:
@@ -25,7 +31,7 @@ def verify_codex_thread(rpc, thread_id, root, *, timeout=30):
         if len(matches) > 1:
             raise RuntimeError("Several Contextopus connections exist in the selected thread")
         for server in matches:
-            tool = next((name for name in server.get("tools", {}) if name.endswith("contextopus_query")), None)
+            tool = select_read_tool(server.get("tools", {}), legacy_tools=legacy_tools)
             if not tool:
                 continue
             try:

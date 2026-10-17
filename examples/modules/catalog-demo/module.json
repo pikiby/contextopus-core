@@ -1,0 +1,103 @@
+{
+  "id": "catalog-demo",
+  "version": "1.0.0",
+  "core_requires": ">=1.3,<2",
+  "storage": {
+    "engine": "sqlite",
+    "schema_version": 1,
+    "migrations": "migrations",
+    "compatible_versions": {
+      "min": 1,
+      "max": 1
+    }
+  },
+  "operations": [
+    {
+      "name": "catalog-demo.session_put",
+      "kind": "execute",
+      "handler": "adapter.py:session_put",
+      "protocol": "contextopus-core-v1",
+      "description": "Create or rename one demonstration session",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "catalog-demo.message_put",
+      "kind": "execute",
+      "handler": "adapter.py:message_put",
+      "protocol": "contextopus-core-v1",
+      "description": "Store a message linked to an existing demonstration session",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "catalog-demo.sessions",
+      "kind": "query",
+      "handler": "adapter.py:sessions",
+      "protocol": "contextopus-core-v1",
+      "description": "Read sessions and their message counts",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "catalog-demo.messages",
+      "kind": "query",
+      "handler": "adapter.py:messages",
+      "protocol": "contextopus-core-v1",
+      "description": "Read a session and its linked messages",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

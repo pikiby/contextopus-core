@@ -1,15 +1,11 @@
-"""Archivist procedure with document-key grouping before relevance cuts."""
-import json
+"""Archivist procedure over the requested units, grouped by the caller."""
 import statistics
 
 
 def select(rows, parameters):
-    unique = {}
-    for row in rows:
-        identity = json.dumps(row.get('key',row.get('id',row.get('object_id',row.get('material_id')))),sort_keys=True)
-        unique.setdefault(identity,row)
-    kept = [row for row in unique.values() if parameters['d_max'] is None or row['distance'] <= parameters['d_max']]
-    boundary = {'reason':'distance_threshold' if len(kept) < len(unique) else 'no_cut','boundary_index':len(kept),'grouping':'document_key_before_cut'}
+    kept = [row for row in rows if parameters['d_max'] is None or row['distance'] <= parameters['d_max']]
+    boundary = {'reason':'distance_threshold' if len(kept) < len(rows) else 'no_cut',
+                'boundary_index':len(kept), 'threshold_removed':len(rows) - len(kept)}
     if len(kept) > 2:
         gaps = [b['distance'] - a['distance'] for a,b in zip(kept,kept[1:])]
         positive = sorted(gap for gap in gaps if gap > 0)
@@ -33,7 +29,10 @@ def select(rows, parameters):
                 kept = kept[:index]
                 boundary.update(reason='archivist_weak_plateau',boundary_index=index)
                 break
-    if len(kept) > parameters['top_k']:
-        kept = kept[:parameters['top_k']]
-        boundary.update(reason='top_k',boundary_index=len(kept))
+    relevance = {**boundary, 'retained':len(kept)}
+    omitted = max(0, len(kept) - parameters['top_k'])
+    kept = kept[:parameters['top_k']]
+    boundary.update(reason='result_cap' if omitted else boundary['reason'],
+                    boundary_index=len(kept), relevance=relevance,
+                    result_cap={'limit':parameters['top_k'], 'omitted':omitted})
     return kept,boundary

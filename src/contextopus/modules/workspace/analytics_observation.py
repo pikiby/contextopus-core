@@ -41,15 +41,38 @@ class Observation:
 
     def __init__(self, runtime, operation, arguments):
         self.runtime, self.operation, self.arguments = runtime, operation, arguments
-        self.references = []
+        self._references = []
+        self.settings_reference = None
         release, procedures = runtime_identity()
         self.metadata = {"runtime_version": release, "procedures_revision": procedures}
         path = runtime.engine.root / "INSTRUCTIONS.md"
         runtime.engine._assert_safe(path)
-        if path.is_file():
+        if operation in {"settings_read", "settings_preview", "settings_apply"}:
+            self.metadata["instructions_ref"] = {"status": "unknown", "path": "INSTRUCTIONS.md",
+                "reason": "operation_does_not_read_instructions"}
+        elif path.is_file():
             text = path.read_bytes().decode("utf-8")
             reference = self._reference(runtime, "INSTRUCTIONS.md", text, "file")
             self.metadata.update(instructions_revision=digest(text), instructions_ref=reference)
+        from .history_queries import SETTINGS_HISTORY_PATH
+        try:
+            text = runtime._settings_history_text()
+            reference = self._reference(runtime, SETTINGS_HISTORY_PATH, text, "file")
+            reference["role"] = "workspace_settings"
+            self.settings_reference = reference
+            self.metadata.update(settings_revision=digest(text), settings_ref=reference)
+            if "instructions_ref" in self.metadata:
+                # One historical basis binds the free text and its separate policy revision.
+                self.metadata["instructions_ref"].update(settings_revision=digest(text), settings_ref=reference)
+        except Exception:
+            # Old events or unavailable canonical settings stay explicitly unknown.
+            self.metadata.update(settings_revision=None, settings_ref=None)
+
+    @property
+    def references(self):
+        # Returned-material indexes retain their existing meaning; the separate
+        # observed policy basis follows them in the evidence reference list.
+        return self._references + ([self.settings_reference] if self.settings_reference else [])
 
     def _reference(self, runtime, path, text, projection, revision=None, commit=None):
         reference = {"workspace": runtime.engine.workspace, "path": path,
@@ -59,9 +82,13 @@ class Observation:
             if commit:
                 full = runtime._history_git("show", commit + ":" + path).stdout
             else:
-                target = runtime.engine.root / path
-                runtime.engine._assert_safe(target)
-                full = target.read_bytes().decode("utf-8")
+                from .history_queries import SETTINGS_HISTORY_PATH
+                if path == SETTINGS_HISTORY_PATH:
+                    full = runtime._settings_history_text()
+                else:
+                    target = runtime.engine.root / path
+                    runtime.engine._assert_safe(target)
+                    full = target.read_bytes().decode("utf-8")
             expected = _parse(full)[1] if projection == "body" else full
             if expected != text:
                 return {**reference, "status": "unversioned", "reason": "returned_content_differs"}
@@ -87,8 +114,8 @@ class Observation:
             projection = "body" if path.startswith("knowledge/") else "file"
             reference = self._reference(runtime, path, text, projection, value.get("revision"))
             reference.update(material_id=value.get("id"), role="returned_material")
-            self.references.append(reference)
-            return {"reference_index": len(self.references) - 1, **reference}
+            self._references.append(reference)
+            return {"reference_index": len(self._references) - 1, **reference}
         finally:
             if other is not None:
                 other.close()
@@ -128,5 +155,5 @@ class Observation:
             reference = self._reference(self.runtime, path, full, "file", commit=commit)
             reference.update(role="historical_read", offset=item.get("offset", 0),
                              returned_characters=len(item["text"]), returned_sha256=digest(item["text"]))
-            self.references.append(reference)
+            self._references.append(reference)
         return clean

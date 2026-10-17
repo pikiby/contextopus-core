@@ -29,6 +29,8 @@ class Application:
         from .core.rag import RagIndex
 
         self.index = RagIndex(self.layout, self.resources)
+        from .core.module_storage import ModuleStorage
+        self.module_storage = ModuleStorage(self.layout)
         from .modules.workspace.source import WorkspaceEligibility
 
         self.index.register_source(
@@ -71,7 +73,7 @@ class Application:
         from .core.module_management import ModuleManager
         self.module_manager = ModuleManager(self)
         self._operation("core.modules", "query", self.module_manager.discover)
-        for action in ("prepare", "enable", "disable"):
+        for action in ("install", "prepare", "enable", "disable"):
             self._operation("core.module_" + action, "execute", getattr(self.module_manager, action), {"module": (str, ...)})
         self._operation("core.module_update", "execute", self.module_manager.update, {"module": (str, ...), "source": (str, ...)})
         self._refresh_algorithms()
@@ -140,6 +142,9 @@ class Application:
                 "module": (str | None, None),
                 "context": (str | None, None),
                 "request": (dict | None, None),
+                "fields": (list[str] | None, None),
+                "agent": (str | None, None),
+                "agent_model": (str | None, None),
             },
         )
         self._operation(
@@ -182,9 +187,10 @@ class Application:
             {"plan": (dict | None, None), "plan_revision": (str | None, None)},
         )
 
-    def settings(self, module=None, context=None, request=None):
-        self._refresh_algorithms()
-        return self.services._settings.snapshot(module, context, request)
+    def settings(self, module=None, context=None, request=None, fields=None, agent=None, agent_model=None):
+        if fields is None:
+            self._refresh_algorithms()
+        return self.services._settings.snapshot(module, context, request, fields=fields, agent=agent, agent_model=agent_model)
 
     def settings_preview(self, changes, module=None, context=None, request_only=False):
         self._refresh_algorithms()
@@ -394,8 +400,11 @@ class Application:
 
     def procedure(self, name):
         if name == "default-instructions":
+            from .core.settings import WORKSPACE_CREATION_DEFAULTS, WORKSPACE_SETTINGS
             return {
                 "name": name,
+                "creation_defaults": {**WORKSPACE_CREATION_DEFAULTS,
+                                      "reread_instructions": WORKSPACE_SETTINGS['reread_instructions']},
                 "content": package_resources.files("contextopus.modules.workspace")
                 .joinpath("default_instructions.md")
                 .read_text(encoding="utf-8"),

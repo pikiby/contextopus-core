@@ -18,19 +18,20 @@ def prepare(runtime, cycle, content):
 def test_instruction_policy_and_transition(workspace, required):
     r = workspace
     c = r.startup('policy')['cycle_id']
-    current = r.instructions_read(c)['content']
-    first = prepare(r, c, current.replace('instructions_approval_required: true', 'instructions_approval_required: false'))
+    first = r.settings_preview({'instructions_approval_required': False}, 'Disable instructions approval')
     assert first['approval_required'] is True
     with pytest.raises(PCWError, match='confirmation'):
-        r.instructions_apply(c, first['proposal_id'], first['revision'])
-    r.instructions_apply(c, first['proposal_id'], first['revision'], 'Approve shown disabling change')
+        r.settings_apply(first['preview_revision'])
+    r.settings_apply(first['preview_revision'], 'Approve shown disabling change')
     content = r.instructions_read(c)['content'] + '\nNew rule\n'
-    if required:
-        content = content.replace('instructions_approval_required: false', 'instructions_approval_required: true')
     second = prepare(r, c, content)
     assert second['approval_required'] is False
     assert second['next_action'] == 'present_changes_in_chat_then_apply'
     assert r.instructions_apply(c, second['proposal_id'], second['revision'])['status'] == 'applied'
+    if required:
+        transition = r.settings_preview({'instructions_approval_required': True}, 'Restore instructions approval')
+        assert not transition['approval_required']
+        r.settings_apply(transition['preview_revision'])
     third = prepare(r, c, content + '\nAnother rule\n')
     assert third['approval_required'] is required
     if required:
@@ -41,7 +42,10 @@ def test_instruction_policy_and_transition(workspace, required):
 def test_missing_policy_and_creation(workspace):
     r = workspace
     assert policies('# Legacy')['instructions_approval_required'] is True
-    current = r.instructions_read()['content']
+    import yaml
+    from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
+    current = '---\n' + yaml.safe_dump(WORKSPACE_CREATION_DEFAULTS) + '---\nLegacy rules\n'
+    assert r.settings_read(fields=['instructions_approval_required'])['values']['instructions_approval_required']
     assert policies(current, creation=True)['instructions_approval_required'] is True
     with pytest.raises(PCWError, match='six settings'):
         policies(current.replace('instructions_approval_required: true\n', ''), creation=True)
@@ -111,9 +115,10 @@ def test_context_skill_removed_from_bare_install_on_native_plugin_cutover(tmp_pa
 def test_false_instruction_policy_is_independent_of_true_knowledge_policy(workspace):
     r = workspace
     c = r.startup('independent-policy')['cycle_id']
-    content = r.instructions_read(c)['content'].replace('knowledge_approval_required: false', 'knowledge_approval_required: true').replace('instructions_approval_required: true', 'instructions_approval_required: false')
-    initial = prepare(r, c, content)
-    r.instructions_apply(c, initial['proposal_id'], initial['revision'], 'Approve these independent settings')
+    initial = r.settings_preview({'knowledge_approval_required': True, 'instructions_approval_required': False},
+                                 'Separate knowledge approval from instructions approval')
+    r.settings_apply(initial['preview_revision'], 'Approve these independent settings')
+    content = r.instructions_read(c)['content']
     proposal = prepare(r, c, content + '\nNew rule\n')
     assert proposal['approval_required'] is False
     assert r.instructions_apply(c, proposal['proposal_id'], proposal['revision'])['status'] == 'applied'

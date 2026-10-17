@@ -1,5 +1,9 @@
 recursive-include src/contextopus/resources *.md *.yaml *.json
 recursive-include src/contextopus/core/filtering/algorithms *.json
-recursive-include examples *.py *.json *.md
+recursive-include examples *.py *.json *.md *.sql
 recursive-include docs *.md *.svg *.png *.gif
 include README.md
+include uv.lock
+include scripts/build_release.py scripts/verify_release.py scripts/verify_installed.py
+recursive-include plugins/contextopus *.json *.md
+recursive-include tests/fixtures *.py *.md *.json *.jsonl *.yaml

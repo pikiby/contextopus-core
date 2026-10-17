@@ -1,7 +1,7 @@
 {
   "id": "archivist",
-  "version": "1.0.0",
-  "purpose": "Archivist first-jump and weak-plateau procedure, with document-key grouping before cuts.",
+  "version": "2.0.0",
+  "purpose": "Archivist first-jump and weak-plateau procedure over materials or explicit fragments.",
   "parameters_schema": {
     "type": "object",
     "properties": {
@@ -24,6 +24,6 @@
     "d_max": null,
     "top_k": 20
   },
-  "when_to_use": "Use to cut a weak flat tail beyond the head cluster without an absolute cap.",
-  "how_to_adjust": "Group document keys before selection. First jump uses upper median positive gap times 3 (minimum .02). With more than three remaining, head=median(first three), plateau delta=max(.02,2*arithmetic median positive gap); cut from index2 when distance>head+delta and local gap<.01. Optional d_max precedes analysis; top_k caps last. Repository/default-branch grouping remains module-owned."
+  "when_to_use": "Use to cut a weak flat tail beyond the head cluster without an absolute distance cap.",
+  "how_to_adjust": "Materials group document keys first; fragments retain individual parts. First jump uses upper median positive gap times 3 (minimum .02). With more than three remaining, head=median(first three), plateau delta=max(.02,2*arithmetic median positive gap); cut from index2 when distance>head+delta and local gap<.01. Optional d_max precedes analysis; top_k caps last. Repository/default-branch grouping remains module-owned."
 }

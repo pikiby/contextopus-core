@@ -1,7 +1,7 @@
 {
   "id": "distance_threshold",
-  "version": "1.0.0",
-  "purpose": "Keep candidates inside an absolute distance boundary.",
+  "version": "2.0.0",
+  "purpose": "Keep requested units inside an absolute distance boundary, then cap results.",
   "parameters_schema": {
     "type": "object",
     "properties": {
@@ -21,6 +21,6 @@
     "N": 20,
     "d_max": 0.8
   },
-  "when_to_use": "Use a calibrated distance scale. Lower d_max for stricter relevance.",
-  "how_to_adjust": "Use a calibrated distance scale. Lower d_max for stricter relevance."
+  "when_to_use": "Use with a calibrated distance scale.",
+  "how_to_adjust": "Lower d_max for stricter relevance. N caps results after threshold evaluation. Materials group document keys first; fragments retain individual parts."
 }

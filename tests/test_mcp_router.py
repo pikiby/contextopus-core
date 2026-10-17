@@ -19,7 +19,7 @@ def test_two_small_tools_and_storage_free_discovery(tmp_path):
         for tool in tools:
             assert set(tool.inputSchema["properties"]) == {"operation", "work_root", "workspace", "arguments"}
         catalog = server.pcw_query("describe")["operations"]
-        assert len(catalog["pcw_query"]) + len(catalog["pcw_execute"]) == 44
+        assert len(catalog["pcw_query"]) + len(catalog["pcw_execute"]) == 47
         assert not set(catalog["pcw_query"]) & set(catalog["pcw_execute"])
         assert set(catalog["pcw_query"] + catalog["pcw_execute"]) == server._DESCRIPTIONS.keys()
         for tool, names in catalog.items():
@@ -76,7 +76,8 @@ def test_router_preserves_approval_conflicts_and_operation_journal(tmp_path):
         with patch.object(server, "runtime", return_value=r):
             cycle = execute("startup", request_id="router-work")["cycle_id"]
             proposal = execute("proposal_prepare", cycle_id=cycle,
-                               changes=[{"key": "fact", "content": "# Fact\nVerified information"}])
+                               changes=[{"key": "fact", "content": "# Fact\nVerified information",
+                                         "description": "Verified fact used to test the router approval boundary."}])
             params = dict(cycle_id=cycle, proposal_id=proposal["proposal_id"], expected_revision=proposal["revision"])
             with pytest.raises(PCWError, match="confirmation"):
                 execute("proposal_apply", **params)

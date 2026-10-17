@@ -38,7 +38,8 @@
     "55b869434506a989c2ef44bf102bf624a9462d2940fddcd22d31a0db0976fba7"
   ],
   "w": [
-    "8feb815dbfb0e212a6df3504e01010bdf8fc6e96eb7bfcb36a302d54be2a3c5b"
+    "8feb815dbfb0e212a6df3504e01010bdf8fc6e96eb7bfcb36a302d54be2a3c5b",
+    "a56441cf0d5d2c1c256d528ec6739e507123e2f16447c03a4c42191b8d50ac28"
   ],
   "wx": [
     "c132b4e1f46d89861ba00ffc2071847492983bfde4b9047425931b7b4c6a5be0"
@@ -60,5 +61,19 @@
   ],
   "w-context": [
     "3007561feb1d01ff0bcc80e175c3b6e2d1f7975c58aea1722f41f95c7aa9e7b5"
+  ],
+  "w-search": [
+    "9a2bcf7e0a7f38e296861027f77fe464d54de0c1b4ee9f9b2c634ccc4c71253c"
+  ],
+  "w-create": [
+    "65400e3ea28240366ffe71523236d45b3ab2204df8dc1db916728cc6b4e657ae"
+  ],
+  "w-settings": [
+    "badca8feebd1988d97bbeed6faa2b20742e52fcfa54fc4a67519ba2706e4b834",
+    "651742a02b5871c0c60d1d48dd59a6aa6d05133199cbe7900536490eb17f97e1"
+  ],
+  "w-analyze": [
+    "91167256e264d9ec169e05e988c3712e27fd3dbaffcc73a17ebd0ee17f8e8de2",
+    "5a8e88801c531fc915f05c646131fb082739bd2b20e6aeecbdc0dfa0f1457f47"
   ]
 }

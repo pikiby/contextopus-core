@@ -20,7 +20,8 @@ def test_startup_delivers_defaults_without_current_or_embeddings(workspace):
     r, f = workspace
     opened = r.startup("first")
     text = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text(encoding="utf-8")
-    assert opened["instructions"]["content"] == text
+    from contextopus.modules.workspace.policies import extract_settings
+    assert opened["instructions"]["content"] == extract_settings(text)[1]
     assert opened["instructions"] == r.instructions_read(opened["cycle_id"])
     assert "current" not in opened and not hasattr(r, "current_set")
     assert not (r._tmp(opened["cycle_id"]) / "current.md").exists()
@@ -147,7 +148,7 @@ def test_instruction_edit_does_not_cover_work_review_or_cross_apply(workspace):
 def test_changed_instructions_block_pending_knowledge_proposal(workspace):
     r, _ = workspace
     c = r.startup("work")["cycle_id"]
-    p = r.proposal_prepare(c, [{"key": "a", "content": "fact"}])
+    p = r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "a", "content": "fact"}])
     apply(r, c, edit(r, c, "New policy"))
     with pytest.raises(PCWError, match="Instructions changed"):
         r.proposal_apply(c, p["proposal_id"], p["revision"], "yes")
@@ -203,7 +204,7 @@ def test_empty_instructions_are_a_user_choice_not_default_fallback(workspace):
 def test_started_knowledge_write_can_recover_after_rule_change_then_requires_review(workspace):
     r, _ = workspace
     c = r.startup("work")["cycle_id"]
-    p = r.proposal_prepare(c, [{"key": "a", "content": "Fact already approved"}])
+    p = r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "a", "content": "Fact already approved"}])
     write = r.engine._write
     def interrupt(path, text):
         write(path, text)

@@ -1,11 +1,11 @@
-This is the canonical rework procedure. Use Contextopus MCP, not direct runtime writes. Workspace operations accept the legacy names below; prefer `workspace.<operation>`. Resolve the selected work_root and workspace explicitly. Fetch a referenced procedure with `procedure(name=...)`; fetch a reference with `procedure(name="reference/<name>")`.
+Use the obtained applicable procedure before acting. Calls use `read` for queries, `write` for changes, and `guide(procedure="name")` or `guide(operation="module.operation")` for a needed procedure or unknown signature. Preserve the selected work_root/context.
 
 
 # Rework knowledge
 
-Use the two [MCP entrypoints](procedure:workspace#mcp-calls): `contextopus_query` for reads and `contextopus_execute` for changes. The names below are operations; place their parameters in `arguments`. Describe only an unknown signature.
+Use `read` for queries and `write` for changes under the ordinary [Workspace procedure](procedure:workspace). The names below are operations; place their parameters in `arguments`. Describe only an unknown signature.
 
-1. Establish the requested transformation and scope. Follow [context selection](procedure:workspace#context-selection), start `purpose: rework`, read INSTRUCTIONS and the project record, then search for the relevant task/state records. Editing instructions alone does not authorize rewriting knowledge.
+1. Establish the requested transformation and scope. Follow [context selection](procedure:workspace), start `purpose: rework`, read INSTRUCTIONS and the project record, then search for the relevant task/state records. Editing instructions alone does not authorize rewriting knowledge.
 2. Enumerate all materials in scope with paginated `list`. A request affecting "all" cannot be satisfied from search top-N. Search helps locate related topics; read affected complete bodies and inspect incoming/outgoing links. Verify material revisions when using an earlier audit.
    On every receipt of a material with `sources` (or legacy `required_sources`), follow the [required-source procedure](procedure:reference/required-sources); earlier checks never substitute.
 3. Prepare final text and relationships according to the requested transformation and current instructions. For a split, decide the original ID's fate and new topics together. For deletion/merge include replacements so incoming links are reviewed. For merges/splits explicitly declare source and result IDs in `transformations` and give a concise `summary`; show this provenance with the text. Git preserves the declaration even when the text is fully rewritten. See [history](procedure:reference/history-analytics). Retain conditions and provenance, including relevant required-source blocks. Research missing mechanisms only through allowed sources; do not invent them.

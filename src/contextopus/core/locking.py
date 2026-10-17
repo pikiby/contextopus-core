@@ -11,11 +11,8 @@ def _windows_flock(file, operation, *, api=None):
     fd = file.fileno() if hasattr(file, "fileno") else file
     position = os.lseek(fd, 0, os.SEEK_CUR)
     try:
-        if operation != LOCK_UN and os.fstat(fd).st_size == 0:
-            os.lseek(fd, 0, os.SEEK_SET)
-            os.write(fd, b"\0")
-        # Initializing an empty file advances its cursor. Every process must
-        # still lock byte zero, including the process that initialized it.
+        # CRT locking supports ranges beyond EOF. Seeding the file is unnecessary
+        # and can fail before lock acquisition when another process owns byte 0.
         os.lseek(fd, 0, os.SEEK_SET)
         api.locking(
             fd,

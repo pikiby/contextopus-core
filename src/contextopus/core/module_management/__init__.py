@@ -1,148 +1,22 @@
-"""Opt-in root-local modules. Discovery only reads manifests; activation is explicit."""
-import hashlib
-import importlib.metadata
+"""Explicit installation, activation and recoverable updates of folder modules."""
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
 from ..operations import OperationSpec
-
-
-class ModuleManifestReader:
-    """Read module contracts and fingerprints without activation or dependency work."""
-    def __init__(self, layout, reserved=()):
-        self.root = layout.root
-        self.base = self.root / 'modules'
-        self.state_path = self.root / 'core/configuration/modules.json'
-        self.state = json.loads(self.state_path.read_text()) if self.state_path.exists() else {}
-        self.reserved = set(reserved) | {'workspace', 'core'}
-
-    def inspect_sources(self, kind):
-        if kind not in ('procedures', 'skills', 'filter_algorithms'):
-            raise ValueError('Invalid source kind')
-        directories, signature, errors = [], [], []
-        for ident, record in sorted(self.state.items()):
-            if not record.get('enabled'):
-                continue
-            try:
-                manifest = self._manifest(ident)
-                fingerprint = self._digest(ident)
-                if fingerprint != record.get('prepared'):
-                    raise ValueError('Module changed; prepare and explicitly enable it again')
-                directories.append(self._inside(self._code(self._directory(ident)) / 'package', manifest.get(kind, kind)))
-                signature.append((ident, fingerprint))
-            except Exception as exc:
-                errors.append({'module': ident, 'error': str(exc)})
-        return directories, signature, errors
-
-    def _directory(self, ident):
-        if not isinstance(ident, str) or not re.fullmatch(r'[a-z][a-z0-9_-]*', ident):
-            raise ValueError('Invalid module ID')
-        directory = self.base / ident
-        if directory.is_symlink():
-            raise ValueError('Module directory must not be a symlink')
-        return directory
-
-    @staticmethod
-    def _inside(base, relative):
-        target = (base / relative).resolve()
-        if not target.is_relative_to(base.resolve()):
-            raise ValueError('Module path escapes package')
-        return target
-
-    def _code(self, directory):
-        pointer = directory / '.current.json'
-        if pointer.is_file():
-            relative = json.loads(pointer.read_text())['release']
-            resolved = (directory / relative).resolve()
-            if not resolved.is_relative_to((directory / '.releases').resolve()):
-                raise ValueError('Release pointer escapes module')
-            return resolved
-        return directory
-
-    def _manifest(self, ident, directory=None):
-        if ident in self.reserved:
-            raise ValueError('Built-in module lifecycle is managed by Core')
-        directory = self._code(directory or self._directory(ident))
-        if (directory / 'package').is_symlink():
-            raise ValueError('Package must not be a symlink')
-        value = json.loads((directory / 'module.json').read_text())
-        from jsonschema import Draft202012Validator
-        validator = Draft202012Validator({
-            'type': 'object', 'required': ['id', 'version'],
-            'properties': {
-                'id': {'type': 'string'}, 'version': {'type': 'string'},
-                'core_requires': {'type': 'string'},
-                'dependencies': {'type': 'object', 'additionalProperties': False, 'properties': {'python': {'type': 'array', 'items': {'type': 'string', 'minLength': 1}}}},
-                **{kind: {'type': 'string'} for kind in ('skills', 'procedures', 'filter_algorithms', 'tui')},
-                'operations': {'type': 'array', 'items': {
-                    'type': 'object', 'required': ['name', 'kind'],
-                    'oneOf': [{'required': ['handler'], 'not': {'required': ['command']}}, {'required': ['command'], 'not': {'required': ['handler']}}],
-                    'properties': {
-                        'name': {'type': 'string'}, 'kind': {'enum': ['query', 'execute']},
-                        'handler': {'type': 'string'},
-                        'command': {'type': 'array', 'minItems': 1, 'items': {'type': 'string', 'minLength': 1}},
-                        'arguments_schema': {'type': 'object'}, 'description': {'type': 'string'},
-                        'timeout': {'type': 'number', 'exclusiveMinimum': 0},
-                    }
-                }},
-            }
-        })
-        try:
-            validator.validate(value)
-        except Exception as exc:
-            raise ValueError('Invalid module manifest: ' + str(exc)) from exc
-        if value.get('id') != ident or not isinstance(value.get('version'), str):
-            raise ValueError('Manifest ID/version missing or mismatched')
-        from packaging.specifiers import SpecifierSet
-        from packaging.version import Version
-        Version(value['version'])
-        core = importlib.metadata.version('contextopus-core')
-        if Version(core) not in SpecifierSet(value.get('core_requires', '')):
-            raise RuntimeError('incompatible: Core ' + core)
-        for kind in ('procedures', 'skills', 'filter_algorithms'):
-            self._inside(directory / 'package', value.get(kind, kind))
-        names = set()
-        for operation in value.get('operations', []):
-            name = operation['name']
-            if not name.startswith(ident + '.') or name in names:
-                raise ValueError('Operations must use unique module ID prefix')
-            names.add(name)
-            if operation['kind'] not in ('query', 'execute'):
-                raise ValueError('Invalid operation kind')
-            if 'handler' in operation:
-                file, function = operation['handler'].split(':')
-                if not function.isidentifier() or not self._inside(directory / 'package', file).is_file():
-                    raise ValueError('Invalid Python handler')
-                handler_path = self._inside(directory / 'package', file)
-                try:
-                    compile(handler_path.read_text(encoding='utf-8'), str(handler_path), 'exec')
-                except SyntaxError as exc:
-                    raise ValueError('Invalid Python handler syntax: ' + str(exc)) from exc
-            elif not isinstance(operation.get('command'), list) or not operation['command']:
-                raise ValueError('Operation requires handler or command argv')
-        return value
-
-    def _digest(self, ident):
-        directory = self._code(self._directory(ident))
-        digest = hashlib.sha256((directory / 'module.json').read_bytes())
-        for path in sorted((directory / 'package').rglob('*')):
-            if path.is_symlink():
-                raise ValueError('Package symlinks are not supported')
-            if path.is_file():
-                digest.update(str(path.relative_to(directory)).encode())
-                digest.update(path.read_bytes())
-        return digest.hexdigest()
+from .manifest import ModuleManifestReader
 
 
 class ModuleManager(ModuleManifestReader):
     def __init__(self, app):
         self.app = app
+        from ..module_storage import ModuleStorage
+        if not hasattr(app, 'module_storage'):
+            app.module_storage = ModuleStorage(app.layout)
         super().__init__(app.layout, app.registry.modules)
         self.loaded = {}
         self._active_fingerprints = {}
@@ -176,6 +50,7 @@ class ModuleManager(ModuleManifestReader):
                     fingerprint = self._digest(ident)
                     if fingerprint != self.state[ident].get('prepared'):
                         raise ValueError('Module changed; prepare and explicitly enable it again')
+                    self._require_storage(ident, self._manifest(ident))
                     if self._active_fingerprints.get(ident) != fingerprint:
                         self._activate(ident)
                 except Exception as exc:
@@ -198,6 +73,13 @@ class ModuleManager(ModuleManifestReader):
                 manifest = self._manifest(ident)
                 record = self.state.get(ident, {})
                 item.update(operations=[op['name'] for op in manifest.get('operations', [])], skills=manifest.get('skills', 'skills'), procedures=manifest.get('procedures', 'procedures'), filter_algorithms=manifest.get('filter_algorithms', 'filter_algorithms'), open_tui=manifest.get('tui'), version=manifest['version'], state='enabled' if ident in self.loaded else 'prepared' if record.get('prepared') == self._digest(ident) else 'discovered')
+                storage = self._storage(ident, manifest)
+                if storage is not None:
+                    item['storage'] = storage
+                    if storage['needs_migration'] and not storage['errors']:
+                        item.update(state='storage_pending')
+                    elif storage['errors'] or not storage['compatible']:
+                        item.update(state='storage_error' if storage['status'] == 'error' else 'storage_incompatible')
                 if ident in self.errors:
                     item.update(state='error', error=self.errors[ident])
             except Exception as exc:
@@ -218,6 +100,9 @@ class ModuleManager(ModuleManifestReader):
         manifest = self._manifest(module)
         directory = self._code(self._directory(module))
         fingerprint = self._digest(module)
+        storage = self._storage(module, manifest)
+        if storage is not None and storage['errors']:
+            raise ValueError('Module storage preflight failed; preserve data and select a compatible release: ' + '; '.join(storage['errors']))
         dependencies = manifest.get('dependencies', {}).get('python', [])
         if dependencies:
             environment = directory / '.venv'
@@ -234,16 +119,46 @@ class ModuleManager(ModuleManifestReader):
         record['prepared'] = fingerprint
         self.errors.pop(module, None)
         self._save()
-        return {'id': module, 'state': 'prepared'}
+        result = {'id': module, 'state': 'prepared'}
+        storage = self._storage(module, manifest)
+        if storage is not None:
+            result['storage'] = storage
+        return result
+
+    def _migrate(self, module):
+        manifest = self._manifest(module)
+        if 'storage' not in manifest:
+            return None
+        package = self._code(self._directory(module)) / 'package'
+        service = self.app.module_storage
+        plan = service.prepare(module, manifest['storage'], package)
+        return service.apply(module, manifest['storage'], package, plan['revision'])
+
+    def install(self, module):
+        """Install the selected module's dependencies and declared schema, then enable it."""
+        self._manifest(module)
+        try:
+            self.prepare(module)
+            self._migrate(module)
+            result = self.enable(module)
+        except Exception as exc:
+            self.disable(module)
+            self.errors[module] = str(exc)
+            raise
+        storage = self._storage(module, self._manifest(module))
+        if storage is not None:
+            result['storage'] = storage
+        return result
 
     def _activate(self, module):
         manifest = self._manifest(module)
         if self.state.get(module, {}).get('prepared') != self._digest(module):
             raise ValueError('Module changed; prepare and explicitly enable it again')
+        self._require_storage(module, manifest)
         directory = self._directory(module)
         specs = []
         for operation in manifest.get('operations', []):
-            handler = self._handler(directory, operation)
+            handler = self._handler(directory, operation, storage_declared='storage' in manifest)
             specs.append(OperationSpec(operation['name'], operation['kind'], operation.get('arguments_schema', {'type': 'object'}), handler, operation.get('description', '')))
         self.app.registry.replace_owned(module, specs)
         self.loaded[module] = manifest
@@ -251,23 +166,34 @@ class ModuleManager(ModuleManifestReader):
         self.app.registry.register_module(module, available=True, state='enabled', open_tui=manifest.get('tui'))
         self.errors.pop(module, None)
 
-    def _handler(self, directory, operation):
+    def _handler(self, directory, operation, *, storage_declared=False):
         code = self._code(directory)
         # Both adapters use a child process, preserving Core's interpreter and imports.
         if 'handler' in operation:
             file, function = operation['handler'].split(':')
-            runner = "import json,runpy,sys; ns=runpy.run_path(sys.argv[1]); print(json.dumps(ns[sys.argv[2]](json.load(sys.stdin))))"
+            if operation.get('protocol') == 'contextopus-core-v1':
+                runner = "import runpy,sys; runpy.run_path(sys.argv[1])['main'](sys.argv[2],sys.argv[3])"
+                runner_arguments = [str(Path(__file__).with_name('child.py')), str(code / 'package' / file), function]
+            else:
+                runner = "import json,runpy,sys; ns=runpy.run_path(sys.argv[1]); print(json.dumps(ns[sys.argv[2]](json.load(sys.stdin))))"
+                runner_arguments = [str(code / 'package' / file), function]
             python = code / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
-            command = [str(python) if python.exists() else sys.executable, '-c', runner, str(code / 'package' / file), function]
+            command = [str(python) if python.exists() else sys.executable, '-c', runner, *runner_arguments]
         else:
             command = list(operation['command'])
             executable = command[0]
             if not Path(executable).is_absolute() and ('/' in executable or '\\' in executable):
                 command[0] = str(self._inside(code / 'package', executable))
         def invoke(context, **arguments):
-            environment = dict(os.environ, CONTEXTOPUS_MODULE_DATA=str(directory / 'data'), CONTEXTOPUS_MODULE_CONFIG=str(directory / 'config'), CONTEXTOPUS_ROOT=str(self.root))
+            environment = dict(os.environ, CONTEXTOPUS_MODULE_DATA=str(directory / 'data'), CONTEXTOPUS_MODULE_CONFIG=str(directory / 'config'), CONTEXTOPUS_ROOT=str(self.root), PYTHONDONTWRITEBYTECODE='1')
             for path in (directory / 'data', directory / 'config'):
                 path.mkdir(exist_ok=True)
+            if operation.get('protocol') == 'contextopus-core-v1':
+                from .bridge import invoke as bridge_invoke
+                return bridge_invoke(command, arguments=arguments, module=directory.name,
+                    kind=operation['kind'], storage=self.app.module_storage,
+                    declared_storage=storage_declared, cwd=code / 'package',
+                    env=environment, timeout=operation.get('timeout', 60))
             output = subprocess.run(command, input=json.dumps(arguments), cwd=code / 'package', env=environment, text=True, capture_output=True, check=True, timeout=operation.get('timeout', 60))
             return json.loads(output.stdout)
         return invoke
@@ -321,9 +247,10 @@ class ModuleManager(ModuleManifestReader):
             os.replace(temporary, pointer)
             try:
                 self.prepare(module)
+                self._migrate(module)
                 if was_enabled:
                     self.enable(module)
-            except Exception:
+            except Exception as update_error:
                 if previous is None:
                     pointer.unlink()
                 else:
@@ -332,7 +259,14 @@ class ModuleManager(ModuleManifestReader):
                 self.state[module] = previous_record
                 self._save()
                 if was_enabled:
-                    self._activate(module)
+                    try:
+                        self._activate(module)
+                    except Exception as rollback_error:
+                        self.disable(module)
+                        self.errors[module] = str(rollback_error)
+                        raise RuntimeError('Module update failed: ' + str(update_error) +
+                            '; previous code cannot reactivate against current storage: ' +
+                            str(rollback_error) + '; data/schema preserved; retry core.module_update') from update_error
                 raise
             return {'id': module, 'state': 'enabled' if was_enabled else 'prepared', 'previous': previous or 'original package'}
         finally:

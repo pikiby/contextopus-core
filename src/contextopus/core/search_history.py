@@ -130,7 +130,7 @@ class SearchHistory:
         from .filtering import select
         original = self.read(event_id)
         diagnostics = original["diagnostics"]
-        if not diagnostics or not diagnostics.get("candidates"):
+        if not diagnostics or not isinstance(diagnostics.get("candidates"), list):
             raise ValueError("No recorded candidates to replay")
         rows = diagnostics["candidates"]
         alternative = select(rows, selection, output=diagnostics.get("output", "materials"),
@@ -142,6 +142,17 @@ class SearchHistory:
         old = {key(row) for row in rows if row.get("selected")}
         new = {key(row) for row in alternative["results"]}
         desc = alternative["diagnostics"]
+        counts = diagnostics.get("counts", {})
+        snapshot_truncated = bool(diagnostics.get("truncated") or
+                                  counts.get("considered_fragments", len(rows)) > len(rows))
+        retrieval_truncated = bool(diagnostics.get("candidate_pool_truncated"))
+        recorded_selected = counts.get("selected")
+        original_selection_complete = (sum(bool(row.get("selected")) for row in rows) == recorded_selected
+                                       if recorded_selected is not None else None)
+        original_version = diagnostics.get("version")
+        same_implementation = (diagnostics.get("algorithm") == desc["algorithm"] and
+                               original_version == desc["version"] and
+                               diagnostics.get("selection_contract") == desc["selection_contract"])
         judgments = None
         if relevant_keys is not None:
             if fragments:
@@ -155,17 +166,32 @@ class SearchHistory:
                         "precision": hits / len(chosen) if chosen else None,
                         "recall": hits / len(expected) if expected else None}
             judgments = {"basis": "caller_supplied_relevance_labels",
-                         "original": score(old), "alternative": score(new)}
+                         "scope": "recorded_candidates_only",
+                         "original_selection_complete": original_selection_complete,
+                         "original": score(old) if original_selection_complete is True else None,
+                         "original_recorded_subset": score(old), "alternative": score(new)}
         return {"event_id": event_id, "scope": "recorded_candidates_only",
                 "output": diagnostics.get("output", "materials"),
-                "snapshot_truncated": bool(diagnostics.get("truncated") or diagnostics.get("candidate_pool_truncated")),
+                "snapshot_truncated": snapshot_truncated or retrieval_truncated,
+                "candidate_snapshot_truncated": snapshot_truncated,
+                "retrieval_truncated": retrieval_truncated,
+                "original_selection_complete": original_selection_complete,
+                "replay_kind": "current_counterfactual",
+                "same_implementation": same_implementation,
+                "original_execution_reproduced": False,
                 "original": {"algorithm": diagnostics.get("algorithm"), "version": diagnostics.get("version"),
-                             "effective_settings": diagnostics.get("effective_settings")},
-                "alternative": {k: desc[k] for k in ("algorithm", "version", "effective_settings", "counts", "boundary")},
+                             "effective_settings": diagnostics.get("effective_settings"),
+                             "selection_contract": diagnostics.get("selection_contract"),
+                             "deduplication_order": diagnostics.get("deduplication_order"),
+                             "counts": diagnostics.get("counts"),
+                             "boundary": diagnostics.get("boundary")},
+                "alternative": {k: desc[k] for k in ("algorithm", "version", "selection_contract", "effective_settings", "counts", "boundary")},
                 "added": [json.loads(k) for k in sorted(new - old)],
                 "removed": [json.loads(k) for k in sorted(old - new)],
                 "quality_assessment": "not_established",
                 "label_comparison": judgments,
                 "limitations": ["Same candidate snapshot, current alternative implementation",
                                 "Missing candidates outside the snapshot require a broader retrieval",
+                                "Recorded selected flags describe the original result; the old algorithm is not rerun",
+                                "Added and removed keys cover recorded candidates only; incomplete snapshots can omit original selections",
                                 "Compare task/answer evidence and historical rules before judging relevance"]}

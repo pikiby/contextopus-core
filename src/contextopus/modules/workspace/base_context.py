@@ -14,8 +14,9 @@ import tempfile
 
 from contextopus.core.storage import StorageLayout, sync_directory
 from .cycles import CycleRuntime
-from .policies import policies
-from .runtime import PCWError, _parse
+from .runtime import PCWError, Material, _parse
+from .records import validate_description
+from .links import LinkCodec
 
 DEFAULT_CONTEXT = 'contextopus-base'
 
@@ -38,10 +39,11 @@ def packaged_bundle():
             content = content.replace(manifest['version'], version('contextopus-core'))
         documents.append({**item, 'content': content})
     instructions = files('contextopus.modules.workspace').joinpath('default_instructions.md').read_text()
-    # These product docs may be long; ordinary contexts keep their own limits.
-    instructions = instructions.replace('material_max_tokens: 1024', 'material_max_tokens: null')
     instructions += '\n## Product documentation context\n\nThis context holds packaged product documentation and has no material length limit. Reading these records never changes an active task context or its instructions. Future edits to these rules govern product documentation updates too.\n'
+    from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
     return {**manifest, 'version': version('contextopus-core'), 'documents': documents, 'instructions': instructions,
+            'settings': {**WORKSPACE_CREATION_DEFAULTS, 'material_max_tokens': None},
+            'project_description': 'Defines the scope and use of the installed Contextopus guides, examples and templates as product reference material.',
             'project': '# Contextopus product documentation\n\nInstalled-version guides, examples and templates. These records are reference material; reading them never changes the active context or its rules.\n'}
 
 
@@ -79,6 +81,26 @@ class BaseContext:
             raise PCWError('Base context cannot be a symlink')
         return path
 
+    def _link_codec(self):
+        """Read only the source catalog; preview never initializes an engine."""
+        catalog, owners = {}, {}
+        if self.layout.workspace_base.is_dir():
+            for root in sorted(self.layout.workspace_base.iterdir()):
+                if root.name.startswith('.') or root.is_symlink() or not root.is_dir():
+                    continue
+                for path in (root / 'knowledge').rglob('*.md'):
+                    if path.is_symlink() or any(p.startswith('.') for p in path.relative_to(root).parts):
+                        continue
+                    metadata, body = _parse(path.read_text())
+                    ident = metadata.get('id')
+                    if ident is None:
+                        continue
+                    if ident in catalog:
+                        raise PCWError(f'Duplicate YAML material ID: {ident}')
+                    catalog[ident] = Material(ident, path.relative_to(root).as_posix(), metadata, body)
+                    owners[ident] = root.name
+        return LinkCodec(self.layout.root, catalog, owners)
+
     def status(self):
         state = self._read()
         selected = state.get('context')
@@ -113,6 +135,7 @@ class BaseContext:
         create = not managed
         conflicts, changes, unchanged = [], [], []
         incoming = {item['key']: item for item in self.bundle['documents']}
+        codec = self._link_codec()
         if create and root.exists():
             conflicts.append({'reason': 'unmanaged_context_exists', 'path': str(root),
                               'incoming': self.bundle})
@@ -122,32 +145,47 @@ class BaseContext:
             conflicts.append({'reason': 'instructions_missing', 'path': str(instructions_path),
                               'incoming': self.bundle['instructions']})
         instructions = instructions_path.read_text() if instructions_hash else self.bundle['instructions']
-        settings = policies(instructions)
+        if create:
+            from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
+            settings = {**WORKSPACE_CREATION_DEFAULTS, **self.bundle.get('settings', {})}
+        else:
+            from contextopus.core.settings import Settings, WORKSPACE_POLICY_DEFAULTS
+            settings = Settings(self.layout).workspace_snapshot(context=context,
+                fields=list(WORKSPACE_POLICY_DEFAULTS))["values"]
         for key, item in incoming.items():
+            validate_description(item, required=True)
             previous = managed.get('documents', {}).get(key)
             if previous:
                 path = root / previous['path']
                 actual = _file_hash(path)
-                metadata, body = _parse(path.read_text()) if actual else ({}, '')
+                try:
+                    metadata, body = _parse(path.read_text()) if actual else ({}, '')
+                    links = codec.decode(metadata.get('links', []), previous['id']) if actual else []
+                except PCWError as exc:
+                    conflicts.append({'key': key, 'path': str(path), 'reason': 'navigation_conflict',
+                                      'error': str(exc), 'current': path.read_text(), 'incoming': item['content']})
+                    continue
+                description_changed_by_user = (actual is not None and metadata.get('description') != previous.get('description')
+                    and metadata.get('description') != item['description'])
                 compatible_metadata_edit = (actual is not None and _revision(body) == previous.get('body_revision')
                     and metadata.get('id') == previous['id'] and metadata.get('type') == previous.get('type', item['type'])
-                    and set(previous.get('links', [])) <= set(metadata.get('links', [])))
-                if actual != previous['file_hash'] and not compatible_metadata_edit:
+                    and set(previous.get('links', [])) <= set(links) and not description_changed_by_user)
+                if description_changed_by_user or actual != previous['file_hash'] and not compatible_metadata_edit:
                     conflicts.append({'key': key, 'path': str(path),
                                       'reason': 'deleted' if actual is None else 'user_modified',
                                       'current': path.read_text() if actual else None,
                                       'incoming': item['content']})
                     continue
                 required_links = [managed.get('documents', {}).get(key, {}).get('id') for key in item.get('links', [])]
-                links_complete = all(ident and ident in metadata.get('links', []) for ident in required_links)
-                if body == item['content'] and metadata.get('type') == item['type'] and links_complete:
+                links_complete = all(ident and ident in links for ident in required_links)
+                if body == item['content'] and metadata.get('type') == item['type'] and metadata.get('description') == item['description'] and links_complete:
                     unchanged.append(key)
                     continue
                 changes.append({'key': key, 'material_id': previous['id'],
                                 'expected_file_hash': actual, 'before': body, 'content': item['content'],
-                                'type': item['type'], 'bundle_links': item.get('links', [])})
+                                'type': item['type'], 'description': item['description'], 'bundle_links': item.get('links', [])})
             else:
-                changes.append({'key': key, 'before': None, 'content': item['content'], 'type': item['type'], 'bundle_links': item.get('links', [])})
+                changes.append({'key': key, 'before': None, 'content': item['content'], 'type': item['type'], 'description': item['description'], 'bundle_links': item.get('links', [])})
         # Removed bundle entries remain user-visible records, never automatic deletions.
         retired = sorted(set(managed.get('documents', {})) - set(incoming))
         result = {'context': context, 'version': self.bundle['version'], 'create': create,
@@ -157,6 +195,8 @@ class BaseContext:
                   'material_max_tokens': settings['material_max_tokens'],
                   'initial_instructions': self.bundle['instructions'] if create else None,
                   'initial_project': self.bundle['project'] if create else None,
+                  'initial_project_description': self.bundle.get('project_description') if create else None,
+                  'initial_settings': settings if create else None,
                   'state_revision': _revision(state), 'active_rules_changed': False}
         result['plan_revision'] = _revision(result)
         result['status'] = 'conflicts' if conflicts else 'ready' if changes or create or managed.get('version') != self.bundle['version'] else 'current'
@@ -193,7 +233,9 @@ class BaseContext:
             if preview['create']:
                 created = runtime.workspace_create('base-create-' + revision[:32],
                     preview['initial_instructions'], preview['initial_project'],
-                    'Install the exact packaged Contextopus base documentation from the reviewed plan')
+                    'Install the exact packaged Contextopus base documentation from the reviewed plan',
+                    project_description=preview.get('initial_project_description'),
+                    settings=preview.get('initial_settings'))
                 if created['status'] != 'created':
                     return {'status': created['status'], 'plan_revision': revision, 'result': created}
             pending['stage'] = 'prepare'
@@ -205,7 +247,7 @@ class BaseContext:
             changes = []
             project = runtime.project_read()
             for item in preview['changes']:
-                change = {key: item[key] for key in ('content', 'type')}
+                change = {key: item[key] for key in ('content', 'type', 'description')}
                 if item.get('material_id'):
                     current = runtime.read(material_id=item['material_id'])
                     path = runtime.engine.root / current['path']
@@ -259,6 +301,7 @@ class BaseContext:
                 pending['documents'][item['key']] = {'id': ident, 'path': current['path'],
                     'file_hash': _file_hash(runtime.engine.root / current['path']),
                     'body_revision': _revision(item['content']), 'type': item['type'],
+                    'description': item['description'],
                     'links': list(current['links'])}
             pending['stage'] = 'finish'
             self._write(state)
