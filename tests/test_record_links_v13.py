@@ -17,7 +17,7 @@ from test_runtime import Factory
 
 def context(root, name="alpha", factory=None):
     runtime = CycleRuntime(root, name, provider_factory=factory or Factory())
-    rules = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text()
+    rules = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text(encoding="utf-8")
     rules = rules.replace("material_max_tokens: 1024", "material_max_tokens: null").replace("git_history_enabled: true", "git_history_enabled: false")
     project = "---\ndescription: Explains the project scope and its operating boundaries.\n---\n# Project\nDefined scope."
     runtime.workspace_create("create", rules, project, "Create this context", settings={
@@ -44,7 +44,7 @@ def test_native_links_distinguish_contexts_and_duplicate_unicode_titles(tmp_path
     one = put(a, "# Одинаковый заголовок\nAlpha conditions.", path="Папка один/Карточка.md")
     two = put(b, "# Одинаковый заголовок\nBeta conditions.", path="Папка два/Карточка.md")
     entry = put(a, "# Entry\nBoth sets of conditions apply.", [one["id"], two["id"]])
-    metadata, _ = _parse((a.engine.root / entry["path"]).read_text())
+    metadata, _ = _parse((a.engine.root / entry["path"]).read_text(encoding="utf-8"))
     assert metadata["id"] == entry["id"]
     assert len(set(metadata["links"])) == 2
     for link in metadata["links"]:
@@ -74,7 +74,7 @@ def test_rename_reviews_incoming_paths_preserves_graph_and_vectors(tmp_path):
     assert review[source["id"]]["links_added"] == review[source["id"]]["links_removed"] == []
     runtime.proposal_apply(ident, plan["proposal_id"], plan["revision"])
     assert runtime.engine.resolve(source["id"]).links == [target["id"]]
-    metadata, _ = _parse((runtime.engine.root / source["path"]).read_text())
+    metadata, _ = _parse((runtime.engine.root / source["path"]).read_text(encoding="utf-8"))
     assert "Раздел/Новое имя.md" in metadata["links"][0]
     assert runtime.read(material_id=target["id"])["revision"] == target["revision"]
     assert len(factory.calls) == calls
@@ -121,9 +121,12 @@ def test_descriptions_are_authored_legacy_gaps_remain_readable_and_repairable(tm
             runtime.proposal_prepare(ident, [change])
     item = put(runtime, "# Legacy\nVerified conditions.")
     path = runtime.engine.root / item["path"]
-    metadata, body = _parse(path.read_text())
+    metadata, body = _parse(path.read_text(encoding="utf-8"))
     metadata.pop("description")
-    path.write_text("---\n" + yaml.safe_dump(metadata) + "---\n" + body)
+    # This is a metadata-only fixture edit: retain the runtime's exact LF body.
+    path.write_text("---\n" + yaml.safe_dump(metadata) + "---\n" + body,
+                    encoding="utf-8", newline="")
+    assert _parse(path.read_bytes().decode("utf-8"))[1] == body
     legacy = runtime.read(material_id=item["id"])
     gaps = [row for row in runtime.audit()["materials"] if row["material_id"] == item["id"]]
     assert any(issue["problem"] == "missing_description" for issue in gaps[0]["issues"])
@@ -164,7 +167,7 @@ def test_oversized_legacy_body_metadata_edits_preserve_text_and_vectors(tmp_path
         assert runtime.proposal_apply(ident, plan["proposal_id"], plan["revision"])["status"] == "applied"
         current = runtime.read(material_id=item["id"])
         assert current["content"] == body
-        assert _parse((runtime.engine.root / current["path"]).read_text())[1] == body
+        assert _parse((runtime.engine.root / current["path"]).read_text(encoding="utf-8"))[1] == body
         for field, value in edits[edit].items():
             assert current[field] == ("knowledge/" + value if field == "path" else value)
         assert len(factory.calls) == calls
@@ -239,7 +242,7 @@ def test_delete_redirects_native_incoming_paths_without_changing_surviving_ids(t
     runtime.proposal_apply(ident, plan["proposal_id"], plan["revision"])
     assert old["id"] not in runtime.engine.catalog
     assert runtime.engine.resolve(source["id"]).links == [survivor["id"]]
-    raw = _parse((runtime.engine.root / source["path"]).read_text())[0]["links"]
+    raw = _parse((runtime.engine.root / source["path"]).read_text(encoding="utf-8"))[0]["links"]
     assert runtime.engine.link_codec().decode(raw, source["id"]) == [survivor["id"]]
     runtime.close()
 
@@ -251,11 +254,11 @@ def test_rename_conflict_keeps_concurrent_source_write(tmp_path):
     ident = cycle(runtime)
     plan = runtime.proposal_prepare(ident, [{"material_id": target["id"], "expected_revision": target["revision"], "path": "New.md"}])
     path = runtime.engine.root / source["path"]
-    concurrent = path.read_text() + "\nConcurrent observation.\n"
-    path.write_text(concurrent)
+    concurrent = path.read_text(encoding="utf-8") + "\nConcurrent observation.\n"
+    path.write_text(concurrent, encoding="utf-8", newline="")
     with pytest.raises(PCWError, match="Proposal conflict"):
         runtime.proposal_apply(ident, plan["proposal_id"], plan["revision"])
-    assert path.read_text() == concurrent
+    assert path.read_text(encoding="utf-8") == concurrent
     assert (runtime.engine.root / target["path"]).is_file()
     runtime.close()
 
@@ -294,11 +297,13 @@ def test_format_three_pending_id_graph_rename_and_new_card_survive_migration(tmp
     # Reconstruct real format-three storage and its immutable prepared proposal.
     policies = runtime._policies()
     rules_path = runtime.engine.root / "INSTRUCTIONS.md"
-    rules = "---\n" + yaml.safe_dump(policies, sort_keys=False) + "---\n" + _parse(rules_path.read_text())[1]
-    rules_path.write_text(rules)
+    rules = "---\n" + yaml.safe_dump(policies, sort_keys=False) + "---\n" + _parse(rules_path.read_text(encoding="utf-8"))[1]
+    # Prepared revisions must describe the bytes actually supplied by the old writer.
+    rules_path.write_text(rules, encoding="utf-8", newline="")
+    assert _revision(rules_path.read_bytes().decode("utf-8")) == _revision(rules)
     for material in runtime.engine.materials.values():
         text = "---\n" + yaml.safe_dump(material.metadata, sort_keys=False, allow_unicode=True) + "---\n" + material.content
-        (runtime.engine.root / material.path).write_text(text)
+        (runtime.engine.root / material.path).write_text(text, encoding="utf-8", newline="")
     runtime.control.write(runtime._format_path(), json.dumps({"format_version": 3}))
     target_material = runtime.engine.resolve(target["id"])
     source_material = runtime.engine.resolve(source["id"])

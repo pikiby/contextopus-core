@@ -10,6 +10,13 @@ below describe the preceding package and do not certify rebuilt bytes. The
 corrected artifact has a separate identity receipt and still requires its own
 successful platform CI and live-installation acceptance.
 
+That CI also exposed Windows test fixtures using the platform default encoding
+and newline conversion. The correction supplies UTF-8 and preserves fixture bytes,
+with explicit body/revision assertions; production link and migration code did
+not change. Both Windows jobs passed the native empty/seeded-file lock tests,
+but their full suites were cancelled after four fixture failures while still
+making progress. They are incomplete runs, not Windows suite passes.
+
 ## Version domains
 
 | Domain | Target |
