@@ -1,6 +1,6 @@
 # Contextopus 1.3 implementation and delivery evidence
 
-This document records implementation and delivery history. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define acceptance. The final delivery section records the released and installed 1.3.1 runtime, platform CI and separate client-behavior results. The later 1.3.2 section records candidate verification with native model acceptance still pending. Earlier run counts and temporary-artifact evidence below retain their original scope; they do not certify later rebuilt bytes.
+This document records implementation and delivery history. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define acceptance. The final delivery section records the released and installed 1.3.1 runtime, platform CI and separate client-behavior results. The later 1.3.2 section records exact-artifact verification and independently reviewed, bounded synthetic native-model acceptance. Earlier run counts and temporary-artifact evidence below retain their original scope; they do not certify later rebuilt bytes.
 
 ## Earlier candidate and cross-platform corrections
 
@@ -59,7 +59,7 @@ their original attribution rather than certifying new runtime bytes.
 
 | Domain | Target |
 | --- | --- |
-| Python package and client manifests | 1.3.1 released/installed; 1.3.2 candidate in preparation |
+| Python package and client manifests | 1.3.1 released/installed; 1.3.2 final delivery artifacts verified |
 | Workspace storage format | 4 |
 | Builtin search algorithms | 2.0.0 |
 | Shared selection/evidence contracts | 2 |
@@ -423,9 +423,9 @@ experiment do not establish a shipped product fix or universal model compliance.
 All four clients demonstrated technical native retrieval under the stated
 conditions. OpenCode's missing INSTRUCTIONS and search-setting override, and
 Crush's correctly activated behavior failure, remain separate acceptance
-limitations. The follow-up 1.3.2 candidate clarifies the initial-rule and native
-MCP routing instructions; its actual model acceptance remains pending. This
-does not establish that those observed behaviors are fixed. Project-memory
+limitations of that package. The follow-up 1.3.2 runtime clarifies initial-rule
+and native MCP routing instructions; its later controlled-corpus results are
+recorded separately below and do not relabel these earlier observations. Project-memory
 reconciliation must retain these limits. Native Windows CI does not establish
 Windows/macOS GUI behavior, GPU inference, or complete model scenarios on every
 host. Historical model/copy receipts above remain attributed to their original
@@ -435,15 +435,15 @@ packages.
 sequence. Private host paths, backup locations and client-session identifiers
 are intentionally absent from this delivery summary.
 
-## Follow-up 1.3.2 candidate: routing and legacy identities
+## Follow-up 1.3.2: routing and legacy identities
 
-The [1.3.2 release draft](../releases/1.3.2.md) separates first complete rule
-reading from conditional project reading and makes native MCP routing explicit.
+The [1.3.2 release notes](../releases/1.3.2.md) separate first complete rule
+reading from conditional project reading and make native MCP routing explicit.
 The initial search inherits the selected algorithm and limits unless the user
 provided alternatives. Protocol tests can establish delivery of these
 instructions, not model compliance. The native 1.3.1 observations above retain
-their own scope. Publication, installation and final-artifact acceptance are not
-claimed here.
+their own scope. Exact artifacts and final native checks have their own source
+binding below; local installation remains a separate delivery step.
 
 An earlier synthetic OpenCode model turn on 1.3.2 source `2add7fa` made five
 successful main provider requests and retrieved the fixture record, but skipped
@@ -493,24 +493,50 @@ job passed 797 with 10 skips. The Windows early gates and all six build,
 release-verification, exact-wheel installation and installed MCP checks passed;
 the seventh job exercised the real 1.1 writer transition.
 
-The current candidate runtime is
-`8b00620b9a8a1c07672bda0eebbb0e9110d59d27`, wheel SHA-256
-`d4e83f2bdacc3e95c813131beb443808e1ed9dfedb5815efaee8bc461231b7f0`.
-Its subsequent metadata-only help/schema-description change passed 28 MCP
-contract tests and two Core/release checks. Independent review found all 47
+The intermediate `8b00620b9a8a1c07672bda0eebbb0e9110d59d27` wheel, SHA-256
+`d4e83f2bdacc3e95c813131beb443808e1ed9dfedb5815efaee8bc461231b7f0`,
+passed 28 MCP tests for its metadata-only help/schema-description change and
+two Core/release checks. Independent review found all 47
 operation argument schemas unchanged except the search N description, with
 unchanged validation and dispatch. Its exact installed wheel passed MCP,
 module-storage write/read/restart and guide-metadata checks; all 120 application
 members matched the wheel. The full OS matrix belongs to `2add7fa`, not this
-later SHA. A separate real installed 1.2 writer transition against this exact
-final wheel passed one test in 25.81 s, preserving two temporary contexts,
+later SHA. A separate real installed 1.2 writer transition against that
+intermediate wheel passed one test in 25.81 s, preserving two temporary contexts,
 pending approval bytes and search settings without model calls.
 
-Live remains 1.3.1; 1.3.2 is not published or installed. Native model retests of
-the final `8b00620` candidate have not run while explicit consent for the
-synthetic payload and providers is pending. No corrected model behavior is
-claimed. Observed proof is also missing
-for delegation, context switches, lost rule text and plugin refresh, and for a
-paired same-fixture measurement of MCP calls, repeated rule loads and tokens.
-The earlier JSON-payload comparison retains its own scope. These acceptance
-coverage limits do not themselves identify an additional source defect.
+The final runtime source is `f0578ce1734af2b516cbfe8175b8f991d9fd8acf`,
+wheel SHA-256
+`f8d47a8ea562532138c04b869cc1b8e8f008993e0cb683eae6183c7b2b076b1a`.
+Its only later product delta makes the independent retrieval sequence explicit:
+policy settings, complete INSTRUCTIONS, then search with inherited settings.
+Three targeted procedure/MCP/release checks passed. The exact installed wheel
+passed guide/procedure and module-storage write/read/restart smoke checks, with
+all 120 application members matching. This delivery-text delta did not change
+storage, dispatch or validation. Its focused acceptance does not reattribute the
+`2add7fa` platform matrix or the `8b00620` real-1.2 transition to a later SHA.
+
+Two independently reviewed native model turns used this final wheel with a
+controlled synthetic corpus. OpenCode 1.18.32 with DeepSeek Flash and Crush 0.87
+with DeepSeek Pro both obtained policy settings, read the complete rules,
+inherited N=2, fully read the requested fact and grounded the answer in the
+returned evidence. OpenCode also fully read the related plan. Neither bypassed
+MCP through files nor wrote context data. Crush
+recovered from one guessed-ID argument error by obtaining the read signature and
+retrying with `material_id`. OpenCode made nine successful MCP calls and nine
+HTTP-200 provider requests in 25.154 s; Crush made seven MCP attempts, six
+successful, and ten HTTP-200 provider requests in 34.010 s. Provider-reported
+input/output totals including title generation were 70,905/1,830 and
+109,815/2,133 tokens respectively. These are observed per-turn totals, not a
+paired causal token-economy comparison.
+
+These checks establish the bounded fresh-task path on controlled retrieval,
+not production ranking, every model/client combination or enforced compliance.
+Earlier partial/failing traces retain their original package and fixture scope.
+Observed proof is still missing for delegation, context switches, lost rule
+text and plugin refresh. GUI/GPU behavior and model scenarios on every OS remain
+outside the native platform CI claim. Live remains 1.3.1 at this delivery
+checkpoint; package installation and final data-preservation checks are separate
+steps. Final documentation changes affect only the sdist: accepted wheel/client
+ZIP bytes retain their runtime-source attribution and are not rebuilt as though
+a documentation-only commit had rerun the platform or model checks.

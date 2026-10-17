@@ -35,7 +35,7 @@ platform counts remain separate; the focused counts above are historical.
 
 The [delivery record](contextopus-1.3.md#final-delivery-released-and-installed-131)
 records preservation and native-client outcomes, including the remaining model
-behavior limits. Live still runs 1.3.1. The later 1.3.2 candidate has separate
-technical verification; native model retests of its final `8b00620` runtime have
-not run pending explicit synthetic payload/provider consent. It does not replace
-or relabel the 1.3.1 evidence.
+behavior limits. Live still runs 1.3.1 at this delivery checkpoint. The later
+1.3.2 runtime has separate technical verification and independently reviewed
+controlled-corpus OpenCode/Crush model checks. Those bounded results are recorded
+in the delivery record; they do not replace or relabel the 1.3.1 evidence.
