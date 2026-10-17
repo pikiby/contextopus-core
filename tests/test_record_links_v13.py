@@ -218,7 +218,31 @@ def test_codec_uses_an_unambiguous_enclosing_obsidian_vault(tmp_path):
     link = codec.encode(['a'])[0]
     assert link.startswith('[[Contextopus/modules/workspace/workspace_contexts/alpha/knowledge/Условия.md|')
     assert codec.decode([link], 'another') == ['a']
-    (work_root / '.obsidian').mkdir()
+
+
+def test_codec_own_root_vault_takes_priority_over_enclosing_vault(tmp_path):
+    vault = tmp_path / 'Outer'
+    work_root = vault / 'Contextopus'
+    (vault / '.obsidian').mkdir(parents=True)
+    (work_root / '.obsidian').mkdir(parents=True)
+    (work_root / 'modules/workspace/workspace_contexts').mkdir(parents=True)
+    catalog = {'a': Material('a', 'knowledge/Условия.md', {}, '')}
+    codec = LinkCodec(work_root, catalog, {'a': 'alpha'})
+    assert codec.vault_root == work_root
+    link = codec.encode(['a'])[0]
+    assert link.startswith('[[modules/workspace/workspace_contexts/alpha/knowledge/Условия.md|')
+    assert codec.decode([link], 'another') == ['a']
+    assert (vault / '.obsidian').is_dir() and (work_root / '.obsidian').is_dir()
+
+
+def test_codec_rejects_ambiguous_ancestors_without_an_own_root_vault(tmp_path):
+    outer = tmp_path / 'Outer'
+    inner = outer / 'Inner'
+    work_root = inner / 'Contextopus'
+    (outer / '.obsidian').mkdir(parents=True)
+    (inner / '.obsidian').mkdir(parents=True)
+    work_root.mkdir()
+    catalog = {'a': Material('a', 'knowledge/Условия.md', {}, '')}
     with pytest.raises(PCWError, match='Several enclosing'):
         LinkCodec(work_root, catalog, {'a': 'alpha'})
 
@@ -339,3 +363,100 @@ def test_format_three_pending_id_graph_rename_and_new_card_survive_migration(tmp
     assert proposal_path.read_bytes() == original
     assert runtime.upgrade_plan()["compatible"]
     runtime.close()
+
+
+def test_mcp_upgrade_copy_uses_own_vault_boundary_inside_another_vault(tmp_path, monkeypatch):
+    """Migrate a copied format-three context through the real MCP protocol."""
+    import asyncio
+    import shutil
+    from pathlib import Path
+    from mcp.shared.memory import create_connected_server_and_client_session
+    from contextopus.core.resources import ProcessResources
+    from contextopus.interfaces.mcp import server
+
+    original = tmp_path / "fixture-original"
+    (original / "modules/workspace/workspace_contexts").mkdir(parents=True)
+    (original / ".obsidian").mkdir()
+    a, b = context(original), context(original, "beta")
+    try:
+        local = put(a, "# Одинаковые условия\nПроверенные условия первой категории.", path="Раздел/Условия.md")
+        foreign = put(b, "# Одинаковые условия\nПроверенные условия другой категории.", path="Раздел/Условия.md")
+        source = put(a, "# Наблюдение\nИспользуйте оба набора условий.", [local["id"], foreign["id"]])
+        rules_path = a.engine.root / "INSTRUCTIONS.md"
+        rules = "---\n" + yaml.safe_dump(a._policies()) + "---\n" + _parse(rules_path.read_bytes().decode("utf-8"))[1]
+        rules_path.write_bytes(rules.encode("utf-8"))
+        for material in a.engine.materials.values():
+            metadata = copy.deepcopy(material.metadata)
+            if material.id == source["id"]:
+                # An authored source-relative native link must keep its target
+                # and display alias when the legacy ID graph is migrated.
+                metadata["links"] = ["[[Раздел/Условия.md|Авторская подпись условий]]", foreign["id"]]
+            text = "---\n" + yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True) + "---\n" + material.content
+            (a.engine.root / material.path).write_bytes(text.encode("utf-8"))
+        a.control.write(a._format_path(), json.dumps({"format_version": 3}))
+    finally:
+        a.close(); b.close()
+    original_files = {p.relative_to(original): p.read_bytes() for p in original.rglob("*.md")}
+    outer = tmp_path / "outer-vault"
+    (outer / ".obsidian").mkdir(parents=True)
+    root = outer / "Contextopus"
+    shutil.copytree(original, root)
+    assert (root / ".obsidian").is_dir() and (outer / ".obsidian").is_dir()
+    factory = Factory()
+    resources = ProcessResources(factory)
+    original_owner = server.ServerOwner
+    owners = []
+
+    class CopyOwner(original_owner):
+        def __init__(self, selected_root):
+            super().__init__(selected_root)
+            owners.append(self)
+
+        def application(self, selected_root=None, context=None):
+            assert Path(selected_root or self.root).resolve() == root
+            return super().application(selected_root, context)
+
+    monkeypatch.setattr(server, "ProcessResources", lambda: resources)
+    monkeypatch.setattr(server, "ServerOwner", CopyOwner)
+    mcp = server.create_server(root)
+
+    async def exercise():
+        async with create_connected_server_and_client_session(mcp) as client:
+            assert {tool.name for tool in (await client.list_tools()).tools} == {"guide", "read", "write"}
+
+            async def call(name, **arguments):
+                result = await client.call_tool(name, {"work_root": str(root), "context": "alpha", **arguments})
+                assert not result.isError, result
+                return result.structuredContent if result.structuredContent is not None else json.loads(
+                    "".join(block.text for block in result.content if hasattr(block, "text")))
+
+            await call("guide", procedure="upgrade")
+            plan = await call("read", operation="workspace.upgrade_plan", detail="full")
+            assert plan["ready"], plan["blockers"]
+            applied = await call("write", operation="workspace.upgrade_apply", detail="full",
+                                 arguments={"expected_revision": plan["revision"], "user_request": "Upgrade this isolated copy"})
+            assert applied["status"] == "complete", applied
+            found = await call("read", operation="workspace.read", detail="full", arguments={"material_id": source["id"]})
+            assert found["id"] == source["id"] and found["content"] == source["content"]
+            assert found["revision"] == source["revision"]
+            assert found["links"] == [local["id"], foreign["id"]]
+            replay = await call("write", operation="workspace.upgrade_apply", detail="full",
+                                arguments={"expected_revision": plan["revision"], "user_request": "Retry this isolated copy"})
+            assert replay["replayed"]
+            assert (await call("read", operation="workspace.upgrade_plan", detail="full"))["compatible"]
+            assert not [entry for entry in factory.calls if entry[1] == "document"]
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        for owner in owners:
+            owner.close()
+    metadata, body = _parse((root / "modules/workspace/workspace_contexts/alpha" / source["path"]).read_bytes().decode("utf-8"))
+    assert body == source["content"]
+    targets = [link[2:-2].split("|", 1)[0] for link in metadata["links"]]
+    assert targets == ["modules/workspace/workspace_contexts/" + name + "/" + target["path"]
+                       for name, target in [("alpha", local), ("beta", foreign)]]
+    assert all((root / target).is_file() for target in targets)
+    assert metadata["links"][0].endswith("|Авторская подпись условий]]")
+    assert {p.relative_to(original): p.read_bytes() for p in original.rglob("*.md")} == original_files
+    assert (root / ".obsidian").is_dir() and (outer / ".obsidian").is_dir()

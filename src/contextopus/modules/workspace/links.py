@@ -20,8 +20,10 @@ class LinkCodec:
     def __init__(self, work_root, catalog, owners):
         self.work_root = Path(work_root).resolve()
         self.catalog, self.owners = catalog, owners
-        candidates = [p for p in (self.work_root, *self.work_root.parents)
-                      if (p / ".obsidian").is_dir()]
+        # An explicitly selected root that is itself a vault defines its own
+        # boundary, even when another vault contains that directory.
+        candidates = ([self.work_root] if (self.work_root / ".obsidian").is_dir()
+                      else [p for p in self.work_root.parents if (p / ".obsidian").is_dir()])
         if len(candidates) > 1:
             raise PCWError("Several enclosing Obsidian vaults exist; select one unambiguous vault root")
         self.vault_root = candidates[0] if candidates else self.work_root

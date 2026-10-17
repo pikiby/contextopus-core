@@ -8,7 +8,7 @@ Persistent context for people and coding agents. Keep project knowledge, working
 
 Contextopus is a standalone Python application with a shared Core, a Workspace module, a terminal interface and an MCP service. Coding-client integrations connect to that service and expose short skills.
 
-**This checkout prepares Contextopus 1.3.0:** compact material retrieval, three MCP tools (`guide`, `read`, `write`), correct document-level selection across all builtin algorithms, Obsidian navigation, separate machine settings and one-action module installation with packaged database migrations. Package build, publication, live migration and actual client adoption are separate checks. [1.3.0 changes and direct upgrade instructions](docs/releases/1.3.0.md).
+**This checkout prepares Contextopus 1.3.1:** compact material retrieval, three MCP tools (`guide`, `read`, `write`), correct document-level selection across all builtin algorithms, Obsidian navigation, separate machine settings and one-action module installation with packaged database migrations. Package build, publication, live migration and actual client adoption are separate checks. [1.3.1 patch and upgrade instructions](docs/releases/1.3.1.md). The patch prioritizes a selected root’s own vault boundary when an ancestor also contains `.obsidian`.
 
 ![Contextopus terminal example](docs/media/tui/main-wide.png)
 
@@ -42,20 +42,20 @@ is available through CLI and the TUI Modules page.
 
 ## Install
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), obtain the exact verified 1.3.0 wheel and SHA256SUMS from the authorized local build or a published [release](https://github.com/pikiby/contextopus-core/releases). This source tree does not establish that 1.3.0 has been published. Verify its checksum before installation. From the download directory:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), obtain the exact verified 1.3.1 wheel and SHA256SUMS from the authorized local build or a published [release](https://github.com/pikiby/contextopus-core/releases). This source tree does not establish that 1.3.1 has been published. Verify its checksum before installation. From the download directory:
 
 ```console
-uv tool install --python 3.12 ./contextopus_core-1.3.0-py3-none-any.whl
+uv tool install --python 3.12 ./contextopus_core-1.3.1-py3-none-any.whl
 contextopus --version
 contextopus init
 contextopus tui
 ```
 
-For local embedding inference, install the same verified wheel with its `local` extra: `uv tool install --python 3.12 "./contextopus_core-1.3.0-py3-none-any.whl[local]"`. Models download only when an explicitly requested operation needs inference; status and setup previews do not load a model. Explicit init/model setup prepares bundled documentation and the algorithm catalog after a profile is configured. A first init without a model reports `model_setup_required`; use `contextopus setupmodel` to review the model plan, then `contextopus setupmodel --apply` when ready. Python and application dependencies are managed by uv.
+For local embedding inference, install the same verified wheel with its `local` extra: `uv tool install --python 3.12 "./contextopus_core-1.3.1-py3-none-any.whl[local]"`. Models download only when an explicitly requested operation needs inference; status and setup previews do not load a model. Explicit init/model setup prepares bundled documentation and the algorithm catalog after a profile is configured. A first init without a model reports `model_setup_required`; use `contextopus setupmodel` to review the model plan, then `contextopus setupmodel --apply` when ready. Python and application dependencies are managed by uv.
 
 Use `--root <directory>` before a subcommand or `CONTEXTOPUS_ROOT` to select persistent storage. The default is the platform's user-data directory, outside plugin caches. Keep the same root across clients.
 
-For an existing installation, follow the [direct 1.1/1.2 → 1.3 sequence](docs/releases/1.3.0.md#direct-update-from-11-or-12) before replacing anything: coherent whole-set backup, isolated migration/retry/restore test, preserved root/extras/pending work, reviewed managed-client update and actual fresh-client verification. An intermediate 1.2 installation is unnecessary. Do not initialize an empty replacement root or launch old code against incompatible converted data.
+For an existing installation, follow the [direct 1.1/1.2 → 1.3 sequence and 1.3.1 retry guidance](docs/releases/1.3.1.md#update-and-retry) before replacing anything: coherent whole-set backup, isolated migration/retry/restore test, preserved root/extras/pending work, reviewed managed-client update and actual fresh-client verification. An intermediate 1.2 installation is unnecessary. Do not initialize an empty replacement root or launch old code against incompatible converted data.
 
 
 ```console
@@ -76,7 +76,7 @@ Other client names: `claude-code`, `opencode`, `crush`. Integration refuses name
 - [Search evidence and analysis](docs/search-analysis.md)
 - [Base documentation context](docs/base-context.md)
 - [Transition acceptance and evidence](docs/implementation/contextopus-transition.md)
-- [1.3.0 release candidate and upgrade guide](docs/releases/1.3.0.md)
+- [1.3.1 patch and upgrade guide](docs/releases/1.3.1.md)
 - [1.3 implementation and delivery evidence](docs/implementation/contextopus-1.3.md)
 - [Previous 1.2.0 release notes](docs/releases/1.2.0.md)
 - [Previous changelog](CHANGELOG.md)
