@@ -3,6 +3,7 @@ import importlib.util
 import hashlib
 import json
 from pathlib import Path
+import tomllib
 import zipfile
 
 import pytest
@@ -12,6 +13,25 @@ from contextopus.integrations import IntegrationConflict, integrate, plan
 ROOT = Path(__file__).resolve().parents[1]
 RELEASED = json.loads((ROOT / 'tests/fixtures/released-short-skills.json').read_text())
 CASES = [(version, name, text) for version, skills in RELEASED.items() for name, text in skills.items()]
+
+
+def test_canonical_release_versions_and_documentation_agree():
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    assert next(p["version"] for p in lock["package"] if p["name"] == "contextopus-core") == version
+    # pathlib includes hidden native-client directories such as .codex-plugin.
+    manifests = set((ROOT / "plugins/contextopus").rglob("plugin.json"))
+    assert {ROOT / "plugins/contextopus/plugin.json",
+            ROOT / "plugins/contextopus/.codex-plugin/plugin.json"} <= manifests
+    for path in manifests:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        assert manifest["name"] == "contextopus"
+        assert manifest["version"] == version, path
+    base = json.loads((ROOT / "src/contextopus/resources/base_context/manifest.json").read_text(encoding="utf-8"))
+    assert base["version"] == version
+    installed = (ROOT / "src/contextopus/resources/base_context/installed-version.md").read_text(encoding="utf-8")
+    assert f"ships with Contextopus Core {version}." in installed
+    assert (ROOT / "docs/releases" / f"{version}.md").is_file()
 
 
 @pytest.mark.parametrize('version,name,text', CASES, ids=[f'{version}-{name}' for version, name, _ in CASES])

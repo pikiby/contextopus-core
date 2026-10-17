@@ -115,6 +115,13 @@ class WorkspaceSourceAdapter(PCWRuntime):
             self._assert_safe(previous)
             if previous.is_file():
                 reserved.update(json.loads(read_utf8(previous)))
+            receipt = directory / "migration-v4.json"
+            self._assert_safe(receipt)
+            if receipt.is_file():
+                from .migration_identity import validate_mapping
+                for item in json.loads(read_utf8(receipt)).get("identity_map", []):
+                    validate_mapping(item)
+                    reserved[item["new_id"]] = {"workspace": item["workspace"]}
         reserved.update({ident: {} for ident in self.catalog})
         while True:
             ident = uuid.uuid4().hex + ".md"
@@ -347,7 +354,20 @@ class WorkspaceSourceAdapter(PCWRuntime):
         self._knowledge_path(candidate.removeprefix("knowledge/"))
         return candidate
 
+    def _material(self, ident):
+        from .migration_identity import legacy_reference
+        return super()._material(legacy_reference(self, ident))
+
+    def effective_task_id(self, ident):
+        if ident is None:
+            return None
+        from .migration_identity import legacy_reference
+        with self.read_guard():
+            return legacy_reference(self, ident, local_task=True)
+
     def resolve(self, ident):
+        from .migration_identity import legacy_reference
+        ident = legacy_reference(self, ident)
         _id(ident)
         if ident not in self.catalog:
             raise PCWError(f"Unknown material ID: {ident}")
@@ -355,9 +375,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
 
     def _check_links(self, links, ident):
         links = _unique_links(links, ident)
-        for target in links:
-            self.resolve(target)
-        return links
+        return _unique_links([self.resolve(target).id for target in links], ident)
 
     def assert_no_foreign_incoming(self, removed):
         for material in self.catalog.values():

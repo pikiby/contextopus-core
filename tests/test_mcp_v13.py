@@ -108,6 +108,54 @@ def test_default_tools_and_direct_guide_selectors(monkeypatch, tmp_path):
     assert app.query.call_count == before
 
 
+def test_initialize_delivers_native_tool_routing_and_preserves_real_tool_names(monkeypatch, tmp_path):
+    import anyio
+    from mcp import ClientSession
+    from mcp.shared.memory import create_client_server_memory_streams
+
+    mcp, app = fixture_server(monkeypatch, tmp_path)
+
+    async def inspect_protocol():
+        lowlevel = mcp._mcp_server
+        async with create_client_server_memory_streams() as (client_streams, server_streams):
+            async with anyio.create_task_group() as tasks:
+                async def serve():
+                    await lowlevel.run(*server_streams, lowlevel.create_initialization_options())
+                tasks.start_soon(serve)
+                async with ClientSession(*client_streams) as session:
+                    initialized = await session.initialize()
+                    instructions = initialized.instructions
+                    assert "Contextopus MCP tools advertised by this client" in instructions
+                    assert "native names may include a server prefix" in instructions
+                    assert "work_root identifies Contextopus data" in instructions
+                    assert "Do not replace Contextopus operations with shell commands" in instructions
+                    assert "Native skill loading and obtaining declared external sources" in instructions
+                    assert "existing approval rules" in instructions
+                    assert "reload only when unknown, lost, changed or after a plugin update" in instructions
+                    tools = (await session.list_tools()).tools
+                    assert {tool.name for tool in tools} == {"guide", "read", "write"}
+                    # Shell-specific aliases belong to the client, not the server catalog.
+                    assert "mcp_contextopus_guide" not in instructions
+                    await session.call_tool("guide", {})
+                tasks.cancel_scope.cancel()
+
+    asyncio.run(inspect_protocol())
+    app.query.assert_called_once_with("procedure", {"name": "workspace"})
+
+
+def test_workspace_procedure_requires_first_rules_read_and_inherited_query_settings(tmp_path):
+    from contextopus.startup import Application
+
+    with Application(tmp_path, discover=False) as app:
+        procedure = app.query("procedure", {"name": "workspace"})["content"]
+    assert "before the first search in a new independent task" in procedure
+    assert "obtain and read the complete workspace.instructions_read" in procedure
+    assert "Read workspace.project_read when" in procedure
+    assert "it never replaces the first reading" in procedure
+    assert "inherit the selected context's algorithm and limits" in procedure
+    assert "omit overrides rather than inventing them" in procedure
+
+
 def test_legacy_aliases_are_explicit_full_responses(monkeypatch, tmp_path):
     mcp, app = fixture_server(monkeypatch, tmp_path, legacy_tools=True)
     assert {t.name for t in asyncio.run(mcp.list_tools())} == {

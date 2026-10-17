@@ -67,10 +67,19 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         host=host,
         port=port,
         instructions=(
-            "Use guide for a procedure or an unknown operation signature; read for queries and write for changes. "
-            "Obtain and read the applicable procedure before acting. guide() returns the ordinary Workspace workflow. "
-            "Reuse a known procedure during the task; ordinary phases do not require another guide call. "
-            "Workspace operations require explicit context and preserve their approval rules."
+            "Use the Contextopus MCP tools advertised by this client for Contextopus context discovery, "
+            "instructions, knowledge retrieval and memory changes. Their native names may include a server "
+            "prefix; select those advertised tools, not similarly named local tools. A supplied work_root "
+            "identifies Contextopus data, not a code directory to explore. Obtain and read the applicable "
+            "procedure through this server's guide tool before context operations. Do not replace Contextopus "
+            "operations with shell commands, direct context-file reads, generic code search or web search. "
+            "Native skill loading and obtaining declared external sources still use the readers required by "
+            "the client and procedure. If Contextopus MCP is unavailable, report the connection failure "
+            "instead of bypassing it. Use this server's read tool for queries and write tool only for "
+            "authorized changes under the existing approval rules. guide() returns the ordinary Workspace "
+            "workflow; request a signature only when unknown. Reuse procedures already obtained for the same "
+            "task; reload only when unknown, lost, changed or after a plugin update. Workspace operations "
+            "require explicit context."
         ),
     )
     atexit.register(owner.close)

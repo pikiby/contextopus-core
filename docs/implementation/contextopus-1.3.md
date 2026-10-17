@@ -1,6 +1,6 @@
 # Contextopus 1.3 implementation and delivery evidence
 
-This document records implementation and delivery history. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define acceptance. The final delivery section records the released and installed 1.3.1 runtime, platform CI and separate client-behavior results. Earlier run counts and temporary-artifact evidence below retain their original scope; they do not certify later rebuilt bytes.
+This document records implementation and delivery history. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define acceptance. The final delivery section records the released and installed 1.3.1 runtime, platform CI and separate client-behavior results. The later 1.3.2 section records candidate verification with native model acceptance still pending. Earlier run counts and temporary-artifact evidence below retain their original scope; they do not certify later rebuilt bytes.
 
 ## Earlier candidate and cross-platform corrections
 
@@ -59,7 +59,7 @@ their original attribution rather than certifying new runtime bytes.
 
 | Domain | Target |
 | --- | --- |
-| Python package and client manifests | 1.3.1 (1.3.0 feature release plus nested-vault correction) |
+| Python package and client manifests | 1.3.1 released/installed; 1.3.2 candidate in preparation |
 | Workspace storage format | 4 |
 | Builtin search algorithms | 2.0.0 |
 | Shared selection/evidence contracts | 2 |
@@ -404,7 +404,7 @@ checks subsequently established the following separate results:
 | --- | --- |
 | Codex | `$w` passed: actual guide, rules, project, search and full read. |
 | Claude Code | Native `/w` retrieval passed; guide was repeated. `project_read` is conditional on need, so its absence alone does not establish a procedure violation. |
-| OpenCode | Native `opencode run --command w` performed guide/settings/search and full reads, with zero argument errors and default compact responses. It skipped INSTRUCTIONS: technical retrieval worked, but this procedure requirement was not met. Project reading remains conditional. |
+| OpenCode | Native `opencode run --command w` performed guide/settings/search and full reads, with zero argument errors and default compact responses. It skipped the initial full INSTRUCTIONS and supplied `N=15` rather than inheriting the selected search settings. Technical retrieval worked, but those procedure requirements were not met. Project reading remains conditional. |
 | Crush 0.87 | Native ReadSkill supplied the exact released skill through a text/markdown attachment to AgentMessage. Bytes were verified in the native user-message attachment; prompt inclusion was established from the client implementation, not an outbound provider-request capture. MCP was connected and its tools advertised, but the model used grep/glob/view and made zero MCP calls. This validly activated behavior check failed. |
 
 The separate earlier Crush capability turn allowed only the two read-only MCP
@@ -421,11 +421,12 @@ product runtime remain unchanged. Harness/method corrections and this temporary
 experiment do not establish a shipped product fix or universal model compliance.
 
 All four clients demonstrated technical native retrieval under the stated
-conditions. OpenCode's missing INSTRUCTIONS and Crush's correctly activated
-behavior failure remain separate acceptance limitations. The goal stays open
-while the user decides whether to accept delivery with those model limitations
-as a separate task or continue the work. Final project-memory reconciliation
-must retain that decision and these limits. Native Windows CI does not establish
+conditions. OpenCode's missing INSTRUCTIONS and search-setting override, and
+Crush's correctly activated behavior failure, remain separate acceptance
+limitations. The follow-up 1.3.2 candidate clarifies the initial-rule and native
+MCP routing instructions; its actual model acceptance remains pending. This
+does not establish that those observed behaviors are fixed. Project-memory
+reconciliation must retain these limits. Native Windows CI does not establish
 Windows/macOS GUI behavior, GPU inference, or complete model scenarios on every
 host. Historical model/copy receipts above remain attributed to their original
 packages.
@@ -433,3 +434,48 @@ packages.
 [Upgrade and restore instructions](../releases/1.3.0.md) describe the operational
 sequence. Private host paths, backup locations and client-session identifiers
 are intentionally absent from this delivery summary.
+
+## Follow-up 1.3.2 candidate: routing and legacy identities
+
+The [1.3.2 release draft](../releases/1.3.2.md) separates first complete rule
+reading from conditional project reading and makes native MCP routing explicit.
+The initial search inherits the selected algorithm and limits unless the user
+provided alternatives. Protocol tests can establish delivery of these
+instructions, not model compliance. The native 1.3.1 observations above remain
+the behavioral evidence until the exact 1.3.2 candidate is tested with clients.
+Publication, installation and final-artifact acceptance are not claimed here.
+
+The candidate also adds reviewed context/path mappings for colliding legacy
+format-0/1 filename identities. Format-2-and-later canonical YAML IDs remain
+authoritative. Original pending proposal/review bytes and approval revisions
+are preserved; technical overlays adapt identities and paths. Foreign contexts
+are not migrated implicitly, and ambiguous references block.
+
+Independent review reproduced a graph-preservation defect: an exact foreign
+native link resolved to its canonical ID, but a second local-alias lookup could
+redirect it when that ID matched a local legacy filename. The correction uses
+the decoded canonical target directly. Pending `link_ids` must match the
+reviewed graph; explicit foreign `link_targets` keep their owner, ID and path.
+Changed or ambiguous reviewed targets block before migration. The same isolated
+reproducer passed after correction, preserving the foreign path and ID.
+
+The targeted migration run passed **17 new cases plus five historical cases**
+in 75.30 s, covering local/foreign identities, unchanged approvals, interruption
+and retry, retained-map conflicts and root relocation. Those counts identify
+one bounded source run and must not be added to full-suite totals as unique
+tests. Normal record lookup reads the local retained-map receipt rather than
+running the migration-wide catalog scan; no lookup timing benchmark was run.
+
+The combined candidate's complete Linux suite finished with **792 passed, two
+failed, 10 skipped and 62 passed subtests** in 930.44 s. Both failures concerned
+version consistency: the hidden native-plugin manifest and installed metadata
+in the test interpreter still reported 1.3.1 against project version 1.3.2.
+The full run's 257 inspected source/test file fingerprints remained unchanged.
+After the hidden manifest was aligned and only the repository's editable project
+metadata rebuilt as 1.3.2, the complete contract and release-readiness files
+passed: **40 passed and two passed subtests** in 19.35 s. Non-project dependencies
+and the host installation were unchanged. This focused run closes those two
+version failures without rerunning or relabeling the earlier full suite.
+The full run is not reported as a fully passing release gate. No native 1.3.2 client behavior,
+Windows/macOS platform result, installed wheel or live migration is established
+by these source tests.

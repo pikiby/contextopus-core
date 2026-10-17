@@ -19,6 +19,7 @@ from .records import project_record, task_record, document_id, validate_metadata
 from .policies import extract_settings, policies
 from .settings import configuration_text, save_configuration
 from contextopus.core.settings import WORKSPACE_POLICY_DEFAULTS
+from .migration_identity import MigrationIdentity
 
 
 class FormatMigrationMixin:
@@ -123,8 +124,13 @@ class FormatMigrationMixin:
             if k not in {"migration-v3.json", "migration-v4.json"}
         }
 
-    def _v2_transforms(self, version):
+    def _v2_transforms(self, version, identity=None):
+        identity = identity or MigrationIdentity(self)
+        self._migration_identity = identity
         files, ids, aliases = {}, {}, {}
+        if version < 2:
+            aliases.update({item['old_id']: item['new_id'] for item in identity.preview()
+                            if item['workspace'] == self.engine.workspace})
         indexed_paths = None
         for path in sorted(self.engine.knowledge.rglob("*.md")):
             if any(
@@ -165,6 +171,10 @@ class FormatMigrationMixin:
                 ident = _id(next(iter(candidates)))
             else:
                 ident = _id(metadata["id"] if version >= 2 else path.name)
+            mapped = identity.mapping.get((self.engine.workspace, relative)) if version < 2 else None
+            if mapped:
+                aliases[ident] = mapped["new_id"]
+                ident = mapped["new_id"]
             if ident in ids:
                 raise PCWError(f"Duplicate material ID: {ident}")
             ids[ident] = relative
@@ -212,28 +222,16 @@ class FormatMigrationMixin:
             ids[ident] = relative
             files[relative] = {"id": ident, "metadata": metadata, "content": body,
                                "before": before, "converted": converted}
-        # Reject global identity collisions before changing any source file.
-        for root in self.engine.root.parent.iterdir():
-            if root.name.startswith(".") or root == self.engine.root:
-                continue
-            self.engine._assert_safe(root)
-            if not root.is_dir():
-                continue
-            for path in (root / "knowledge").rglob("*.md"):
-                self.engine._assert_safe(path)
-                metadata, _ = _parse(path.read_bytes().decode("utf-8"))
-                other = metadata.get("id", path.name)
-                if other in ids:
-                    raise PCWError(
-                        f"Duplicate ID {other} in {root.name}; resolve before migration"
-                    )
+        for ident in ids:
+            if ident in identity.owners and identity.owners[ident] != self.engine.workspace:
+                raise PCWError(f"Duplicate ID {ident}; restore its actual identity before migration")
         occupied, transforms = set(), {}
         for relative, item in files.items():
             ident = item["id"]
             after_path = relative
             if "converted" in item:
                 after_path = "knowledge/" + topic_name(item["content"], ident)
-            elif version < 2 or Path(relative).name == ident:
+            elif relative not in identity.preserved_paths and (version < 2 or Path(relative).name == ident):
                 after_path = (
                     Path(relative).parent / topic_name(item["content"], ident)
                 ).as_posix()
@@ -265,21 +263,17 @@ class FormatMigrationMixin:
         return transforms, aliases
 
     def _migration_link_codecs(self, transforms, snapshots=()):
-        from .links import LinkCodec
-        original, final, owners = {}, {}, {}
-        for root in self.engine.root.parent.iterdir():
-            if not root.is_dir() or root.name.startswith("."):
-                continue
-            for path in (root / "knowledge").rglob("*.md"):
-                self.engine._assert_safe(path)
-                metadata, body = _parse(read_utf8(path))
-                ident = metadata.get("id", path.name)
-                # Old YAML IDs may alias the filename identity in format 0/1.
-                relative = path.relative_to(root).as_posix()
-                if root == self.engine.root and relative in transforms:
-                    ident = transforms[relative]["id"]
-                original[ident] = Material(ident, relative, metadata, body)
-                owners[ident] = root.name
+        identity = getattr(self, "_migration_identity", None) or MigrationIdentity(self)
+        original, owners = dict(identity.catalog), dict(identity.owners)
+        for row in identity.rows:
+            if row["workspace"] == self.engine.workspace and row["path"] in transforms:
+                item = transforms[row["path"]]
+                original.pop(row["id"], None)
+                owners.pop(row["id"], None)
+                original[item["id"]] = Material(item["id"], row["path"], row["metadata"], row["body"])
+                owners[item["id"]] = self.engine.workspace
+                identity.aliases[self.engine.workspace][row["old_id"]] = item["id"]
+        final = {}
         final.update(original)
         for relative, item in transforms.items():
             ident = item["id"]
@@ -289,13 +283,14 @@ class FormatMigrationMixin:
             final[ident] = Material(ident, item["path"], metadata, body)
             owners[ident] = self.engine.workspace
         for ident, before, after in snapshots:
+            if ident in owners and owners[ident] != self.engine.workspace:
+                raise PCWError(f"Pending migration snapshot conflicts with foreign ID {ident}")
             for target, snapshot in ((original, before or after), (final, after or before)):
                 if snapshot:
                     metadata, body = _parse(snapshot["text"])
                     target[ident] = Material(ident, snapshot["path"], metadata, body)
                     owners[ident] = self.engine.workspace
-        return (LinkCodec(self.engine.work_root, original, owners),
-                LinkCodec(self.engine.work_root, final, owners))
+        return identity.codec(original, owners), identity.codec(final, owners)
 
     def _normalize_snapshot(self, text, ident, aliases, codec=None, render_codec=None):
         metadata, body = _parse(text)
@@ -306,8 +301,12 @@ class FormatMigrationMixin:
         if not isinstance(links, list):
             raise PCWError("links must be a list")
         display_aliases = codec.display_aliases(links, ident) if codec else {}
-        resolved = codec.decode(links, ident, self.engine.workspace) if codec else [_id(i) for i in links]
-        metadata["links"] = list(dict.fromkeys(aliases.get(i, i) for i in resolved if i != ident))
+        # The migration codec already resolves local aliases and exact foreign
+        # paths to canonical IDs. Applying local aliases again could redirect a
+        # foreign canonical ID which happens to equal a local legacy filename.
+        resolved = (codec.decode(links, ident, self.engine.workspace) if codec else
+                    [aliases.get(_id(i), i) for i in links])
+        metadata["links"] = list(dict.fromkeys(i for i in resolved if i != ident))
         if render_codec:
             return render_codec.record_text(metadata, migrate_sources(body), aliases=display_aliases)
         return (
@@ -362,6 +361,39 @@ class FormatMigrationMixin:
                             _, snapshot["text"] = project_record(self.engine.workspace, snapshot["text"])
                     plan["entries"][project["id"]] = change
                     plan["kind"] = "knowledge"
+                # Only technical identity fields are translated. Original
+                # proposal bytes and their approval digest remain untouched.
+                entries = {}
+                original_entry_ids = set(plan["entries"])
+                for ident, change in plan["entries"].items():
+                    target = aliases.get(ident, ident)
+                    if target in entries:
+                        raise PCWError("Pending proposal identities become ambiguous during migration")
+                    entries[target] = change
+                plan["entries"] = entries
+                plan["created_ids"] = {key: aliases.get(value, value)
+                                       for key, value in plan.get("created_ids", {}).items()}
+                if plan.get("task_id"):
+                    plan["task_id"] = aliases.get(plan["task_id"], plan["task_id"])
+                for transform in plan.get("transformations", []):
+                    for key in ("sources", "targets"):
+                        if any(value not in original_entry_ids for value in transform[key]):
+                            raise PCWError("Pending transformation must reference its reviewed local entries")
+                        transform[key] = [aliases.get(value, value) for value in transform[key]]
+                if "link_targets" in plan:
+                    targets = {}
+                    for ident, target in plan["link_targets"].items():
+                        workspace = target.get("workspace", self.engine.workspace)
+                        if ("workspace" not in target and ident in aliases
+                                and ident in self._migration_identity.owners
+                                and self._migration_identity.owners[ident] != self.engine.workspace):
+                            raise PCWError("Ambiguous pending link target owner; review its exact context and path")
+                        final_id = aliases.get(ident, ident) if workspace == self.engine.workspace else ident
+                        target["id"] = final_id
+                        if final_id in mapped and target.get("workspace", self.engine.workspace) == self.engine.workspace:
+                            target["path"] = mapped[final_id]
+                        targets[final_id] = target
+                    plan["link_targets"] = targets
                 original_paths = {item["id"]: path for path, item in transforms.items()}
                 original_snapshots = []
                 snapshots = []
@@ -386,16 +418,29 @@ class FormatMigrationMixin:
                         snapshot = change[key]
                         if snapshot is None:
                             continue
+                        source_codec = old_codec if key == "before" else after_source_codec
+                        resolved_links = source_codec.decode(
+                            _parse(snapshot["text"])[0].get("links", []), ident, self.engine.workspace)
+                        if "link_ids" in snapshot:
+                            if not isinstance(snapshot["link_ids"], list):
+                                raise PCWError("Pending reviewed target IDs must be a list")
+                            # Respect IDs already established by exact native
+                            # paths. Validate the old graph before adapting its
+                            # technical representation, rather than repairing a
+                            # changed approval graph implicitly.
+                            expected_links = [_id(link) if link in resolved_links else aliases.get(_id(link), link)
+                                              for link in snapshot["link_ids"]]
+                            if expected_links != resolved_links:
+                                raise PCWError("Pending proposal navigation differs from its reviewed target IDs")
                         snapshot["path"] = normalized_paths[ident][key]["path"]
                         snapshot["text"] = self._normalize_snapshot(
                             snapshot["text"], ident, aliases,
-                            old_codec if key == "before" else after_source_codec,
+                            source_codec,
                             current_codec if key == "before" else final_codec
                         )
                         snapshot["fingerprint"] = _revision(snapshot["text"])
                         if "link_ids" in snapshot:
-                            snapshot["link_ids"] = list(dict.fromkeys(aliases.get(_id(link), link)
-                                                                        for link in snapshot["link_ids"]))
+                            snapshot["link_ids"] = resolved_links
                 result[cycle_id + "/" + proposal_id] = {
                     "revision": entry["revision"],
                     "plan": plan,
@@ -427,6 +472,14 @@ class FormatMigrationMixin:
         return plan
 
     def _verify_transition(self, operation, *, ignored_receipts=()):
+        if "identity_catalog" in operation:
+            from .migration_identity import catalog_fingerprints
+            actual = catalog_fingerprints(self)
+            expected_catalog = operation["identity_catalog"]
+            workspace = self.engine.workspace
+            if ({k: v for k, v in actual.items() if k != workspace} !=
+                    {k: v for k, v in expected_catalog.items() if k != workspace}):
+                raise PCWError("Foreign identity catalog changed during migration; inspect retained backup")
         current = self._v2_sources()
         expected = operation["sources"]
         managed = set(operation["transforms"]) | {
@@ -600,6 +653,7 @@ class FormatMigrationMixin:
             except (PCWError, ValueError) as exc:
                 blockers.append({"reason": str(exc)})
             transforms, aliases = ({}, {})
+            identity = None
             predecessor = None
             predecessor_version = None
             try:
@@ -615,9 +669,14 @@ class FormatMigrationMixin:
                     if operation is None and not predecessor:
                         self._check_previous_migration()
                     if not predecessor:
-                        transforms, aliases = self._v2_transforms(version)
+                        identity = MigrationIdentity(self)
+                        transforms, aliases = self._v2_transforms(version, identity)
+                        if aliases:
+                            self._proposal_overlays(transforms, aliases, state.get("instruction_transition"))
             except (PCWError, OSError, ValueError) as exc:
                 blockers.append({"reason": str(exc)})
+            if identity:
+                state.update(identity.binding())
             return {
                 **state,
                 "revision": _revision(encode(state)),
@@ -725,6 +784,9 @@ class FormatMigrationMixin:
                         "Actual human confirmation of the reviewed complete instructions is required, including automatic upgrades"
                     )
                 transforms, aliases = self._v2_transforms(plan["from_version"])
+                binding = self._migration_identity.binding()
+                if any(plan.get(field) != value for field, value in binding.items()):
+                    raise PCWError("Identity catalog changed since migration review; inspect a fresh plan")
                 backup = self.control.root / "backups" / uuid.uuid4().hex
                 operation = {
                     "revision": expected_revision,
@@ -744,6 +806,9 @@ class FormatMigrationMixin:
                     if initialization.get("required")
                     else None,
                 }
+                for field in ("identity_map", "identity_catalog", "identity_map_scope"):
+                    if field in plan:
+                        operation[field] = plan[field]
                 self.control.write(receipt, encode(operation))
             if operation["status"] == "snapshotting":
                 if (

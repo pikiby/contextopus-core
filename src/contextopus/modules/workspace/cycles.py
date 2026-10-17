@@ -218,7 +218,7 @@ class CycleRuntime(
         if task_id is not None:
             if purpose not in {"work", "rework"}:
                 raise PCWError("Only work and rework cycles bind a task")
-            self.read(material_id=task_id)
+            self.read(material_id=self.engine.effective_task_id(task_id))
         signature = _revision(_json([purpose, restart_cycle_id, invocation, task_id]))
         with self.control.guard():
             records = self._records()
@@ -236,6 +236,7 @@ class CycleRuntime(
                         "replayed": True,
                         "tmp_cleared": False,
                         "purpose": cycle.get("purpose", "work"),
+                        "task_id": self.engine.effective_task_id(cycle.get("task_id")),
                         **(
                             {"instructions": self._instructions()}
                             if cycle["state"] == "active"
@@ -296,7 +297,7 @@ class CycleRuntime(
                     "status": "active",
                     "tmp_cleared": True,
                     "purpose": purpose,
-                    "task_id": task_id,
+                    "task_id": self.engine.effective_task_id(task_id),
                     "instructions": instructions,
                     "project": self.project_read(),
                     **status,
@@ -320,6 +321,7 @@ class CycleRuntime(
                 "proposals": outstanding[:50],
                 "outstanding_proposal_count": len(outstanding),
                 **self.engine.status(),
+                "task_id": self.engine.effective_task_id(cycle.get("task_id")),
             }
 
     def _read_call(self, cycle_id, method, **kwargs):
@@ -341,7 +343,7 @@ class CycleRuntime(
         with self.engine.read_guard():
             if (
                 from_id is not None
-                and material_id not in self.engine.resolve(from_id).links
+                and self.engine.resolve(material_id).id not in self.engine.resolve(from_id).links
             ):
                 raise PCWError(
                     "from_id must have an existing link to the requested material"
