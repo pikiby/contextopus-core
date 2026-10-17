@@ -54,14 +54,14 @@ def test_recovers_interrupted_preceding_format_before_v3(tmp_path, interruption,
     found = runtime.read(material_id="old-id.md")
     assert found["type"] == "knowledge" and "Preserve this identity" in found["content"]
     assert not (root / "knowledge/old-id.md").exists()
-    assert json.loads(receipt.read_text())["status"] == "complete"
+    assert json.loads(receipt.read_text(encoding="utf-8"))["status"] == "complete"
     assert runtime.upgrade_plan()["compatible"]
     runtime.close()
 
 
 def workspace(root, name="alpha", factory=None):
     runtime = CycleRuntime(root, name, provider_factory=factory or Factory())
-    rules = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text().replace("material_max_tokens: 1024", "material_max_tokens: null")
+    rules = files("contextopus.modules.workspace").joinpath("default_instructions.md").read_text(encoding="utf-8").replace("material_max_tokens: 1024", "material_max_tokens: null")
     project = f"---\ndescription: Defines shared observability goals and the project boundaries.\n---\n# {name}\nProject for shared observability"
     created = runtime.workspace_create("create", rules, project, "Create this context",
                                        settings={**WORKSPACE_CREATION_DEFAULTS, "material_max_tokens": None})
@@ -95,7 +95,8 @@ def test_types_statuses_links_and_project_are_common_records(tmp_path):
     runtime.close()
 
 
-def test_migrate_current_preserves_ids_pending_proposal_and_retry(tmp_path):
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_migrate_current_preserves_ids_pending_proposal_and_retry(tmp_path, line_ending):
     runtime = workspace(tmp_path)
     item = put(runtime, "# State\nVerified before migration")
     cycle = runtime.startup("pending")["cycle_id"]
@@ -103,21 +104,25 @@ def test_migrate_current_preserves_ids_pending_proposal_and_retry(tmp_path):
     project = runtime.project_read()
     # Reconstruct the machine flags and proposal contract a real pre-v4 context used.
     rules = runtime.engine.root / "INSTRUCTIONS.md"
-    rules.write_text("---\n" + yaml.safe_dump(runtime._policies()) + "---\n" + _parse(rules.read_text())[1])
+    rules_text = "---\n" + yaml.safe_dump(runtime._policies()) + "---\n" + _parse(rules.read_bytes().decode("utf-8"))[1]
+    rules_text = rules_text.replace("\n", line_ending)
+    rules.write_bytes(rules_text.encode("utf-8"))
     with runtime._cycle(cycle) as (records, state):
         old = runtime._load_plan(cycle, proposal["proposal_id"], state["proposals"][proposal["proposal_id"]])
         old.pop("settings_revision", None)
         from contextopus.modules.workspace.runtime import _revision
-        old["instructions_revision"] = _revision(rules.read_text())
+        # Revisions cover the actual old writer's bytes, including CRLF.
+        old["instructions_revision"] = _revision(rules.read_bytes().decode("utf-8"))
+        assert old["instructions_revision"] == _revision(rules_text) == runtime._instructions()["revision"]
         proposal = runtime._save_plan(records, state, old, "prepared")
     proposal_path = runtime._tmp(cycle) / "proposals" / (proposal["proposal_id"] + ".json")
     original_proposal = proposal_path.read_bytes()
     root = runtime.engine.root
-    (root / "PROJECT.md").write_text(project["content"])
+    (root / "PROJECT.md").write_text(project["content"], encoding="utf-8", newline="")
     (root / project["path"]).unlink()
     (root / "current").mkdir()
-    (root / "current/task-id.md").write_text("---\ngoal: Find archive\nconstraints: Preserve data\nverified_state: Found schema\nnext_step: Verify files\nblockers: Authentication\nstatus: blocked\nresults: 12 rows\n---\nExtra evidence\n")
-    (root / "current/Descriptive task.md").write_text("---\nid: stable-task-id\ngoal: Keep named task\nstatus: completed\n---\n")
+    (root / "current/task-id.md").write_text("---\ngoal: Find archive\nconstraints: Preserve data\nverified_state: Found schema\nnext_step: Verify files\nblockers: Authentication\nstatus: blocked\nresults: 12 rows\n---\nExtra evidence\n", encoding="utf-8", newline="")
+    (root / "current/Descriptive task.md").write_text("---\nid: stable-task-id\ngoal: Keep named task\nstatus: completed\n---\n", encoding="utf-8", newline="")
     runtime.control.write(runtime._format_path(), json.dumps({"format_version": 2}))
     plan = runtime.upgrade_plan()
     assert plan["ready"], plan
@@ -148,7 +153,7 @@ def test_discovery_before_selection_and_external_project_edit(tmp_path):
         result = app.query("workspace.projects_search", {"query": "observability", "distance": 2.0})
         assert result["results"][0]["material_id"] == project["id"]
         path = runtime.engine.root / project["path"]
-        path.write_text(path.read_text().replace("observability", "robotics"))
+        path.write_text(path.read_text(encoding="utf-8").replace("observability", "robotics"), encoding="utf-8", newline="")
         assert not app.query("workspace.projects_search", {"query": "observability", "distance": 2.0})["results"]
         runtime.engine.reconcile()
         assert "robotics" in app.query("workspace.projects_search", {"query": "robotics", "distance": 2.0})["results"][0]["excerpt"]

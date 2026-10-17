@@ -310,6 +310,7 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
     whole root is copied only after closing LanceDB and while holding its guard;
     SQLite uses its backup API so a WAL is never copied as a moving database.
     """
+    from contextlib import closing
     import shutil
     import sqlite3
     from contextopus.modules.workspace.history_queries import SETTINGS_HISTORY_PATH
@@ -354,8 +355,12 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
         before_rag = runtime._migration_tree(runtime.engine.state)
         before_records = runtime.record_path.read_bytes()
         shutil.copytree(root, snapshot)
-        with events.connect() as source, sqlite3.connect(snapshot / database_relative) as destination:
+        with events.connect() as source, closing(sqlite3.connect(snapshot / database_relative)) as destination:
             source.backup(destination)
+        # Connection's own context manager only completes transactions. Close
+        # its file handles before removing WAL sidecars, including on Windows.
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            destination.execute("SELECT 1")
         for suffix in ("-wal", "-shm"):
             Path(str(snapshot / database_relative) + suffix).unlink(missing_ok=True)
 

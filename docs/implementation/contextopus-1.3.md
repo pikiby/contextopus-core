@@ -17,6 +17,13 @@ not change. Both Windows jobs passed the native empty/seeded-file lock tests,
 but their full suites were cancelled after four fixture failures while still
 making progress. They are incomplete runs, not Windows suite passes.
 
+The next full matrix passed Linux and macOS, but both Windows jobs completed
+with two remaining fixture failures. The migration fixture now records exact
+UTF-8 rule bytes for both LF and CRLF; the snapshot fixture explicitly closes
+its SQLite destination before deleting WAL sidecars. Both targeted files passed
+their local checks. These corrections change tests only; the next complete
+platform CI remains the acceptance gate.
+
 ## Version domains
 
 | Domain | Target |
