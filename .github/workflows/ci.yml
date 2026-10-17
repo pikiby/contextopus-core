@@ -30,6 +30,9 @@ jobs:
           tests/test_core_portability.py::test_simultaneous_processes_bootstrap_wal_without_lost_events
           tests/test_core_portability.py::test_windows_native_lock_exclusion_and_reacquisition
           tests/test_record_links_v13.py::test_native_links_distinguish_contexts_and_duplicate_unicode_titles
+          tests/test_record_links_v13.py::test_codec_own_root_vault_takes_priority_over_enclosing_vault
+          tests/test_record_links_v13.py::test_codec_rejects_ambiguous_ancestors_without_an_own_root_vault
+          tests/test_record_links_v13.py::test_mcp_upgrade_copy_uses_own_vault_boundary_inside_another_vault
           tests/test_core_foundation.py::test_relocation_sqlite_wal_consistent_backup
       - run: uv run --locked pytest -v --durations=20 -o faulthandler_timeout=120
       - run: uv build --no-sources
