@@ -151,7 +151,8 @@ def test_workspace_procedure_requires_first_rules_read_and_inherited_query_setti
 
     with Application(tmp_path, discover=False) as app:
         procedure = app.query("procedure", {"name": "workspace"})["content"]
-    assert "before the first search in a new independent task" in procedure
+    independent = next(line for line in procedure.splitlines() if line.startswith("- **Independent retrieval:**"))
+    assert independent.index('workspace.settings_read(fields=["reread_instructions"])') < independent.index("workspace.instructions_read") < independent.index("workspace.search with inherited settings")
     assert "obtain and read the complete workspace.instructions_read" in procedure
     assert "Read workspace.project_read when" in procedure
     assert "it never replaces the first reading" in procedure
