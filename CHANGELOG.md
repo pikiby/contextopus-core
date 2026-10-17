@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.3 — 2026-10-17
+
+- Handle upgrade previews for legacy contexts that have no initial INSTRUCTIONS and retain pending proposals. An absent previous instruction body is not hashed as text; revision overlays for existing rules retain their checks.
+- Preserve the requirement to review and approve initial rules through the existing migration procedure. Migration does not approve, cancel or rewrite the original reviewed pending work.
+
+
 ## 0.14.0 — unreleased
 
 - Share one RAG/profile and analytical database across context folders under a selected memory root. Search defaults to the active category; explicit category lists and all-category retrieval preserve its instructions and write destination.

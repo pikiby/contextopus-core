@@ -187,3 +187,119 @@ def test_distinct_current_case_entries_are_both_preserved(tmp_path):
         assert len({task['path'] for task in tasks}) == 2
     finally:
         runtime.close()
+
+
+@pytest.mark.parametrize("existing_rules", [False, True], ids=["initial-rules", "existing-rules"])
+def test_public_legacy_adoption_preserves_pending_rule_basis(tmp_path, monkeypatch, existing_rules):
+    """Initializing rules must not turn an old approval into a new rules review."""
+    from unittest.mock import Mock
+
+    from contextopus.modules.workspace import server as workspace_server
+    from contextopus.modules.workspace.cycles import _json
+    from contextopus.modules.workspace.runtime import PCWError, _revision
+    from contextopus.startup import Application
+
+    original, _ = sparse(tmp_path)
+    rules = "# Human rules\nPreserve facts and require approval for knowledge changes.\n"
+    legacy_rules = "---\nknowledge_approval_required: true\ngit_history_enabled: false\n---\n" + rules
+    if existing_rules:
+        (original / "INSTRUCTIONS.md").write_bytes(legacy_rules.encode("utf-8"))
+    foreign_root = tmp_path / ".pcw/other/knowledge"
+    foreign_root.mkdir(parents=True)
+    (foreign_root / "topic.md").write_bytes(b"# Foreign topic\nUnchanged foreign fact.\n")
+    foreign = CycleRuntime(tmp_path, "other", provider_factory=Factory())
+    runtime = CycleRuntime(tmp_path, "old", provider_factory=Factory())
+    try:
+        source = original / "knowledge/topic.md"
+        source_before = source.read_bytes()
+        snapshot = {"path": "knowledge/topic.md", "text": source_before.decode("utf-8"),
+                    "fingerprint": _revision(source_before.decode("utf-8"))}
+        changed = {**snapshot, "text": snapshot["text"].replace("Literal source body.", "Reviewed later body.")}
+        changed["fingerprint"] = _revision(changed["text"])
+        records = {"starts": {}, "cycles": {}}
+        originals = {}
+        revisions = {}
+        for cycle, proposal, state, before, after in (
+            ("recovering", "legacy-create", "applying", None, snapshot),
+            ("awaiting-review", "legacy-edit", "prepared", snapshot, changed),
+        ):
+            plan = {"cycle_id": cycle, "proposal_id": proposal,
+                    "created_ids": {"created": "topic.md"} if before is None else {},
+                    "knowledge_approval_required": True,
+                    "entries": {"topic.md": {"before": before, "after": after}}}
+            if existing_rules:
+                plan["instructions_revision"] = _revision(legacy_rules)
+            raw = _json(plan)
+            revisions[proposal] = _revision(raw)
+            path = runtime._plan_path(cycle, proposal)
+            runtime.engine._write(path, raw)
+            runtime.engine._write(path.with_suffix(".md"), runtime._review(plan))
+            originals[path] = path.read_bytes()
+            originals[path.with_suffix(".md")] = path.with_suffix(".md").read_bytes()
+            records["cycles"][cycle] = {"state": "active", "purpose": "work", "proposals": {
+                proposal: {"revision": revisions[proposal], "state": state}}}
+        with runtime.control.guard():
+            runtime._persist(records)
+        registry_before = runtime.record_path.read_bytes()
+
+        # Exercise the same validated operation registry and observation boundary
+        # used by public MCP; inject only the test-only embedding runtime.
+        monkeypatch.setattr(workspace_server, "runtime", Mock(return_value=runtime))
+        with Application(tmp_path, context="old", discover=False) as app:
+            arguments = {} if existing_rules else {"instructions_content": rules}
+            preview = app.query("workspace.upgrade_plan", arguments)
+            assert preview["ready"], preview
+            assert preview["from_version"] == 0
+            assert preview["instruction_transition"]["before"] == (legacy_rules if existing_rules else None)
+            assert source.read_bytes() == source_before
+            assert runtime.record_path.read_bytes() == registry_before
+            assert all(path.read_bytes() == raw for path, raw in originals.items())
+            if not existing_rules:
+                assert not (original / "INSTRUCTIONS.md").exists()
+            applied = app.execute("workspace.upgrade_apply", {
+                "expected_revision": preview["revision"], "user_request": "Apply reviewed technical migration",
+                **({"instructions_content": rules, "instructions_confirmation": "Approve these first full rules"}
+                   if not existing_rules else {}),
+            })
+            assert applied["status"] == "complete"
+            assert runtime.instructions_read()["content"] == rules
+            assert runtime.read(material_id="topic.md")["content"] == snapshot["text"]
+            assert runtime.record_path.read_bytes() == registry_before
+            assert all(path.read_bytes() == raw for path, raw in originals.items())
+            assert app.execute("workspace.upgrade_apply", {
+                "expected_revision": preview["revision"], "user_request": "Retry same migration",
+            })["replayed"]
+
+            pending = runtime._records()["cycles"]["awaiting-review"]["proposals"]["legacy-edit"]
+            original_plan = runtime._load_plan("awaiting-review", "legacy-edit", pending)
+            overlay = runtime._execution_plan(original_plan)
+            if existing_rules:
+                assert overlay["instructions_revision"] == _revision(rules)
+            else:
+                assert "instructions_revision" not in overlay
+
+            # An already-started exact write remains recoverable, but still
+            # requires its original explicit knowledge approval.
+            with pytest.raises(PCWError, match="confirmation"):
+                app.execute("workspace.proposal_apply", {
+                    "cycle_id": "recovering", "proposal_id": "legacy-create",
+                    "expected_revision": revisions["legacy-create"],
+                })
+            assert app.execute("workspace.proposal_apply", {
+                "cycle_id": "recovering", "proposal_id": "legacy-create",
+                "expected_revision": revisions["legacy-create"], "confirmation": "Resume original exact review",
+            })["status"] == "applied"
+            edit = {"cycle_id": "awaiting-review", "proposal_id": "legacy-edit",
+                    "expected_revision": revisions["legacy-edit"], "confirmation": "Original knowledge approval"}
+            if existing_rules:
+                assert app.execute("workspace.proposal_apply", edit)["status"] == "applied"
+                assert runtime.read(material_id="topic.md")["content"] == changed["text"]
+            else:
+                with pytest.raises(PCWError, match="Instructions changed.*prepare"):
+                    app.execute("workspace.proposal_apply", edit)
+                assert runtime.read(material_id="topic.md")["content"] == snapshot["text"]
+                assert runtime._records()["cycles"]["awaiting-review"]["proposals"]["legacy-edit"] == pending
+            assert all(path.read_bytes() == raw for path, raw in originals.items())
+    finally:
+        runtime.close()
+        foreign.close()

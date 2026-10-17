@@ -357,8 +357,8 @@ class FormatMigrationMixin:
                         change[key]["fingerprint"] = _revision(text)
                     result[cycle_id + "/" + proposal_id] = {"revision": entry["revision"], "plan": plan}
                     continue
-                if (instruction_transition and plan.get("instructions_revision")
-                        == _revision(instruction_transition["before"])):
+                if (instruction_transition and instruction_transition["before"] is not None
+                        and plan.get("instructions_revision") == _revision(instruction_transition["before"])):
                     plan["instructions_revision"] = _revision(instruction_transition["after"])
                 if plan.get("kind") == "project":
                     project = transforms.get("PROJECT.md")
