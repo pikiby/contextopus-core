@@ -19,7 +19,7 @@ class AlgorithmRegistry:
                 if not (path / 'description.json').is_file():
                     continue
                 try:
-                    description = json.loads((path / 'description.json').read_text())
+                    description = json.loads((path / 'description.json').read_text(encoding='utf-8'))
                     for name in ('id', 'version', 'purpose', 'parameters_schema', 'defaults', 'when_to_use', 'how_to_adjust'):
                         if name not in description:
                             raise ValueError(f'Missing algorithm description field: {name}')
@@ -33,7 +33,7 @@ class AlgorithmRegistry:
                         raise ValueError(f'Duplicate search algorithm: {ident}')
                     spec = importlib.util.spec_from_file_location('contextopus_filter_' + ident, path / 'algorithm.py')
                     module = importlib.util.module_from_spec(spec)
-                    exec(compile((path / "algorithm.py").read_text(), str(path / "algorithm.py"), "exec"), module.__dict__)
+                    exec(compile((path / "algorithm.py").read_bytes(), str(path / "algorithm.py"), "exec"), module.__dict__)
                     if not callable(getattr(module, 'select', None)):
                         raise ValueError('Algorithm must export select(rows, parameters)')
                     found[ident] = (description, module.select)

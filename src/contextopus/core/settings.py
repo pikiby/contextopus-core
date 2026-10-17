@@ -49,7 +49,7 @@ class Settings:
         self._previews = {}
 
     def _read(self):
-        return json.loads(self.path.read_text()) if self.path.exists() else {}
+        return json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
 
     def _scope_path(self, module=None, context=None):
         if module is not None:
@@ -72,7 +72,7 @@ class Settings:
                 if origin == "context" and context is None:
                     continue
                 path = self._scope_path(module, selected_context)
-                layers.append((origin, json.loads(path.read_text()) if path.is_file() else {}))
+                layers.append((origin, json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}))
         return layers
 
     def workspace_snapshot(self, module="workspace", context=None, fields=None,
@@ -125,7 +125,7 @@ class Settings:
         self._scope_path(module, context)
         root = self._read()
         active_path = self.layout.workspace_rag / "active.json"
-        active = json.loads(active_path.read_text()) if active_path.is_file() else None
+        active = json.loads(active_path.read_text(encoding="utf-8")) if active_path.is_file() else None
         effective = json.loads(json.dumps(DEFAULTS))
         sources = {key: "default" for key in effective}
         if active:
@@ -146,7 +146,7 @@ class Settings:
                 continue
             path = self._scope_path(selected_module, selected_context)
             layers.append(
-                (scope, json.loads(path.read_text()) if path.is_file() else {})
+                (scope, json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {})
             )
         from .filtering import registry_for_layout
         registry = self.registry or registry_for_layout(self.layout)
@@ -352,7 +352,7 @@ class Settings:
             if self.snapshot(**scope)["revision"] != preview["base_revision"]:
                 raise ValueError("Configuration changed; preview again")
             path = self._scope_path(**scope)
-            existing = json.loads(path.read_text()) if path.is_file() else {}
+            existing = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
             saved = {**existing, **preview["changes"]}
             if 'selection' in preview['changes']:
                 old = existing.get('selection', {})

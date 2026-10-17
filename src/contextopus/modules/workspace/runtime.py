@@ -741,7 +741,7 @@ class PCWRuntime:
                 historical = self._git("show", "HEAD:" + relative, check=False)
                 differs = (path.exists() != (historical.returncode == 0)) or (
                     path.is_file()
-                    and path.read_text(encoding="utf-8") != historical.stdout
+                    and read_utf8(path) != historical.stdout
                 )
                 if not path.exists() and historical.returncode:
                     history = self._git(

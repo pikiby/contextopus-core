@@ -66,7 +66,7 @@ class ModuleManifestReader:
         directory = self._code(directory or self._directory(ident))
         if (directory / 'package').is_symlink():
             raise ValueError('Package must not be a symlink')
-        value = json.loads((directory / 'module.json').read_text())
+        value = json.loads((directory / 'module.json').read_text(encoding='utf-8'))
         from jsonschema import Draft202012Validator
         validator = Draft202012Validator({
             'type': 'object', 'required': ['id', 'version'],

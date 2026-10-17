@@ -17,6 +17,7 @@ from .cycles import CycleRuntime
 from .runtime import PCWError, Material, _parse
 from .records import validate_description
 from .links import LinkCodec
+from .text_io import read_utf8
 
 DEFAULT_CONTEXT = 'contextopus-base'
 
@@ -31,14 +32,14 @@ def _file_hash(path):
 
 def packaged_bundle():
     source = files('contextopus').joinpath('resources', 'base_context')
-    manifest = json.loads(source.joinpath('manifest.json').read_text())
+    manifest = json.loads(source.joinpath('manifest.json').read_text(encoding='utf-8'))
     documents = []
     for item in manifest['documents']:
-        content = source.joinpath(item['file']).read_text()
+        content = source.joinpath(item['file']).read_text(encoding='utf-8')
         if item['key'] == 'installed-version':
             content = content.replace(manifest['version'], version('contextopus-core'))
         documents.append({**item, 'content': content})
-    instructions = files('contextopus.modules.workspace').joinpath('default_instructions.md').read_text()
+    instructions = files('contextopus.modules.workspace').joinpath('default_instructions.md').read_text(encoding='utf-8')
     instructions += '\n## Product documentation context\n\nThis context holds packaged product documentation and has no material length limit. Reading these records never changes an active task context or its instructions. Future edits to these rules govern product documentation updates too.\n'
     from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
     return {**manifest, 'version': version('contextopus-core'), 'documents': documents, 'instructions': instructions,
@@ -55,7 +56,7 @@ class BaseContext:
         self.bundle = bundle if bundle is not None else packaged_bundle()
 
     def _read(self):
-        return json.loads(self.path.read_text()) if self.path.is_file() else {}
+        return json.loads(self.path.read_text(encoding='utf-8')) if self.path.is_file() else {}
 
     def _write(self, state):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,7 +92,7 @@ class BaseContext:
                 for path in (root / 'knowledge').rglob('*.md'):
                     if path.is_symlink() or any(p.startswith('.') for p in path.relative_to(root).parts):
                         continue
-                    metadata, body = _parse(path.read_text())
+                    metadata, body = _parse(read_utf8(path))
                     ident = metadata.get('id')
                     if ident is None:
                         continue
@@ -144,7 +145,7 @@ class BaseContext:
         if managed and instructions_hash is None:
             conflicts.append({'reason': 'instructions_missing', 'path': str(instructions_path),
                               'incoming': self.bundle['instructions']})
-        instructions = instructions_path.read_text() if instructions_hash else self.bundle['instructions']
+        instructions = read_utf8(instructions_path) if instructions_hash else self.bundle['instructions']
         if create:
             from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
             settings = {**WORKSPACE_CREATION_DEFAULTS, **self.bundle.get('settings', {})}
@@ -159,11 +160,11 @@ class BaseContext:
                 path = root / previous['path']
                 actual = _file_hash(path)
                 try:
-                    metadata, body = _parse(path.read_text()) if actual else ({}, '')
+                    metadata, body = _parse(read_utf8(path)) if actual else ({}, '')
                     links = codec.decode(metadata.get('links', []), previous['id']) if actual else []
                 except PCWError as exc:
                     conflicts.append({'key': key, 'path': str(path), 'reason': 'navigation_conflict',
-                                      'error': str(exc), 'current': path.read_text(), 'incoming': item['content']})
+                                      'error': str(exc), 'current': read_utf8(path), 'incoming': item['content']})
                     continue
                 description_changed_by_user = (actual is not None and metadata.get('description') != previous.get('description')
                     and metadata.get('description') != item['description'])
@@ -173,7 +174,7 @@ class BaseContext:
                 if description_changed_by_user or actual != previous['file_hash'] and not compatible_metadata_edit:
                     conflicts.append({'key': key, 'path': str(path),
                                       'reason': 'deleted' if actual is None else 'user_modified',
-                                      'current': path.read_text() if actual else None,
+                                      'current': read_utf8(path) if actual else None,
                                       'incoming': item['content']})
                     continue
                 required_links = [managed.get('documents', {}).get(key, {}).get('id') for key in item.get('links', [])]

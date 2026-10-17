@@ -12,6 +12,7 @@ import uuid
 from contextopus.core.settings import Settings, WORKSPACE_SETTINGS, WORKSPACE_POLICY_DEFAULTS
 from contextopus.core.storage import sync_directory
 from .runtime import PCWError
+from .text_io import read_utf8
 
 
 def configuration_path(layout, context):
@@ -86,7 +87,7 @@ class WorkspaceSettingsMixin:
         with self.control.guard():
             for path in (self.control.root / "settings").glob("*.json"):
                 self.control.safe(path)
-                if json.loads(path.read_text())["state"] == "applying":
+                if json.loads(read_utf8(path))["state"] == "applying":
                     raise PCWError("Resume pending settings_apply with preview revision " + path.stem)
             before = self._settings_snapshot()
             before_configuration = configuration_text(self.control.layout, self.engine.workspace)
@@ -112,7 +113,7 @@ class WorkspaceSettingsMixin:
             path = self._settings_receipt_path(preview_revision)
             if not path.is_file():
                 raise PCWError("Settings preview is absent; use settings_preview before applying")
-            receipt = json.loads(path.read_text())
+            receipt = json.loads(read_utf8(path))
             if receipt.get("state") not in {"prepared", "applying", "applied"}:
                 raise PCWError("Unsupported settings operation state; inspect the retained receipt")
             payload = receipt["payload"]

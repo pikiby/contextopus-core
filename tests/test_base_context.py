@@ -1,10 +1,13 @@
 """Base docs use ordinary records and recover exact managed updates."""
 import copy
+import hashlib
+from pathlib import Path
 from unittest.mock import patch
 import pytest
 from contextopus.modules.workspace.base_context import BaseContext, packaged_bundle
 from contextopus.modules.workspace.cycles import CycleRuntime
 from contextopus.modules.workspace.runtime import PCWError
+from contextopus.modules.workspace.text_io import read_utf8
 from test_runtime import Factory
 
 
@@ -33,6 +36,111 @@ def settings(service, changes):
         runtime.settings_apply(preview['preview_revision'], 'Approve the exact shown documentation settings')
     finally:
         runtime.close()
+
+
+@pytest.mark.parametrize('newline', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_unicode_neighbors_and_managed_update_ignore_implicit_locale(base, monkeypatch, newline):
+    """Real UTF-8 records survive install/update/reopen with a cp1252 default."""
+    def lines(text):
+        return text.replace('\n', newline)
+
+    rules = lines('# Правила Н 🙂\nСохранять текст и ссылки без изменений.\n')
+    neighbor = base.runtime_factory(base.layout.root, 'neighbor')
+    try:
+        neighbor.workspace_create('neighbor-create', rules, '# Соседний проект Н', 'Create the independent context',
+                                  settings=base.bundle['settings'], project_description='Описывает независимые записи Н и их связи.')
+        cycle = neighbor.startup('neighbor-records')['cycle_id']
+        bodies = {'target': lines('# Цель Н 🙂\nТочные условия применения.\n'),
+                  'source': lines('# Источник Н\nПроверить связанную цель.\n')}
+        proposal = neighbor.proposal_prepare(cycle, [
+            {'key': key, 'content': body, 'description': 'Содержит проверенные условия Н и границы применения.',
+             'path': 'Знания/' + ('Цель Н.md' if key == 'target' else 'Источник Н.md'),
+             'links': [] if key == 'target' else ['@target']}
+            for key, body in bodies.items()])
+        assert neighbor.proposal_apply(cycle, proposal['proposal_id'], proposal['revision'])['status'] == 'applied'
+        assert neighbor.finish(cycle)['status'] == 'closed'
+        originals = {key: neighbor.read(material_id=ident) for key, ident in proposal['created_ids'].items()}
+        neighbor_bytes = {neighbor.engine.root / item['path']: (neighbor.engine.root / item['path']).read_bytes()
+                          for item in originals.values()}
+        neighbor_bytes[neighbor.engine.root / 'INSTRUCTIONS.md'] = (neighbor.engine.root / 'INSTRUCTIONS.md').read_bytes()
+    finally:
+        neighbor.close()
+
+    base.bundle['instructions'] = rules
+    base.bundle['documents'][0].update(content=lines('# Руководство Н 🙂\nПроверенный порядок действий.\n'),
+                                     description='Объясняет проверенный порядок Н и условия применения.', links=['template'])
+    base.bundle['documents'][1].update(content=lines('# Шаблон Н\nУказать проверяемые условия.\n'),
+                                     description='Определяет поля Н для проверки документации.')
+    # U+041D encodes a byte (0x9d) undefined in cp1252, so accidental locale
+    # decoding cannot silently pass as ASCII or merely produce mojibake.
+    with pytest.raises(UnicodeDecodeError):
+        base.bundle['documents'][0]['content'].encode('utf-8').decode('cp1252')
+    original_read_text = Path.read_text
+
+    def locale_read_text(path, encoding=None, errors=None, **kwargs):
+        return original_read_text(path, encoding=encoding or 'cp1252', errors=errors, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', locale_read_text)
+    assert packaged_bundle()['documents']
+    install(base)
+    base.select('neighbor')  # Preserve a selected role independent of managed docs.
+    initial = copy.deepcopy(base._read())
+    initial_revision = base.plan()['plan_revision']
+    reopened = BaseContext(base.layout.root, runtime_factory=base.runtime_factory, bundle=copy.deepcopy(base.bundle))
+    assert reopened._read() == initial
+    assert reopened.plan()['status'] == 'current'
+    assert reopened.plan()['plan_revision'] == initial_revision
+    base_root = reopened._context_path(initial['managed']['context'])
+    initial_rules = (base_root / 'INSTRUCTIONS.md').read_bytes()
+    base_settings = reopened.runtime_factory(base.layout.root, initial['managed']['context'])
+    try:
+        initial_settings = base_settings.settings_read()['values']
+    finally:
+        base_settings.close()
+    reopened.bundle['version'] = 'next-utf8-version'
+    reopened.bundle['documents'][0]['content'] += lines('\nНовые проверенные условия Н.\n')
+    plan = reopened.plan()
+    assert plan['status'] == 'ready' and plan['conflicts'] == []
+    assert reopened.install(plan['plan_revision'])['status'] == 'installed'
+    final = BaseContext(base.layout.root, runtime_factory=base.runtime_factory, bundle=reopened.bundle)
+    state = final._read()
+    assert final.status()['context'] == 'neighbor'
+    assert state['managed']['version'] == 'next-utf8-version'
+    assert final.plan()['status'] == 'current'
+    assert (base_root / 'INSTRUCTIONS.md').read_bytes() == initial_rules == rules.encode('utf-8')
+    runtime = final.runtime_factory(base.layout.root, state['managed']['context'])
+    try:
+        assert runtime.settings_read()['values'] == initial_settings
+        for item in final.bundle['documents']:
+            receipt = state['managed']['documents'][item['key']]
+            assert receipt['id'] == initial['managed']['documents'][item['key']]['id']
+            actual = runtime.read(material_id=receipt['id'])
+            assert actual['content'] == item['content'] and actual['description'] == item['description']
+            assert runtime.project_read()['id'] in actual['links']
+            if item['key'] == 'guide':
+                assert state['managed']['documents']['template']['id'] in actual['links']
+            assert receipt['file_hash'] == hashlib.sha256((base_root / receipt['path']).read_bytes()).hexdigest()
+    finally:
+        runtime.close()
+    neighbor = final.runtime_factory(base.layout.root, 'neighbor')
+    try:
+        for key, before in originals.items():
+            actual = neighbor.read(material_id=before['id'])
+            assert actual['content'] == bodies[key] and actual['revision'] == before['revision']
+            assert actual['path'] == before['path'] and actual['links'] == before['links']
+        assert originals['target']['id'] in originals['source']['links']
+        assert all(path.read_bytes() == before for path, before in neighbor_bytes.items())
+    finally:
+        neighbor.close()
+    # The conflict path must return the literal user's Unicode text too.
+    guide = base_root / state['managed']['documents']['guide']['path']
+    changed = guide.read_bytes() + lines('\nПользовательское уточнение Н.\n').encode('utf-8')
+    guide.write_bytes(changed)
+    conflict = final.plan()
+    assert conflict['status'] == 'conflicts'
+    assert conflict['conflicts'][0]['current'] == changed.decode('utf-8')
+    assert final.install(conflict['plan_revision'])['status'] == 'conflicts'
+    assert guide.read_bytes() == changed
 
 
 def test_passive_preview_then_shared_index_and_history(base):
@@ -243,9 +351,10 @@ def test_managed_update_preserves_user_description_as_conflict(base):
     state = base._read()
     entry = state['managed']['documents']['guide']
     path = base._context_path(state['managed']['context']) / entry['path']
-    metadata, body = _parse(path.read_text())
+    metadata, body = _parse(read_utf8(path))
     metadata['description'] = 'Describes the user-specific workflow and its verified exceptions.'
-    path.write_text('---\n' + yaml.safe_dump(metadata, allow_unicode=True) + '---\n' + body)
+    path.write_text('---\n' + yaml.safe_dump(metadata, allow_unicode=True) + '---\n' + body,
+                    encoding='utf-8', newline='')
     before = path.read_bytes()
     base.bundle['documents'][0]['content'] += '\nUpstream behavior.\n'
     plan = base.plan()
@@ -262,10 +371,11 @@ def test_native_link_alias_reformat_does_not_look_like_user_content_change(base)
     state = base._read()
     entry = state['managed']['documents']['guide']
     path = base._context_path(state['managed']['context']) / entry['path']
-    metadata, body = _parse(path.read_text())
+    metadata, body = _parse(read_utf8(path))
     assert all(link.startswith('[[') for link in metadata['links'])
     metadata['links'] = [link.split('|', 1)[0] + '|Readable user display]]' for link in metadata['links']]
-    path.write_text('---\n' + yaml.safe_dump(metadata, allow_unicode=True) + '---\n' + body)
+    path.write_text('---\n' + yaml.safe_dump(metadata, allow_unicode=True) + '---\n' + body,
+                    encoding='utf-8', newline='')
     assert base.plan()['status'] == 'current'
     base.bundle['documents'][0]['content'] += '\nUpstream behavior.\n'
     assert base.plan()['conflicts'] == []

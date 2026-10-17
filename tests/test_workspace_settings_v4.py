@@ -1,7 +1,9 @@
 """Canonical policies, free rules and recoverable legacy upgrades on real storage."""
 import copy
 import json
+import os
 from pathlib import Path
+import stat
 from unittest.mock import patch
 
 import pytest
@@ -38,6 +40,65 @@ def legacy_instructions(**changes):
     values = {**CHOICES, **changes}
     flags = "".join(f"{key}: {'null' if value is None else str(value).lower()}\r\n" for key, value in values.items())
     return "---\r\ncustom: 'Keep these exact bytes' # user comment\r\n" + flags + "---\r\n# Правила\r\nKeep all user text.\r\n"
+
+
+def _retry_readonly_git_unlink(git_object_stores, function, filename, error):
+    """Handle only Windows' readonly-file deletion rule in this owned fixture."""
+    path = Path(filename)
+    try:
+        details = path.lstat()
+    except OSError:
+        error.add_note(f"Snapshot removal: path={path}, metadata unavailable")
+        raise error
+    attributes = getattr(details, "st_file_attributes", None)
+    error.add_note(f"Snapshot removal: function={function.__name__}, path={path}, "
+                   f"mode={details.st_mode:o}, file_attributes={attributes}, "
+                   f"winerror={getattr(error, 'winerror', None)}")
+    readonly = not details.st_mode & stat.S_IWRITE and (
+        attributes is None or attributes & stat.FILE_ATTRIBUTE_READONLY)
+    if not (isinstance(error, PermissionError) and getattr(error, "winerror", None) == 5
+            and function in (os.unlink, os.remove) and stat.S_ISREG(details.st_mode)
+            and any(path.resolve().is_relative_to(store.resolve()) for store in git_object_stores)
+            and readonly):
+        raise error
+    path.chmod(details.st_mode | stat.S_IWRITE)
+    function(filename)  # One retry only; sharing violations/other failures propagate.
+
+
+@pytest.mark.parametrize("winerror,readonly,location", [
+    (5, True, "live"), (5, True, "retained"), (32, True, "retained"),
+    (5, False, "retained"), (5, True, "outside"), (13, True, "retained"),
+])
+def test_snapshot_cleanup_only_retries_readonly_git_access_denied(tmp_path, winerror, readonly, location):
+    owned = tmp_path / "isolated-root"
+    live = owned / "project/.git/objects"
+    # The Windows failure was in this retained migration backup, not the live
+    # workspace's Git directory. Keep that exact path shape in the regression.
+    retained = owned / ".pcw/.control/project/backups/reviewed-revision/workspace/.git/objects"
+    stores = (live, retained)
+    for store in stores:
+        store.mkdir(parents=True)
+    foreign = tmp_path / "coherent-snapshot/.git/objects"
+    foreign.mkdir(parents=True)
+    path = {"live": live, "retained": retained, "outside": foreign}[location] / "object"
+    path.write_bytes(b"closed fixture file")
+    path.chmod(0o444 if readonly else 0o644)
+    mode = path.stat().st_mode
+    error = PermissionError("Injected Windows deletion failure")
+    error.winerror = winerror
+    try:
+        if winerror == 5 and readonly and location != "outside":
+            _retry_readonly_git_unlink(stores, os.unlink, str(path), error)
+            assert not path.exists()
+        else:
+            with pytest.raises(PermissionError) as caught:
+                _retry_readonly_git_unlink(stores, os.unlink, str(path), error)
+            assert caught.value is error
+            assert path.read_bytes() == b"closed fixture file" and path.stat().st_mode == mode
+            assert "file_attributes=" in error.__notes__[0]
+    finally:
+        if path.exists():
+            path.chmod(0o644)
 
 
 def test_free_rules_lightweight_settings_and_explicit_profiles(tmp_path):
@@ -303,7 +364,8 @@ def test_legacy_instruction_flag_delta_blocks_only_its_apply_and_preserves_raw(t
         runtime.close()
 
 
-def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(tmp_path):
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(tmp_path, newline):
     """Restore one stopped-owner snapshot, then retry the same technical upgrade.
 
     This is an isolated acceptance exercise, not a live rollback operation. The
@@ -322,12 +384,12 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
     layout = runtime.control.layout
     cycle = runtime.startup("unfinished-before-snapshot")["cycle_id"]
     temporary = runtime.tmp_write(cycle, "Keep this unfinished investigation")
-    proposal = runtime.proposal_prepare(cycle, [{"key": "pending", "content": "# Pending fact\nChecked conditions.",
+    proposal = runtime.proposal_prepare(cycle, [{"key": "pending", "content": f"# Pending факт Н{newline}Checked conditions.",
                                                 "description": "Verified conditions awaiting application"}])
-    old_rules = legacy_instructions(allow_implicit_updates=True, material_max_tokens=None)
+    old_rules = legacy_instructions(allow_implicit_updates=True, material_max_tokens=None).replace("\r\n", newline)
     downgrade(runtime, old_rules)
     # Reconstruct the prior Core context file, which held search settings only.
-    old_configuration = '{\r\n  "searchN": 7\r\n}\r\n'
+    old_configuration = '{\r\n  "searchN": 7\r\n}\r\n'.replace("\r\n", newline)
     save_configuration(layout, "project", old_configuration)
     records = runtime._records()
     entry = records["cycles"][cycle]["proposals"][proposal["proposal_id"]]
@@ -350,11 +412,24 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
     events.end(event_id, "project", monotonic(), result={"marker": "before"})
     database_relative = events.path.relative_to(root)
     runtime.close()
+    # Exercise readonly Git objects deliberately and verify copy2 keeps their
+    # attributes. No global Git setting or original snapshot permission is reset.
+    git_objects = runtime.engine.root / ".git/objects"
+    git_object = next(path for path in sorted(git_objects.rglob("*")) if path.is_file())
+    git_object.chmod(git_object.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+    assert not git_object.stat().st_mode & stat.S_IWRITE
+    if os.name == "nt":
+        assert git_object.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
     with layout.guard():
         before_sources = runtime._source_files()
         before_rag = runtime._migration_tree(runtime.engine.state)
         before_records = runtime.record_path.read_bytes()
         shutil.copytree(root, snapshot)
+        copied_object = snapshot / git_object.relative_to(root)
+        assert copied_object.read_bytes() == git_object.read_bytes()
+        assert not copied_object.stat().st_mode & stat.S_IWRITE
+        if os.name == "nt":
+            assert copied_object.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
         with events.connect() as source, closing(sqlite3.connect(snapshot / database_relative)) as destination:
             source.backup(destination)
         # Connection's own context manager only completes transactions. Close
@@ -363,6 +438,7 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
             destination.execute("SELECT 1")
         for suffix in ("-wal", "-shm"):
             Path(str(snapshot / database_relative) + suffix).unlink(missing_ok=True)
+        snapshot_permissions = {path.relative_to(snapshot): path.lstat().st_mode for path in snapshot.rglob("*")}
 
     runtime = CycleRuntime(root, "project", provider_factory=Factory())
     plan = runtime.upgrade_plan()
@@ -383,10 +459,30 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
     # Switch back one complete stopped-owner root, including the Core file,
     # Git objects/index, control state, SQLite snapshot and shared RAG tree.
     with layout.guard():
+        # Include only actual object stores in this closed, disposable root.
+        # Migration retains additional copies under .control/.../backups.
+        git_object_stores = tuple(path / "objects" for path in root.rglob(".git")
+                                  if path.is_dir() and not path.is_symlink()
+                                  and (path / "objects").is_dir() and not (path / "objects").is_symlink()
+                                  and (path / "objects").resolve().is_relative_to(root.resolve()))
+        assert git_objects in git_object_stores
+        retained_stores = [store for store in git_object_stores
+                           if store.is_relative_to(runtime.control.root / "backups")]
+        assert retained_stores, "The full restore must cover retained migration backups too"
+        for store in retained_stores:
+            retained_object = store / git_object.relative_to(git_objects)
+            assert retained_object.read_bytes() == copied_object.read_bytes()
+            assert not retained_object.stat().st_mode & stat.S_IWRITE
+            if os.name == "nt":
+                assert retained_object.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
         for child in list(root.iterdir()):
             if child.name == ".contextopus.lock":
                 continue
-            shutil.rmtree(child) if child.is_dir() else child.unlink()
+            if child.is_dir():
+                shutil.rmtree(child, onexc=lambda function, path, error:
+                              _retry_readonly_git_unlink(git_object_stores, function, path, error))
+            else:
+                child.unlink()
         for child in snapshot.iterdir():
             if child.name == ".contextopus.lock":
                 continue
@@ -401,6 +497,10 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
         assert configuration_text(layout, "project") == old_configuration
         assert restored._instructions()["content"] == old_rules
         assert restored._history_revision("HEAD") == old_head
+        assert git_object.read_bytes() == copied_object.read_bytes()
+        assert not git_object.stat().st_mode & stat.S_IWRITE
+        if os.name == "nt":
+            assert git_object.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
         assert restored._history_blob(old_head, SETTINGS_HISTORY_PATH) is None
         assert restored._history_git("status", "--porcelain", "--untracked-files=no").stdout == ""
         assert restored._events().read(event_id)["result"]["value"] == {"marker": "before"}
@@ -416,5 +516,6 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
         found = restored.search(query="Checked conditions", types=["knowledge"], d_max=2)
         assert [item["id"] for item in found["results"]] == [proposal["created_ids"]["pending"]]
         assert not (restored.engine.root / SETTINGS_HISTORY_PATH).exists()
+        assert {path.relative_to(snapshot): path.lstat().st_mode for path in snapshot.rglob("*")} == snapshot_permissions
     finally:
         restored.close()

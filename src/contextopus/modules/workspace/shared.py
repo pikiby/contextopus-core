@@ -279,7 +279,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
         owners = {**self.owners, material.id: self.workspace}
         codec = self.link_codec(catalog, owners)
         path = self.root / material.path
-        aliases = self.link_codec().display_aliases(_parse(path.read_text())[0].get('links', []), material.id) if path.is_file() else {}
+        aliases = self.link_codec().display_aliases(_parse(read_utf8(path))[0].get('links', []), material.id) if path.is_file() else {}
         self._write(path, codec.record_text(material.metadata, material.content, aliases=aliases))
         observed, body = _parse((self.root / material.path).read_bytes().decode("utf-8"))
         observed["links"] = codec.decode(observed.get("links", []), material.id)

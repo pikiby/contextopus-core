@@ -15,6 +15,22 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --extra test
+      - name: Check Windows snapshot, Unicode and storage behavior first
+        if: runner.os == 'Windows'
+        run: >-
+          uv run --locked pytest -v --durations=20 -o faulthandler_timeout=120
+          tests/test_base_context.py
+          tests/test_utf8_dataflows.py
+          tests/test_workspace_settings_v4.py::test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag
+          tests/test_workspace_settings_v4.py::test_snapshot_cleanup_only_retries_readonly_git_access_denied
+          tests/test_unified_records.py::test_migrate_current_preserves_ids_pending_proposal_and_retry
+          tests/test_workspace_v3.py::test_snapshot_interruption_resumes_same_backup_without_overwrite
+          tests/test_workspace_text_io.py::test_snapshot_sync_uses_original_writable_descriptor
+          tests/test_workspace_text_io.py::test_unicode_root_upgrade_receipt_replays_after_reopen
+          tests/test_core_portability.py::test_simultaneous_processes_bootstrap_wal_without_lost_events
+          tests/test_core_portability.py::test_windows_native_lock_exclusion_and_reacquisition
+          tests/test_record_links_v13.py::test_native_links_distinguish_contexts_and_duplicate_unicode_titles
+          tests/test_core_foundation.py::test_relocation_sqlite_wal_consistent_backup
       - run: uv run --locked pytest -v --durations=20 -o faulthandler_timeout=120
       - run: uv build --no-sources
       - run: uv run --locked python scripts/build_release.py

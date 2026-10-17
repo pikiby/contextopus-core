@@ -24,6 +24,29 @@ its SQLite destination before deleting WAL sidecars. Both targeted files passed
 their local checks. These corrections change tests only; the next complete
 platform CI remains the acceptance gate.
 
+The third matrix again passed five jobs; both Windows full suites finished with
+731 passed, 30 skipped and one failure in the snapshot fixture's deletion of a
+read-only Git object. The fixture now permits only the precise owned Git-object
+cleanup case and preserves other permission failures. Its coherent full restore,
+pending-work continuation and indexed-search assertions remain in place.
+
+A separate audit confirmed production readers that decoded persisted UTF-8 with
+the OS default: base-context records/state, settings configuration and receipts,
+native link aliases, and public module/algorithm metadata. These paths now read
+UTF-8 explicitly; byte-sensitive revision/Git comparisons preserve LF/CRLF, and
+Python algorithm sources retain their declared source-encoding semantics. This
+was a production dataflow gap, not solely a fixture issue. Linux checks forcing
+the implicit default to CP1252 reproduced failures before the corrections.
+
+The earlier focused set collected 35 cases: 33 passed on Linux and two native
+Windows lock cases were skipped. Ten additional dataflow cases failed before
+and passed after their fixes. The final Windows-only early gate collects 45
+cases and precedes the unchanged full suite/build/installed checks in both
+existing Windows jobs. Collection is not execution; these local results are
+not a native Windows pass or an aggregate 45-case pass. The corrected wheel has
+separate installed UTF-8/MCP evidence; historical model/copy receipts retain
+their original attribution rather than certifying new runtime bytes.
+
 ## Version domains
 
 | Domain | Target |
