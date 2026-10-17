@@ -393,26 +393,42 @@ previews were no-ops, and controlled configurations, manifests and skill hashes
 matched their reviewed state. Configuration preservation is separate from a
 fresh native MCP request and from the model following the whole procedure.
 
+The first OpenCode and Crush runners sent literal `$w` as ordinary text. Those
+turns were incorrectly described as native skill activation checks. Their
+observed actions remain evidence of literal-text routing only; in particular,
+the first Crush result did not establish failure of its native activation path.
+Claude's runner did use native `/w`. Correctly activated OpenCode and Crush
+checks subsequently established the following separate results:
+
 | Client | Current bounded result |
 | --- | --- |
-| Codex | Ordinary `$w` passed: actual guide, rules, project, search and full read. |
-| Claude Code | Native retrieval passed; the model omitted the project and repeated guide. |
-| OpenCode | Native retrieval passed; the model omitted rules/project, recovered from an unknown argument and requested unnecessary full detail. |
-| Crush | Ordinary `$w` failed: despite advertised connected MCP tools, the model read files directly and encountered stale 1.1 statements. A separate explicit MCP-only native turn passed schema/search/read after strict argument errors and recovery. |
+| Codex | `$w` passed: actual guide, rules, project, search and full read. |
+| Claude Code | Native `/w` retrieval passed; guide was repeated. `project_read` is conditional on need, so its absence alone does not establish a procedure violation. |
+| OpenCode | Native `opencode run --command w` performed guide/settings/search and full reads, with zero argument errors and default compact responses. It skipped INSTRUCTIONS: technical retrieval worked, but this procedure requirement was not met. Project reading remains conditional. |
+| Crush 0.87 | Native ReadSkill supplied the exact released skill through a text/markdown attachment to AgentMessage. Bytes were verified in the native user-message attachment; prompt inclusion was established from the client implementation, not an outbound provider-request capture. MCP was connected and its tools advertised, but the model used grep/glob/view and made zero MCP calls. This validly activated behavior check failed. |
 
-The separate Crush capability turn allowed the two read-only MCP tools and
-disabled non-MCP builtins. It proves technical retrieval under that constraint;
-it does not prove ordinary skill routing or full procedure compliance. Earlier
-native-harness readiness and observation corrections changed the test scaffold,
-not Contextopus product code. The ordinary Crush failure remains a failure.
-All four clients can perform technical native retrieval under the stated
-conditions; a connected endpoint, final prose or successful explicit-tool turn
-is not universal model compliance.
+The separate earlier Crush capability turn allowed only the two read-only MCP
+tools and disabled non-MCP builtins. It passed schema/search/read after argument
+errors and recovery, proving technical retrieval under that constraint rather
+than ordinary skill behavior. The valid native activation above is a separate
+failure; a connected endpoint or verified skill attachment does not prove that
+the model will use it. The evidence does not establish the cause of that choice.
 
-Final project-memory reconciliation is tracked separately and must retain these
-results and limits. Native Windows CI does not establish Windows/macOS GUI
-behavior, GPU inference, or complete model scenarios on every host. Historical
-model/copy receipts above remain attributed to their original packages.
+One bounded temporary A/B turn added explicit Contextopus MCP guidance to a
+candidate skill and used the same native activation path. It also made zero
+MCP calls. This candidate was not accepted or installed; the released skill and
+product runtime remain unchanged. Harness/method corrections and this temporary
+experiment do not establish a shipped product fix or universal model compliance.
+
+All four clients demonstrated technical native retrieval under the stated
+conditions. OpenCode's missing INSTRUCTIONS and Crush's correctly activated
+behavior failure remain separate acceptance limitations. The goal stays open
+while the user decides whether to accept delivery with those model limitations
+as a separate task or continue the work. Final project-memory reconciliation
+must retain that decision and these limits. Native Windows CI does not establish
+Windows/macOS GUI behavior, GPU inference, or complete model scenarios on every
+host. Historical model/copy receipts above remain attributed to their original
+packages.
 
 [Upgrade and restore instructions](../releases/1.3.0.md) describe the operational
 sequence. Private host paths, backup locations and client-session identifiers
