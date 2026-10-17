@@ -1,14 +1,16 @@
 # Contextopus 1.3 implementation and delivery evidence
 
-This is source/build readiness evidence, not a publication or live-installation receipt. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define the remaining acceptance.
+This document records implementation and delivery history. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define acceptance. The final delivery section records the released and installed 1.3.1 runtime, platform CI and separate client-behavior results. Earlier run counts and temporary-artifact evidence below retain their original scope; they do not certify later rebuilt bytes.
+
+## Earlier candidate and cross-platform corrections
 
 The first authorized platform CI found that macOS SQLite omits the optional
 `enable_load_extension` API. The correction checks for that API before disabling
 extension loading; SQL authorization remains enforced, with both API variants
 covered by regression tests. The `a38…` installation, model and data-copy receipts
 below describe the preceding package and do not certify rebuilt bytes. The
-corrected artifact has a separate identity receipt and still requires its own
-successful platform CI and live-installation acceptance.
+corrected artifact had a separate identity receipt and, at that stage, still
+required its own successful platform CI and live-installation acceptance.
 
 That CI also exposed Windows test fixtures using the platform default encoding
 and newline conversion. The correction supplies UTF-8 and preserves fixture bytes,
@@ -22,12 +24,13 @@ with two remaining fixture failures. The migration fixture now records exact
 UTF-8 rule bytes for both LF and CRLF; the snapshot fixture explicitly closes
 its SQLite destination before deleting WAL sidecars. Both targeted files passed
 their local checks. These corrections change tests only; the next complete
-platform CI remains the acceptance gate.
+platform CI remained the acceptance gate at that stage.
 
 The third matrix again passed five jobs; both Windows full suites finished with
-731 passed, 30 skipped and one failure in the snapshot fixture's deletion of a
-read-only Git object. The fixture now permits only the precise owned Git-object
-cleanup case and preserves other permission failures. Its coherent full restore,
+731 passed, 30 skipped and one WinError 5 failure in the snapshot fixture's
+Git-object deletion. The original log did not record that file's attributes.
+The fixture now diagnoses permissions and permits cleanup only for an actually
+read-only object in an owned Git store; other permission failures propagate. Its coherent full restore,
 pending-work continuation and indexed-search assertions remain in place.
 
 A separate audit confirmed production readers that decoded persisted UTF-8 with
@@ -38,10 +41,15 @@ Python algorithm sources retain their declared source-encoding semantics. This
 was a production dataflow gap, not solely a fixture issue. Linux checks forcing
 the implicit default to CP1252 reproduced failures before the corrections.
 
+The optional SQLite API guard, explicit production UTF-8 readers and later
+nested-vault boundary correction are product fixes. SQLite fixture connection
+closure, restricted read-only Git-object cleanup and byte-preserving test
+expectations repair the test scaffold without weakening production checks.
+
 The earlier focused set collected 35 cases: 33 passed on Linux and two native
 Windows lock cases were skipped. Ten additional dataflow cases failed before
-and passed after their fixes. The final Windows-only early gate collects 45
-cases and precedes the unchanged full suite/build/installed checks in both
+and passed after their fixes. That candidate's Windows-only early gate collected
+45 cases and preceded the unchanged full suite/build/installed checks in both
 existing Windows jobs. Collection is not execution; these local results are
 not a native Windows pass or an aggregate 45-case pass. The corrected wheel has
 separate installed UTF-8/MCP evidence; historical model/copy receipts retain
@@ -51,7 +59,7 @@ their original attribution rather than certifying new runtime bytes.
 
 | Domain | Target |
 | --- | --- |
-| Python package and client manifests | 1.3.0 |
+| Python package and client manifests | 1.3.1 (1.3.0 feature release plus nested-vault correction) |
 | Workspace storage format | 4 |
 | Builtin search algorithms | 2.0.0 |
 | Shared selection/evidence contracts | 2 |
@@ -106,20 +114,19 @@ entrypoints receive the common storage service before registration. Actual HTTP
 roundtrips also exposed FastMCP expanding list results into multiple text blocks;
 the transport now retains a single JSON value for arrays and scalars, preserving
 empty lists, multiple results, false, zero, null and existing dictionaries.
-Windows child cleanup uses Job Objects but has not run on this Linux host; the
-platform CI result is still required. See the accepted plan's module section.
+Windows child cleanup uses Job Objects and had not run on this Linux host at
+that stage; its platform CI result was still required. See the accepted plan's module section.
 
 The complete 59-file inventory was subsequently covered by three disjoint runs
 and a targeted retry of one migration case that failed with `database or disk
-is full`. The retry passed with at least 6.92 GB free. After the final Windows
-lock correction, the current inventory contains 759 unique tests: **751 passed,
+is full`. The retry passed with at least 6.92 GB free. After the Windows
+lock correction, that inventory contained 759 unique tests: **751 passed,
 8 skipped, no unresolved failures**, with 64 passing subtests counted separately.
 These are combined latest outcomes, not one uninterrupted run. The eight skips
 include two native Windows locking cases; Linux results do not establish Windows
 or macOS acceptance. The other skips are five opt-in Codex/model scenarios and
-one virtualenv user-site case. The file and unique-case inventory is retained in
-`/tmp/contextopus-v13-full-test-coverage-evidence.json`; line/branch coverage was
-not measured.
+one virtualenv user-site case. The file and unique-case inventory is retained in private local evidence;
+line/branch coverage was not measured.
 
 The Windows correction removes the unsynchronized seed write before byte-zero
 lock acquisition. CRT permits locking beyond EOF, so an empty lock file needs no
@@ -136,7 +143,7 @@ Inside the execution sandbox, local LanceDB.connect stalled before table creatio
 
 ## Packaging checks
 
-Run against the final coordinated source tree:
+Run against the preceding coordinated candidate source tree:
 
 ```console
 uv lock --check --offline
@@ -148,8 +155,7 @@ uv build --offline --no-sources
 The verifier checks the exact six assets and SHA-256 digests, package/version/license/CLI metadata, every canonical application resource, skill inventories and plugin version. Client bundles reference the matching wheel and current tools. Canonical plugin short-skill copies are compared byte-for-byte with packaged skills. The sdist includes release tooling, lock metadata, canonical plugin resources and fixtures required by the newly shipped release tests; verification compares their actual bytes as well. Previous released 1.1/1.2 skill bytes are retained as recognized hashes; arbitrary edits are not recognized as managed originals.
 
 Offline build and release verification checked all six assets and their canonical
-resources. The temporary venv at `/tmp/contextopus-v13-wheel-gkqCOi/venv`
-contains the wheel and runtime dependencies. Its isolated interpreter (`-I`)
+resources. A temporary venv contains the wheel and runtime dependencies. Its isolated interpreter (`-I`)
 resolves Application inside that venv, not the editable checkout. The CLI reports
 Contextopus 1.3.0; installed inspection finds guide/read/write, seven short skills,
 five version-2.0.0 algorithms and base-context 1.3.0 without loading a model. These
@@ -163,8 +169,8 @@ linked inserts, reads and owner restart. The module's own venv contains no Core
 package. All 119 application files, including 32 resources and seven skills,
 match source and wheel; 125 installed wheel members match exactly. The verifier
 also passed from an extracted sdist. This is temporary-installation evidence;
-the final source archive must incorporate the completed acceptance documentation.
-Evidence: `/tmp/contextopus-v13-final-candidate-evidence.json`.
+it predates the retrospective documentation delivered separately below.
+The corresponding candidate receipt is retained privately.
 
 ## Bounded payload comparison
 
@@ -175,11 +181,11 @@ The coordinator measured raw versus compact presentation of the same backend ope
 | Material read | 1131 | 958 | 15.3% |
 | Material search | 5300 | 2171 | 59.0% |
 
-Evidence: `/tmp/contextopus-v13-obsidian-oxrqg8tf/payload-sizes.json`. This measures those two serialized result objects. It does not establish total conversation tokens, end-to-end latency, model compliance or answer quality.
+The local payload-size receipt is retained privately. This measures those two serialized result objects. It does not establish total conversation tokens, end-to-end latency, model compliance or answer quality.
 
 ## Isolated migration and Obsidian application evidence
 
-CI additionally declares a dedicated Linux/Python-3.12 transition job. It checks out the verified peeled v1.1.0 commit `ff711966921c562f22aa7bcdb9358a871c8d4282`, installs it noneditable in a separate venv, supplies CONTEXTOPUS_V11_PYTHON, then runs the current migration test without model downloads. This declaration is not a completed GitHub job.
+CI additionally declares a dedicated Linux/Python-3.12 transition job. It checks out the verified peeled v1.1.0 commit `ff711966921c562f22aa7bcdb9358a871c8d4282`, installs it noneditable in a separate venv, supplies CONTEXTOPUS_V11_PYTHON, then runs the current migration test without model downloads. At that stage this declaration was not a completed GitHub job; the final CI section records its later successful execution.
 
 Both real old writers were installed noneditable and executed with `-I`, outside
 the new editable source tree. The final suite passed **1.1 → 1.3 and 1.2 → 1.3**
@@ -194,14 +200,14 @@ migrated the user's actual root.
 
 ### Copy of the actual selected context
 
-A coherent snapshot of the existing root was retained under
-`/tmp/contextopus-live-copy-et5ikjnq/baseline`. Its 30,099 files remained immutable.
+A coherent private snapshot of the existing root was retained. Its 30,099 files
+remained immutable.
 The root guard covered the 10.727-second capture; source content and service state
 were unchanged. Active SQLite main/sidecar bundles were copied, checked for
 stability and backed up from isolated staging. Integrity checks and table counts
 matched. This does not establish one global event timestamp across databases.
 
-The exact final candidate wheel above migrated a separate copy of project-update from
+The exact `a38…` candidate wheel above migrated a separate copy of the selected context from
 format 3 to 4, then repeated the operation successfully. All 77 records retained
 bodies, paths, types, statuses, descriptions, revisions, graph endpoints and
 source fields; 377 native YAML links resolved. Free rules and effective policies
@@ -220,9 +226,9 @@ The copy used an explicit offline provider for one query-access check, so it
 does not establish real semantic ranking quality. Its records declared no formal
 sources; required-source behavior has separate fixture and model evidence. The
 transport check used actual in-process MCP handlers, not a deployed native client.
-Summary: `/tmp/contextopus-live-copy-et5ikjnq/final-artifact-copy-acceptance-summary.json`.
+The corresponding private summary retains its exact artifact association.
 
-On Linux, the coordinator exercised the installed Obsidian Flatpak **1.12.7** in an isolated temporary profile/vault. Runtime-created YAML wikilinks to two equally named records in different contexts resolved as two distinct edges in metadataCache/frontmatterLinks/resolvedLinks. Both links rendered in the DOM; clicking the beta link opened its exact file. Evidence: `/tmp/contextopus-v13-obsidian-oxrqg8tf/obsidian-evidence.json`. Existing user vaults/configuration were untouched. This verifies that application/path fixture, not every OS or all migration variants.
+On Linux, the coordinator exercised the installed Obsidian Flatpak **1.12.7** in an isolated temporary profile/vault. Runtime-created YAML wikilinks to two equally named records in different contexts resolved as two distinct edges in metadataCache/frontmatterLinks/resolvedLinks. Both links rendered in the DOM; clicking the beta link opened its exact file. The application-fixture receipt is retained privately. Existing user vaults/configuration were untouched. This verifies that application/path fixture, not every OS or all migration variants.
 
 The final packaging/legacy-skill/stdio/tmp subset passed **28 tests and 2 subtests** in 19.76 seconds. Actual tagged 1.1/1.2 skill bytes were tested with LF and CRLF, without an earlier managed manifest; arbitrary user edits remained protected. The renamed 1.1 w-find becomes w-context only when recognized as unchanged. The latest release guards passed 27 tests; after adding the malformed-revision guard, three targeted tmp regressions passed in 3.23 seconds.
 
@@ -258,11 +264,10 @@ removed, and original credentials and user contexts were unchanged. The observed
 passes and deviations are bounded evidence, not a claim that every model follows
 the procedure or that total token consumption decreased.
 
-Evidence: `/tmp/contextopus-model-acceptance-8xn0xd3x/reviewed-outcomes.json` and
-`/tmp/contextopus-model-postfix-xiqdtem6/work-turn-postfix/reviewed-outcome.json`;
-the corresponding raw JSONL traces retain call and review ordering.
+Private model-review outcomes and corresponding raw JSONL traces retain call
+and review ordering.
 
-One additional native Codex GPT-6.1 Sol turn used the exact final wheel and its
+One additional native Codex GPT-6.1 Sol turn used the `a38…` candidate wheel and its
 packaged `$m` skill, with a temporary root and a wrapper allowing only installation
 of the supplied catalog-demo. The model read the skill and modules procedure,
 inspected pending storage, installed through MCP, and checked the enabled module
@@ -272,12 +277,11 @@ query after restart. No direct installer or SQL command was used by the model.
 The example declared no dependencies and the queried table was empty; dependency
 preparation and inserted-data behavior have separate contract/API evidence. This
 is one observed install turn, not general model compliance. Temporary credentials
-were removed and the source credentials remained unchanged. Evidence:
-`/tmp/contextopus-v13-m-skill-model-acceptance-summary.json`.
+were removed and the source credentials remained unchanged. The corresponding model-install receipt is retained privately.
 
-## Project memory reconciliation
+## Earlier project memory reconciliation
 
-Thirteen thematic records were corrected against the implemented source contract
+Before live delivery, thirteen thematic records were corrected against the implemented source contract
 and explicitly distinguish candidate 1.3 from the installed 1.1 runtime. The
 published-version installation instructions retain their 1.2 commands and now
 label that scope. One historical task remains unchanged because current source
@@ -285,19 +289,131 @@ does not establish completion of that separate assignment. The goal, plan and
 migration state were also updated. All 16 changed records were read back through
 the existing MCP with matching bodies, descriptions, revisions and links; all
 were indexed. Git history is disabled in that selected context. No future live
-installation was recorded as completed.
+installation was recorded as completed. In the earlier selected-context inventory,
+69 missing descriptions had been reviewed and applied; 75 of that original
+76-record inventory had descriptions. One unchanged oversized historical record
+still needed a metadata-only description through the corrected runtime. These
+counts describe that earlier inventory, not the final delivered memory state.
 
-## Remaining acceptance
+## Final delivery: released and installed 1.3.1
 
-- Execute the declared platform CI jobs after publication work is authorized.
-- Retain the exact final-source artifact identities, approved publication and installation receipts.
-- Retain a fresh coherent whole-set backup before live migration; the accepted
-  copy predates later context updates and is not a snapshot of their final state.
-- After separate authorization, update the actual single runtime and managed clients; verify their fresh tools, procedure, context search/read and process/root identity.
-- Check the requested Obsidian navigation in the actual vault. In selected
-  project-update, 69 missing descriptions have already been reviewed, applied and
-  read back unchanged in all other fields; 75 of that original 76-record inventory have descriptions.
-  One unchanged oversized historical record awaits the corrected runtime. The
-  fourteen flagged body/version cases have been reconciled as described above.
+The authorized rollout first installed the published 1.3.0 release without an
+intermediate 1.2 installation. Its full platform matrix passed. Before any live
+format conversion, upgrade planning exposed a separate nested-vault defect:
+both the selected root and an ancestor contained `.obsidian`. Patch 1.3.1 makes
+an explicitly selected root with its own `.obsidian` the vault boundary. Without
+that marker, multiple enclosing vaults still require an unambiguous root.
+Neither vault was removed or renamed.
 
-[Upgrade and restore instructions](../releases/1.3.0.md) describe the operational sequence without claiming it has already been performed.
+The installed patch has source commit
+[`4107050440054c9eaa43f58a54c920fdfac1d3d8`](https://github.com/pikiby/contextopus-core/commit/4107050440054c9eaa43f58a54c920fdfac1d3d8)
+and wheel SHA-256
+`39a0aa09ccc256f50001bcfd907367eb767fe0b2db9a17f3069d3f919313bce9`.
+All 119 installed application files matched that wheel. The existing `local`
+extra, CPU PyTorch, persistent root and one native service owner were retained.
+The patch's [platform workflow](https://github.com/pikiby/contextopus-core/actions/runs/39002613425)
+completed successfully for that exact source: **7/7 jobs passed**. This includes
+Linux/macOS/Windows on Python 3.12/3.13 and the separate real 1.1-writer transition
+job. The two Windows jobs completed their native early gate, unchanged full suite,
+build, release verification, exact-wheel installation and installed MCP checks:
+
+| Native Windows job | Early gate | Full suite |
+| --- | --- | --- |
+| Python 3.12 | 48 passed in 177.52 s | 754 passed, 30 skipped, 53 subtests in 1307.71 s |
+| Python 3.13 | 48 passed in 167.72 s | 754 passed, 30 skipped, 53 subtests in 1359.96 s |
+
+Early cases also occur in the full suite; these counts must not be added as
+unique tests. Skips and subtests are reported separately. This is native Windows
+execution, not a simulated CP1252-only or Linux collection result.
+
+[Release v1.3.1](https://github.com/pikiby/contextopus-core/releases/tag/v1.3.1)
+was published as the latest stable release from that exact commit. All seven
+assets, including SHA256SUMS, were downloaded and matched the approved bytes and
+GitHub API digests. The installed wheel matches the published wheel above.
+Retrospective documentation changes are separate from this runtime commit and
+do not rebuild, retag or replace the immutable release artifacts.
+
+### Coherent backup and live preservation
+
+Two fresh private whole-set snapshots were verified: the old 1.1 installation
+before 1.3.0, and the changed 1.3.0 state before the patch. They retain the package
+prefix/extras, data, configuration, native integrations and service controls as
+a coherent recovery set. Source fingerprints and every regular/symlink archive
+member were checked, together with 76 logical SQLite backups in each snapshot.
+Private snapshot locations and recovery receipts are retained outside public
+documentation. An old runtime must not be started against incompatible migrated
+data; rollback restores the coherent set.
+
+The actual selected context then migrated from Workspace format 3 to 4 through
+the new service's public MCP. Apply completed and a fresh repeat plan was
+compatible with no further changes. Read-only comparison with the migration
+backup established:
+
+- All 77 cards retained IDs, paths, types, statuses, descriptions, bodies, sources
+  and other metadata. All 377 ordered graph edges retained their target YAML IDs
+  and became resolving native vault-relative wikilinks.
+- The complete free-text instructions and unrelated frontmatter were unchanged;
+  only recognized machine settings moved into canonical Core configuration.
+  Effective permissions and settings matched the reviewed transition.
+- All 47 temporary/review/proposal files remained byte-identical, with two active
+  cycles, 29 temporary materials and nine proposals preserved. Cycle/request/ID
+  controls were unchanged apart from the expected format marker.
+- Before base-document delivery, all 27 other contexts were unchanged: 4,911
+  workspace files and 9,559 control files matched the pre-patch snapshot. All 83
+  captured `active.json` pointer files were unchanged. These are file counts,
+  not a claim of 83 distinct active models.
+
+This establishes bounded file/graph preservation, not semantic ranking quality
+or GUI navigation on every platform. The earlier isolated Obsidian application
+fixture retains its separate scope.
+
+### Product documentation, catalog and model cache
+
+Explicit public `core.base_plan` / `core.base_install` delivery installed eight
+managed base records at version 1.3.1 and indexed 12 fragments. Exact content and
+description readback matched the reviewed module guide and template; the repeat
+plan was current with no changes or conflicts. `core.algorithms_refresh`
+refreshed the five builtin catalog entries at version 2.0.0. Bounded semantic
+retrieval returned base documentation and the algorithm catalog through the
+configured CPU provider. Active project rules and settings were preserved.
+Package replacement and workspace migration alone do not perform these steps.
+
+The active Qwen3-Embedding-0.6B configuration, including its pinned revision,
+matched the pre-patch snapshot byte-for-byte. The first live model use populated
+the selected Hugging Face cache, including a 1.19 GB weights file; download and
+reconstruction completed before inference continued. No model/profile change
+was required. The available evidence does not establish why an earlier complete
+cache was unavailable, and does not attribute its absence to the update.
+
+### Native clients and remaining acceptance
+
+Codex and Claude retained seven managed short skills each; OpenCode and Crush
+used config-only integration rather than duplicate skill copies. All four patch
+previews were no-ops, and controlled configurations, manifests and skill hashes
+matched their reviewed state. Configuration preservation is separate from a
+fresh native MCP request and from the model following the whole procedure.
+
+| Client | Current bounded result |
+| --- | --- |
+| Codex | Ordinary `$w` passed: actual guide, rules, project, search and full read. |
+| Claude Code | Native retrieval passed; the model omitted the project and repeated guide. |
+| OpenCode | Native retrieval passed; the model omitted rules/project, recovered from an unknown argument and requested unnecessary full detail. |
+| Crush | Ordinary `$w` failed: despite advertised connected MCP tools, the model read files directly and encountered stale 1.1 statements. A separate explicit MCP-only native turn passed schema/search/read after strict argument errors and recovery. |
+
+The separate Crush capability turn allowed the two read-only MCP tools and
+disabled non-MCP builtins. It proves technical retrieval under that constraint;
+it does not prove ordinary skill routing or full procedure compliance. Earlier
+native-harness readiness and observation corrections changed the test scaffold,
+not Contextopus product code. The ordinary Crush failure remains a failure.
+All four clients can perform technical native retrieval under the stated
+conditions; a connected endpoint, final prose or successful explicit-tool turn
+is not universal model compliance.
+
+Final project-memory reconciliation is tracked separately and must retain these
+results and limits. Native Windows CI does not establish Windows/macOS GUI
+behavior, GPU inference, or complete model scenarios on every host. Historical
+model/copy receipts above remain attributed to their original packages.
+
+[Upgrade and restore instructions](../releases/1.3.0.md) describe the operational
+sequence. Private host paths, backup locations and client-session identifiers
+are intentionally absent from this delivery summary.
