@@ -279,6 +279,77 @@ def test_changed_retained_map_blocks_alias_and_reviewed_foreign_migration(tmp_pa
     finally: a.close(); b.close()
 
 
+@pytest.mark.parametrize('simulate_case_alias', [False, True])
+def test_case_only_filename_preserves_graph_backup_and_retry(tmp_path, monkeypatch, simulate_case_alias):
+    a, b = legacy(tmp_path, 'alpha'), legacy(tmp_path, 'beta')
+    try:
+        original = note(a.engine.root, 'unique.md', '# Unique\nUnchanged identity.', ['index.md'])
+        note(a.engine.root, 'workfile.md', '# Work\nUses unique.', ['unique.md'])
+        source, destination = a.engine.knowledge / 'unique.md', a.engine.knowledge / 'Unique.md'
+        native_alias = destination.is_file() and destination.samefile(source)
+        is_file, samefile = Path.is_file, Path.samefile
+        if simulate_case_alias and not native_alias:
+            def alias_file(path):
+                return is_file(source) if str(path) == str(destination) else is_file(path)
+            def alias_identity(path, other):
+                if str(path) == str(destination) and str(other) == str(source):
+                    return True
+                return samefile(path, other)
+            monkeypatch.setattr(Path, 'is_file', alias_file)
+            monkeypatch.setattr(Path, 'samefile', alias_identity)
+        removed = []
+        unlink = Path.unlink
+        def record_unlink(path, *args, **kwargs):
+            if str(path) in {str(source), str(destination)}:
+                removed.append(str(path))
+            return unlink(path, *args, **kwargs)
+        monkeypatch.setattr(Path, 'unlink', record_unlink)
+        preview = a.upgrade_plan()
+        assert preview['ready'], preview
+        expected_path = 'knowledge/unique.md' if native_alias or simulate_case_alias else 'knowledge/Unique.md'
+        transforms, _ = a._v2_transforms(0)
+        assert transforms['knowledge/unique.md']['path'] == expected_path
+        result = a.upgrade_apply(preview['revision'], 'Preserve the reviewed physical source')
+        assert result['status'] == 'complete'
+        material = a.read(material_id='unique.md')
+        assert material['path'] == expected_path and material['content'] == '# Unique\nUnchanged identity.'
+        assert a.engine.resolve('unique.md').links == [mapping(preview, 'alpha')]
+        work = mapping(preview, 'alpha', 'knowledge/workfile.md')
+        assert a.engine.resolve(work).links == ['unique.md']
+        assert (Path(result['backup']) / 'knowledge/unique.md').read_bytes() == original['text'].encode('utf-8')
+        assert a.upgrade_apply(preview['revision'], 'Retry the exact migration')['replayed']
+        if native_alias or simulate_case_alias:
+            assert not removed
+            assert 'unique.md' in {path.name for path in a.engine.knowledge.iterdir()}
+    finally: a.close(); b.close()
+
+
+def test_case_only_destination_keeps_distinct_directory_entries(tmp_path):
+    a, b = legacy(tmp_path, 'alpha'), legacy(tmp_path, 'beta')
+    try:
+        note(a.engine.root, 'unique.md', '# Unique\nSource body.')
+        source, destination = a.engine.knowledge / 'unique.md', a.engine.knowledge / 'Unique.md'
+        distinct = not destination.exists()
+        if distinct:
+            note(a.engine.root, 'Unique.md', '# Destination\nDistinct body.')
+            assert not source.samefile(destination)
+        else:
+            assert source.samefile(destination)
+        preview = a.upgrade_plan()
+        assert preview['ready'], preview
+        transforms, _ = a._v2_transforms(0)
+        if distinct:
+            assert transforms['knowledge/unique.md']['path'] != 'knowledge/Unique.md'
+            assert len({item['id'] for item in transforms.values()}) == len(transforms)
+        else:
+            assert transforms['knowledge/unique.md']['path'] == 'knowledge/unique.md'
+        assert a.upgrade_apply(preview['revision'], 'Preserve distinct physical records')['status'] == 'complete'
+        assert a.read(material_id='unique.md')['content'] == '# Unique\nSource body.'
+        if distinct:
+            assert a.read(material_id='Unique.md')['content'] == '# Destination\nDistinct body.'
+    finally: a.close(); b.close()
+
+
 @pytest.mark.parametrize('pending,bad_expected', [(False, False), (True, False), (True, True)])
 def test_exact_foreign_wikilink_is_not_realiased_to_local_legacy_id(tmp_path, pending, bad_expected):
     current = context(tmp_path, 'current')

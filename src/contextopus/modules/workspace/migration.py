@@ -235,6 +235,15 @@ class FormatMigrationMixin:
                 after_path = (
                     Path(relative).parent / topic_name(item["content"], ident)
                 ).as_posix()
+            if (after_path != relative and after_path.casefold() == relative.casefold()
+                    and after_path not in files):
+                destination = self.engine.root / after_path
+                self.engine._assert_safe(destination)
+                if destination.is_file() and destination.samefile(self.engine.root / relative):
+                    # macOS paths compare case-sensitively even when the volume
+                    # aliases these names. Keep its actual directory entry so
+                    # verification and cleanup never treat one file as two.
+                    after_path = relative
             if after_path in occupied or (
                 after_path != relative and after_path in files
             ):
