@@ -94,6 +94,8 @@ def test_default_tools_and_direct_guide_selectors(monkeypatch, tmp_path):
     mcp, app = fixture_server(monkeypatch, tmp_path)
     tools = asyncio.run(mcp.list_tools())
     assert {t.name for t in tools} == {'guide', 'read', 'write'}
+    guide_description = next(t.description for t in tools if t.name == 'guide')
+    assert 'only a signature, not a replacement for a procedure' in guide_description
     schemas = {t.name: t.inputSchema for t in tools}
     assert schemas['read']['properties']['detail']['enum'] == ['compact', 'full']
     asyncio.run(mcp.call_tool('guide', {}))
@@ -131,6 +133,7 @@ def test_initialize_delivers_native_tool_routing_and_preserves_real_tool_names(m
                     assert "Do not replace Contextopus operations with shell commands" in instructions
                     assert "Native skill loading and obtaining declared external sources" in instructions
                     assert "existing approval rules" in instructions
+                    assert "only an operation signature and does not replace a procedure" in instructions
                     assert "reload only when unknown, lost, changed or after a plugin update" in instructions
                     tools = (await session.list_tools()).tools
                     assert {tool.name for tool in tools} == {"guide", "read", "write"}
@@ -154,6 +157,127 @@ def test_workspace_procedure_requires_first_rules_read_and_inherited_query_setti
     assert "it never replaces the first reading" in procedure
     assert "inherit the selected context's algorithm and limits" in procedure
     assert "omit overrides rather than inventing them" in procedure
+
+
+@pytest.mark.parametrize('operation', ['search', 'read', 'read_many'])
+def test_workspace_signature_aliases_deliver_shared_preconditions_without_reading_rules(
+    monkeypatch, tmp_path, operation,
+):
+    from contextopus.startup import Application
+    from contextopus.modules.workspace import server as workspace_server
+    from contextopus.modules.workspace.operations import _RETRIEVAL_PRECONDITIONS
+
+    runtime = Mock(side_effect=AssertionError('signature help must not open a Workspace runtime'))
+    monkeypatch.setattr(workspace_server, 'runtime', runtime)
+    with Application(tmp_path, discover=False) as app:
+        query = Mock(wraps=app.query)
+        app.query = query
+        mcp, _ = fixture_server(monkeypatch, tmp_path, app=app)
+        results = [value(asyncio.run(mcp.call_tool('guide', {'operation': alias})))
+                   for alias in (operation, 'workspace.' + operation)]
+        assert results[0] == results[1]
+        result = results[0]
+        assert result['operation'] == 'workspace.' + operation
+        assert result['kind'] == 'query'
+        assert result['arguments_schema'] == app.registry.describe(result['operation'])['arguments_schema']
+        assert result['description'].startswith(_RETRIEVAL_PRECONDITIONS)
+        assert 'operation signature does not replace it' in result['description']
+        assert 'workspace.settings_read' in result['description']
+        assert 'complete current INSTRUCTIONS' in result['description']
+        assert 'workspace.startup for work' in result['description']
+        assert 'workspace.instructions_read for independent retrieval' in result['description']
+        assert 'same task/context' in result['description']
+        assert 'false never skips the first full reading' in result['description']
+        assert query.call_count == 2
+        for call in query.call_args_list:
+            assert call.args == ('describe', {'operation': 'workspace.' + operation})
+        runtime.assert_not_called()
+
+
+def test_workspace_search_help_preserves_nullable_optional_override_schema(monkeypatch, tmp_path):
+    from pydantic import ValidationError
+    from contextopus.startup import Application
+    from contextopus.modules.workspace.operations import _ARGUMENT_MODELS
+
+    with Application(tmp_path, discover=False) as app:
+        mcp, _ = fixture_server(monkeypatch, tmp_path, app=app)
+        signature = value(asyncio.run(mcp.call_tool('guide', {'operation': 'workspace.search'})))
+    assert "inherit the selected context's algorithm and limits" in signature['description']
+    assert 'unless the user explicitly supplied them' in signature['description']
+    schema = signature['arguments_schema']
+    n = schema['properties']['N']
+    assert n['anyOf'] == [{'type': 'integer'}, {'type': 'null'}]
+    assert n['default'] is None
+    assert 'N' not in schema.get('required', [])
+    assert 'omit or pass null to inherit the configured limit' in n['description']
+    assert schema['properties']['output']['default'] == 'materials'
+    assert schema['additionalProperties'] is False
+    model = _ARGUMENT_MODELS['search']
+    assert model.model_validate({'query': 'facts'}).N is None
+    assert model.model_validate({'query': 'facts', 'N': None}).N is None
+    assert model.model_validate({'query': 'facts', 'N': 10}).N == 10
+    with pytest.raises(ValidationError):
+        model.model_validate({'query': 'facts', 'N': '10'})
+
+
+def test_core_signature_and_catalog_do_not_gain_workspace_prerequisites(monkeypatch, tmp_path):
+    from contextopus.startup import Application
+
+    with Application(tmp_path, discover=False) as app:
+        mcp, _ = fixture_server(monkeypatch, tmp_path, app=app)
+        expected = app.registry.describe('core.status')
+        result = value(asyncio.run(mcp.call_tool('guide', {'operation': 'core.status'})))
+        assert result == expected
+        assert 'INSTRUCTIONS' not in result['description']
+        catalog = value(asyncio.run(mcp.call_tool('guide', {'catalog': True})))
+        assert catalog == app.registry.describe()
+        assert set(catalog) == {'operations'}
+
+
+def test_mcp_search_inherits_saved_n_and_keeps_explicit_override(monkeypatch, tmp_path):
+    from contextopus.startup import Application
+    from contextopus.core.resources import ProcessResources
+    from contextopus.core.settings import Settings, WORKSPACE_CREATION_DEFAULTS
+    from contextopus.modules.workspace.cycles import CycleRuntime
+    from contextopus.modules.workspace import server as workspace_server
+    from test_runtime import Factory
+
+    factory = Factory()
+    runtime = CycleRuntime(tmp_path, 'one', provider_factory=factory)
+    try:
+        runtime.workspace_create(
+            'seed', '# Rules\nRead these rules before independent retrieval.\n', '# Project\nTest scope.',
+            'Create this isolated search fixture',
+            settings={**WORKSPACE_CREATION_DEFAULTS, 'git_history_enabled': False},
+            project_description='Tests request limits against saved context settings.',
+        )
+        for number in range(3):
+            runtime.engine.create('# Fact ' + str(number), description='Verified fixture fact.')
+        settings = Settings(runtime.control.layout)
+        preview = settings.preview({'selection': {'algorithm': 'nearest_n', 'parameters': {'N': 2}}},
+                                   module='workspace', context='one')
+        settings.apply(preview['preview_revision'])
+    finally:
+        runtime.close()
+
+    monkeypatch.setattr(workspace_server, '_runtimes', {})
+    with ProcessResources(factory) as resources, Application(
+        tmp_path, 'one', resources=resources, discover=False,
+    ) as app:
+        try:
+            mcp, _ = fixture_server(monkeypatch, tmp_path, app=app)
+            for override, count, effective_n in [({}, 2, 2), ({'N': None}, 2, 2), ({'N': 10}, 3, 10)]:
+                result = value(asyncio.run(mcp.call_tool('read', {
+                    'operation': 'workspace.search', 'work_root': str(tmp_path), 'context': 'one',
+                    'arguments': {'query': 'facts', 'types': ['knowledge'], **override},
+                })))
+                assert len(result['results']) == count
+                assert result['diagnostics']['effective_settings'] == {
+                    'algorithm': 'nearest_n', 'parameters': {'N': effective_n}}
+            assert settings.snapshot(module='workspace', context='one')['values']['selection'] == {
+                'algorithm': 'nearest_n', 'parameters': {'N': 2}}
+        finally:
+            workspace_server.close_runtimes()
 
 
 def test_legacy_aliases_are_explicit_full_responses(monkeypatch, tmp_path):

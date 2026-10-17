@@ -77,7 +77,8 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             "the client and procedure. If Contextopus MCP is unavailable, report the connection failure "
             "instead of bypassing it. Use this server's read tool for queries and write tool only for "
             "authorized changes under the existing approval rules. guide() returns the ordinary Workspace "
-            "workflow; request a signature only when unknown. Reuse procedures already obtained for the same "
+            "workflow; guide(operation=...) returns only an operation signature and does not replace a "
+            "procedure. Request signatures only when unknown. Reuse procedures already obtained for the same "
             "task; reload only when unknown, lost, changed or after a plugin update. Workspace operations "
             "require explicit context."
         ),
@@ -114,7 +115,7 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         context: str | None = None,
         workspace: str | None = None,
     ) -> dict:
-        """Read one applicable procedure or one operation signature; catalog is opt-in."""
+        """guide() reads the Workspace procedure; operation=... gives only a signature, not a replacement for a procedure. Catalog is opt-in."""
         if sum((procedure is not None, operation is not None, catalog)) > 1:
             raise ValueError('Choose procedure, operation or catalog')
         if operation is not None or catalog:
