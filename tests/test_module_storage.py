@@ -60,6 +60,53 @@ def test_two_modules_share_catalog_without_table_or_data_collisions(tmp_path):
         assert conn.execute('SELECT count(*) FROM "_contextopus_module_migrations"').fetchone()[0] == 2
 
 
+@pytest.mark.parametrize("extension_api_present", [False, True])
+def test_optional_extension_api_keeps_storage_usable_and_loading_denied(tmp_path, monkeypatch, extension_api_present):
+    original_connect = sqlite3.connect
+    native_enable = getattr(sqlite3.Connection, "enable_load_extension", None)
+    connections, disable_calls = [], []
+
+    class Connection(sqlite3.Connection):
+        @property
+        def enable_load_extension(self):
+            if not extension_api_present:
+                raise AttributeError("SQLite build has no extension-loading API")
+
+            def enable(value):
+                disable_calls.append((self, value))
+                if native_enable is not None:
+                    native_enable(self, value)
+
+            return enable
+
+    def connect(*args, **kwargs):
+        connection = original_connect(*args, factory=Connection, **kwargs)
+        connections.append(connection)
+        assert hasattr(connection, "enable_load_extension") == extension_api_present
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    storage, path = service(tmp_path), package(tmp_path)
+    assert install(storage, "alpha", contract(), path)["applied_versions"] == [1]
+    assert storage.inspect("alpha", contract(), path)["status"] == "current"
+    storage.execute("alpha", 'INSERT INTO "{{module}}::sessions" VALUES (1,?)', ("retained",))
+    # Without an authorizer, the connection itself must still prohibit loading
+    # (or the function is absent in SQLite builds without that capability).
+    with storage._connection() as connection:
+        with pytest.raises(sqlite3.OperationalError, match="not authorized|no such function"):
+            connection.execute("SELECT load_extension('anything')")
+    with pytest.raises(ModuleStorageError, match="not authorized|no such function"):
+        storage.query("alpha", "SELECT load_extension('anything')")
+    with pytest.raises(ModuleStorageError, match="not authorized|no such function"):
+        storage.execute("alpha", 'INSERT INTO "{{module}}::sessions" VALUES (2,load_extension(\'anything\'))')
+    (path / "migrations/002-extension.sql").write_text("SELECT load_extension('anything');")
+    with pytest.raises(ModuleStorageError, match="not authorized|no such function"):
+        install(storage, "alpha", contract(2), path)
+    assert storage.inspect("alpha", contract(2), path)["current_version"] == 1
+    assert storage.query("alpha", 'SELECT body FROM "{{module}}::sessions"')["rows"] == [{"body": "retained"}]
+    assert disable_calls == ([(connection, False) for connection in connections] if extension_api_present else [])
+
+
 def test_second_migration_preserves_data_and_stricter_new_code_can_upgrade(tmp_path):
     storage, path = service(tmp_path), package(tmp_path)
     install(storage, "alpha", contract(), path)

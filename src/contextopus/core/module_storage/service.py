@@ -47,7 +47,12 @@ class ModuleStorage:
                                uri=True, isolation_level=None, timeout=timeout)
         try:
             conn.row_factory = sqlite3.Row
-            conn.enable_load_extension(False)
+            # Some SQLite builds omit extension-loading support and its Python
+            # API entirely. Disable it explicitly whenever the API is present;
+            # module SQL also remains restricted by the authorizer below.
+            disable_extensions = getattr(conn, "enable_load_extension", None)
+            if disable_extensions is not None:
+                disable_extensions(False)
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA trusted_schema=OFF")
             if not write:

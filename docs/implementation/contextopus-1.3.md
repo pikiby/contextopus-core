@@ -2,6 +2,14 @@
 
 This is source/build readiness evidence, not a publication or live-installation receipt. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define the remaining acceptance.
 
+The first authorized platform CI found that macOS SQLite omits the optional
+`enable_load_extension` API. The correction checks for that API before disabling
+extension loading; SQL authorization remains enforced, with both API variants
+covered by regression tests. The `a38…` installation, model and data-copy receipts
+below describe the preceding package and do not certify rebuilt bytes. The
+corrected artifact has a separate identity receipt and still requires its own
+successful platform CI and live-installation acceptance.
+
 ## Version domains
 
 | Domain | Target |
