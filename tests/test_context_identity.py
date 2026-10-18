@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +19,18 @@ from test_workspace_v3 import create
 from test_shared_v4 import context, save
 
 
+def expose_foreign_context_names(monkeypatch, base, names):
+    """Inspect case-distinct foreign entries even when this filesystem aliases them."""
+    original = Path.iterdir
+
+    def entries(path):
+        if path == base:
+            return iter(base / name for name in names)
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", entries)
+
+
 def test_context_metadata_preserves_user_tags_and_identity():
     original = {"id": "stable.md", "tags": ["team/red", "context/wrong", "custom"]}
     derived = context_metadata(original, "actual")
@@ -30,24 +43,34 @@ def test_context_metadata_preserves_user_tags_and_identity():
     assert "## tags" not in task_body
 
 
-def test_unicode_collision_in_existing_storage(tmp_path):
+def test_unicode_collision_in_existing_storage(tmp_path, monkeypatch):
     layout = StorageLayout(tmp_path)
     # Deliberately inspect names made on another filesystem, even when the local
     # creation API accepts a narrower set of names.
     (layout.workspace_base / "Straße").mkdir(parents=True)
-    (layout.workspace_base / "STRASSE").mkdir()
+    alternative = layout.workspace_base / "STRASSE"
+    if alternative.exists():
+        expose_foreign_context_names(monkeypatch, layout.workspace_base, ("Straße", "STRASSE"))
+    else:
+        alternative.mkdir()
     with layout.guard(), pytest.raises(PCWError, match="Context name collision"):
         assert_unique_context_names(layout)
 
 
-def test_case_collision_creation_and_existing_collision(tmp_path):
+def test_case_collision_creation_and_existing_collision(tmp_path, monkeypatch):
     first = context(tmp_path, "Alpha")
     second = CycleRuntime(tmp_path, "alpha", provider_factory=Factory())
     try:
         with pytest.raises(PCWError, match="Context name collision"):
             create(second)
-        assert not second.engine.root.exists()
-        second.engine.root.mkdir()
+        base = first.control.layout.workspace_base
+        actual = [path for path in base.iterdir() if not path.name.startswith(".") and path.is_dir()]
+        assert [path.name for path in actual] == ["Alpha"]
+        if second.engine.root.exists():
+            assert second.engine.root.samefile(first.engine.root)
+            expose_foreign_context_names(monkeypatch, base, ("Alpha", "alpha"))
+        else:
+            second.engine.root.mkdir()
         with pytest.raises(PCWError, match="Context name collision"):
             first.list()
     finally:
@@ -67,7 +90,9 @@ def test_concurrent_case_variants_allow_only_one_context(tmp_path):
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             assert sorted(pool.map(attempt, runtimes)) == ["collision", "created"]
-        assert sum(runtime.engine.root.is_dir() for runtime in runtimes) == 1
+        base = runtimes[0].control.layout.workspace_base
+        actual = [path for path in base.iterdir() if not path.name.startswith(".") and path.is_dir()]
+        assert len(actual) == 1 and actual[0].name in {"Alpha", "alpha"}
     finally:
         for runtime in runtimes:
             runtime.close()

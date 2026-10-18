@@ -1,9 +1,10 @@
 """Temporary cards use the same YAML records as permanent knowledge."""
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 import re
 import os
 import posixpath
+import ntpath
 import uuid
 import unicodedata
 import yaml
@@ -33,7 +34,7 @@ def temporary_card(path, root, *, parse_sources=True):
 
 def card_name(name, content):
     if name is None:
-        heading = re.search(r'^#\s+(.+)', content, re.M)
+        heading = re.search(r'^#[ \t]+([^\r\n]+)', content, re.M)
         name = heading.group(1) if heading else 'Working note'
     if not isinstance(name, str) or not name.strip():
         raise PCWError('name must be nonempty text')
@@ -111,7 +112,7 @@ def temporary_dependencies(card, cards, *, known_cycles=()):
     references += source_references(embedded, strict=False)
     references += re.findall(r'\[\[([^]\n]+)\]\]', body)
     references += re.findall(r'\[[^]\n]*\]\(([^)\n]+)\)', body)
-    for block in re.findall(r'(?ms)^```ya?ml[^\n]*\n(.*?)^```[ \t]*$', body):
+    for block in re.findall(r'(?ms)^```ya?ml[^\n]*\n(.*?)^```[ \t]*\r?$', body):
         if not re.search(r'(?m)^(?:sources|required_sources)\s*:', block):
             continue
         try:
@@ -137,9 +138,17 @@ def temporary_dependencies(card, cards, *, known_cycles=()):
             found.add('@temporary-path')
         for actual_path, target in cards:
             path = target['path']
-            if PurePosixPath(value).is_absolute():
-                if actual_path is not None and posixpath.normpath(value) == posixpath.normpath(str(actual_path)):
-                    found.add(target['id'])
+            if PurePosixPath(value).is_absolute() or PureWindowsPath(value).root:
+                if actual_path is not None:
+                    actual = str(actual_path)
+                    if '\\' in actual or PureWindowsPath(actual).drive:
+                        # Compare native Windows spelling only against the
+                        # exact inventoried path, never a matching tail.
+                        same = ntpath.normcase(ntpath.normpath(value)) == ntpath.normcase(ntpath.normpath(actual))
+                    else:
+                        same = posixpath.normpath(value) == posixpath.normpath(actual)
+                    if same:
+                        found.add(target['id'])
                 continue
             tail = '.tmp/' + path.split('.tmp/', 1)[1] if '.tmp/' in path else path
             exact = (value == target['id'] or value.removesuffix('.md') == path.removesuffix('.md')

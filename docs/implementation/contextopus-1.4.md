@@ -88,11 +88,11 @@ below records the later client, package and installed-file inventories.
   readable temporary cards, with no pending, unregistered or correction records
   in the selected development context. Base documentation was updated to 1.4.0.
 
-This is deterministic runtime and transport evidence. It is not a claim that
-every model follows the procedure. This revision has not been tested on native
-Windows or macOS runners, and no new GitHub release has been published.
+This original checkpoint records Linux runtime and transport evidence, before
+the later cross-platform CI work and release preparation below. It is not a claim
+that every model follows the procedure or a statement about final publication.
 
-## Local deployment
+## Local deployment checkpoint
 
 The verified wheel is installed locally as 1.4.0 with the prior CPU inference
 extra and all 79 dependency pins retained. The single shared service restarted
@@ -135,8 +135,8 @@ contract. This follow-up adds no separate Core storage or memory provider.
   total: the wheel, source archive and those ZIPs. Release verification checks
   their checksums, package identity and canonical resources. The four-ZIP count
   above belongs to the earlier checkpoint.
-- All 124 current runtime/resource files match across source, wheel and the
-  installed package. The existing local inference installation retained all
+- At the Hermes checkpoint, all 124 runtime/resource files matched across source,
+  wheel and the installed package. The local inference installation retained all
   79 dependency pins. The earlier 123-file checks remain historical evidence.
 - Final verification in Hermes' actual native default home resolved all seven
   canonical skills and discovered exactly `guide`, `read`, `write` and `finish`
@@ -153,3 +153,33 @@ behavior, general model compliance, approval-required-policy behavior or
 recovery during an in-flight model call. The Hermes web build required the
 supported bounded-build retry described in the [setup guide](../integrations/hermes.md);
 successful recovery does not establish the original Node crash's cause.
+
+## Release preparation and final verification
+
+The documentation/base-context regression run passed 30 tests. The managed guide
+bundle expanded from seven to eleven records; upgrade verification retained the
+seven existing record IDs while adding the four new topics and their navigation
+links. Product guidance describes current behavior and scenarios separately from
+bounded run reports and operation history.
+
+A clean archive of commit `c81687e22cd80a44a8d84f8e9ea6650fddf52e32` passed
+wheel/source build, five-client bundle generation and seven-asset verification.
+An isolated Python 3.12 installation with hash-checked locked dependencies passed
+the installed MCP/module smoke checks. All 128 runtime/resource files matched
+between that commit's source, wheel and clean installation. These local artifact
+results precede the subsequent platform fixes and do not claim that later source
+changes were already packaged.
+
+Cross-platform validation exposed CRLF-sensitive temporary filenames and source
+declarations, and native Windows absolute-path matching in dependency checks.
+The corrections retain authored body bytes, source conditions and comments while
+matching dependencies against the actual inventory. Regression fixtures now write
+their intended UTF-8/newline bytes explicitly. Context-name tests count actual
+directory entries on case-insensitive filesystems; the uniqueness guard remains
+unchanged. These changes do not require a separate Windows product version.
+
+Final cross-platform acceptance uses the executed results for the release commit in
+[GitHub Actions](https://github.com/pikiby/contextopus-core/actions/workflows/ci.yml)
+for final CI evidence. Earlier checkpoint counts and local package checks are
+separate from those results and from release publication; native service/client
+and model-behavior limits remain as recorded above.

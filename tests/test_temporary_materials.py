@@ -72,7 +72,7 @@ def test_helper_shared_sources_and_reference_dependencies(tmp_path):
     for body in examples:
         assert 'stable' in temporary_dependencies({'content': body}, [(None, target)])
     note = tmp_path / card_name(None, '# Readable name\nEvidence')
-    note.write_text(record_text({'id': 'stable', 'type': 'knowledge', 'links': []}, examples[-2]))
+    note.write_text(record_text({'id': 'stable', 'type': 'knowledge', 'links': []}, examples[-2]), encoding='utf-8', newline='')
     result = temporary_card(note, tmp_path)
     assert result['id'] == 'stable'
     assert result['sources'][0]['reference'] == 'stable'
@@ -183,7 +183,7 @@ def test_cross_context_temporary_links_and_manual_permanent_dependencies(workspa
         permanent = runtime.engine.knowledge / 'Manual legacy dependency.md'
         permanent.write_text(record_text({'id': 'manual-legacy', 'type': 'knowledge', 'links': [],
                                           'sources': [{'reference': target['id'], 'instruction': 'Read evidence'}]},
-                                         '# Legacy dependency'))
+                                         '# Legacy dependency'), encoding='utf-8', newline='')
         with pytest.raises(PCWError, match='Permanent knowledge depends'):
             other.tmp_delete(foreign_cycle, target['id'], target['revision'], confirmation='Delete')
         snapshot = other.status(foreign_cycle)
@@ -244,7 +244,8 @@ def test_explicit_temporary_names_reject_portable_case_and_unicode_collisions(wo
     assert runtime.tmp_list(cycle)['total'] == 2
 
 
-def test_foreign_historical_source_excerpt_does_not_poison_inventory(workspace):
+@pytest.mark.parametrize('newline', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_foreign_historical_source_excerpt_does_not_poison_inventory(workspace, newline):
     from contextopus.modules.workspace.records import record_text
     runtime, _ = workspace
     other = CycleRuntime(runtime.engine.work_root, 'historical', provider_factory=Factory())
@@ -254,7 +255,8 @@ def test_foreign_historical_source_excerpt_does_not_poison_inventory(workspace):
         path = other._tmp(foreign_cycle) / 'materials' / 'old-draft.md'
         path.parent.mkdir(parents=True)
         malformed = '# Historical draft\n```yaml\nrequired_sources:\n  - url: https://example.org/data\n    extract: muninn: IP and other examples\n```\n'
-        path.write_text(record_text({'id': 'old-draft', 'type': 'knowledge', 'links': []}, malformed))
+        malformed = malformed.replace('\n', newline)
+        path.write_text(record_text({'id': 'old-draft', 'type': 'knowledge', 'links': []}, malformed), encoding='utf-8', newline='')
         cycle = start(runtime)
         current = runtime.tmp_write(cycle, '# Current work')
         assert runtime.tmp_list(cycle)['total'] == 1
@@ -267,11 +269,31 @@ def test_foreign_historical_source_excerpt_does_not_poison_inventory(workspace):
         other.close()
 
 
-def test_helper_malformed_draft_sources_retain_identifiable_dependencies():
+@pytest.mark.parametrize('newline', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_helper_malformed_draft_sources_retain_identifiable_dependencies(newline):
     from contextopus.modules.workspace.temporary_materials import temporary_dependencies
     target = {'id': 'evidence', 'path': '.tmp/work/materials/Evidence.md'}
     body = '```yaml\nrequired_sources:\n  - url: evidence\n    extract: bad: YAML example\n```'
+    body = body.replace('\n', newline)
     assert 'evidence' in temporary_dependencies({'content': body}, [(None, target)])
+
+
+@pytest.mark.parametrize('actual', [
+    r'C:\memory\modules\workspace\workspace_contexts\context\.tmp\work\materials\Finding.md',
+    r'\\server\share\memory\modules\workspace\workspace_contexts\context\.tmp\work\materials\Finding.md',
+    r'\memory\modules\workspace\workspace_contexts\context\.tmp\work\materials\Finding.md',
+])
+def test_windows_absolute_dependencies_match_only_the_inventoried_path(actual):
+    from pathlib import PureWindowsPath
+    from contextopus.modules.workspace.temporary_materials import temporary_dependencies
+
+    actual = PureWindowsPath(actual)
+    target = {'id': 'finding', 'path': '.tmp/work/materials/Finding.md'}
+    for reference in (str(actual), actual.as_posix(), str(actual).upper()):
+        assert 'finding' in temporary_dependencies({'metadata': {'sources': [reference]}}, [(actual, target)])
+    external = PureWindowsPath(r'C:\unrelated\project\.tmp\work\materials\Finding.md')
+    for reference in (str(external), external.as_posix()):
+        assert temporary_dependencies({'metadata': {'sources': [reference]}}, [(actual, target)]) == set()
 
 
 def test_helper_alfa_historical_project_sources_are_not_managed_temporary_paths():

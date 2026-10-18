@@ -229,7 +229,7 @@ def _retarget_source_declarations(text, paths):
                     comment = re.search(r"\s+#.*$", line[2])
                     return line[1] + json.dumps(paths[value], ensure_ascii=False) + (comment[0] if comment else "")
                 return line[0]
-            block = re.sub(r"(?m)^(\s*(?:-\s*)?(?:reference|url):[ \t]*)([^\r\n]+)$", address, match[1])
+            block = re.sub(r"(?m)^(\s*(?:-\s*)?(?:reference|url):[ \t]*)([^\r\n]+)(?=\r?$)", address, match[1])
             offset = match.start(1) - match.start()
             return match[0][:offset] + block + match[0][offset + len(match[1]):]
         edits = []

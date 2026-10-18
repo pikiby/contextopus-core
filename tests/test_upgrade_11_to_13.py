@@ -324,7 +324,7 @@ def test_installed_writer_to_current_runtime_and_mcp_copy(tmp_path, monkeypatch,
                 metadata, body = _parse(actual.decode('utf-8'))
                 assert metadata == {'id': old['temporary']['id'], 'type': 'knowledge', 'links': []}
                 assert body.encode('utf-8') == original
-                assert Path(destination).name != old['temporary']['id']
+                assert Path(destination).name == 'Незавершённый результат.md'
             pending_after_migration[destination] = actual
         for ident, before in old['records'].items():
             read = invoke('read', 'workspace.read', {'material_id': ident})

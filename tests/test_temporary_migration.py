@@ -17,24 +17,28 @@ def fixture_runtime(root):
     return SimpleNamespace(engine=SimpleNamespace(root=root, knowledge=knowledge, _assert_safe=lambda p: None))
 
 
-def test_temporary_tree_preserves_pending_proposal_and_normalizes_cards(tmp_path):
+@pytest.mark.parametrize('newline', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_temporary_tree_preserves_pending_proposal_and_normalizes_cards(tmp_path, newline):
     runtime = fixture_runtime(tmp_path)
     material = tmp_path / 'tmp/cycle/materials/123.md'
     material.parent.mkdir(parents=True)
-    material.write_text('# Ongoing investigation\nUnfinished evidence.\n')
+    original = newline.join(['# Ongoing investigation', 'Unfinished evidence.', ''])
+    material.write_text(original, encoding='utf-8', newline='')
     proposal = tmp_path / 'tmp/cycle/proposals/p.json'
     proposal.parent.mkdir()
     immutable = json.dumps({'revision': 'approved-digest', 'pending': True})
-    proposal.write_text(immutable)
-    proposal.with_suffix('.md').write_text('Reviewed original text\n')
+    proposal.write_text(immutable, encoding='utf-8', newline='')
+    review = 'Reviewed original text' + newline
+    proposal.with_suffix('.md').write_text(review, encoding='utf-8', newline='')
     first = temporary_transforms(runtime)
     assert temporary_transforms(runtime) == first
     card = first['tmp/cycle/materials/123.md']
     assert card['path'] == '.tmp/cycle/materials/Ongoing investigation.md'
     assert _parse(card['text'])[0]['id'] == '123.md'
-    assert _parse(card['text'])[1] == material.read_text()
+    assert _parse(card['text'])[1] == original
+    assert material.read_bytes() == original.encode('utf-8')
     assert first['tmp/cycle/proposals/p.json']['text'] == immutable
-    assert first['tmp/cycle/proposals/p.md']['text'] == 'Reviewed original text\n'
+    assert first['tmp/cycle/proposals/p.md']['text'] == review
     assert material.is_file() and proposal.is_file()  # planning has no writes
 
 
@@ -42,10 +46,10 @@ def test_permanent_to_temporary_dependency_blocks_without_removing_text(tmp_path
     runtime = fixture_runtime(tmp_path)
     material = tmp_path / 'tmp/cycle/materials/123.md'
     material.parent.mkdir(parents=True)
-    material.write_text('# Evidence\n')
+    material.write_text('# Evidence\n', encoding='utf-8', newline='')
     permanent = runtime.engine.knowledge / 'Fact.md'
     original = '---\nid: fact\ntype: knowledge\nlinks: [123.md]\n---\nUses [[tmp/cycle/materials/123.md]].\n'
-    permanent.write_text(original)
+    permanent.write_text(original, encoding='utf-8', newline='')
     blockers = permanent_temporary_blockers(runtime, temporary_transforms(runtime))
     assert len(blockers) == 2
     assert permanent.read_text() == original
@@ -64,7 +68,7 @@ def test_v4_settings_upgrade_preserves_permissions_and_imports_new_default(monke
     runtime = FormatMigrationMixin()
     runtime.engine = SimpleNamespace(root=tmp_path, workspace='alpha')
     runtime.control = SimpleNamespace(layout=object())
-    (tmp_path / 'INSTRUCTIONS.md').write_text('# Author rules\nRetain exactly.\n')
+    (tmp_path / 'INSTRUCTIONS.md').write_text('# Author rules\nRetain exactly.\n', encoding='utf-8', newline='')
     legacy = {key: default for key, default in WORKSPACE_POLICY_DEFAULTS.items() if key != 'cleanup_approval_required'}
     legacy['knowledge_approval_required'] = False
     monkeypatch.setattr(migration, 'configuration_text', lambda *args: json.dumps(legacy))
@@ -88,7 +92,7 @@ def test_v4_migration_retains_cycle_approvals_and_recovers_file_interruption(tmp
     root.mkdir(parents=True)
     runtime.engine.knowledge.mkdir()
     rules = '# Existing rules\nRespect the reviewed approval.\n'
-    (root / 'INSTRUCTIONS.md').write_text(rules)
+    (root / 'INSTRUCTIONS.md').write_text(rules, encoding='utf-8', newline='')
     runtime.control.root.mkdir(parents=True)
     runtime.control.write(runtime._format_path(), encode({'format_version': 4}))
     config = {k: v for k, v in WORKSPACE_POLICY_DEFAULTS.items() if k != 'cleanup_approval_required'}
@@ -96,11 +100,11 @@ def test_v4_migration_retains_cycle_approvals_and_recovers_file_interruption(tmp
     save_configuration(runtime.control.layout, 'alpha', encode(config))
     runtime.engine.state.mkdir(parents=True, exist_ok=True)
     (runtime.engine.state / 'lancedb').mkdir()
-    (runtime.engine.state / 'active.json').write_text('{}')
+    (runtime.engine.state / 'active.json').write_text('{}', encoding='utf-8', newline='')
     material = root / 'tmp/cycle/materials/old.md'
     material.parent.mkdir(parents=True)
     original_material = '# Pending investigation\nUnfinished results.\n'
-    material.write_text(original_material)
+    material.write_text(original_material, encoding='utf-8', newline='')
     text = '---\nid: fact\ntype: knowledge\nlinks: []\n---\n# Proposed fact\nKeep approval binding.\n'
     plan = {'cycle_id': 'cycle', 'proposal_id': 'proposal', 'kind': 'knowledge',
             'created_ids': {'new': 'fact'}, 'entries': {'fact': {'before': None,
@@ -113,8 +117,8 @@ def test_v4_migration_retains_cycle_approvals_and_recovers_file_interruption(tmp
     runtime.control.write(runtime.record_path, _json(records))
     proposal = root / 'tmp/cycle/proposals/proposal.json'
     proposal.parent.mkdir()
-    proposal.write_text(serialized)
-    proposal.with_suffix('.md').write_text(runtime._review(plan))
+    proposal.write_text(serialized, encoding='utf-8', newline='')
+    proposal.with_suffix('.md').write_text(runtime._review(plan), encoding='utf-8', newline='')
     monkeypatch.setattr(runtime.engine, '_guard', lambda: nullcontext())
     monkeypatch.setattr(runtime.engine, 'reconcile', lambda: {'pending_count': 0})
     monkeypatch.setattr(runtime, '_history_record', lambda *args, **kwargs: None)
@@ -193,8 +197,8 @@ def test_working_card_links_follow_both_temporary_and_permanent_paths(tmp_path):
     runtime = fixture_runtime(tmp_path)
     source = tmp_path / 'tmp/cycle/materials/first.md'
     source.parent.mkdir(parents=True)
-    source.write_text('# First\nSee [[tmp/cycle/materials/second.md]] and [[knowledge/old.md|Source]].\n')
-    source.with_name('second.md').write_text('# Second\nStill working.\n')
+    source.write_text('# First\nSee [[tmp/cycle/materials/second.md]] and [[knowledge/old.md|Source]].\n', encoding='utf-8', newline='')
+    source.with_name('second.md').write_text('# Second\nStill working.\n', encoding='utf-8', newline='')
     transforms = temporary_transforms(runtime)
     retarget_temporary(transforms, {'knowledge/old.md': {'path': 'knowledge/Readable.md'}}, {})
     text = transforms['tmp/cycle/materials/first.md']['text']
@@ -208,8 +212,8 @@ def test_source_paths_move_without_rewriting_author_conditions(tmp_path):
     runtime = fixture_runtime(tmp_path)
     source = tmp_path / 'tmp/cycle/materials/first.md'
     source.parent.mkdir(parents=True)
-    source.write_text('# First\n```yaml\nsources:\n- reference: tmp/cycle/materials/second.md # retain comment\n  instruction: Verify the exact approved conditions.\n```\n')
-    source.with_name('second.md').write_text('# Second\n')
+    source.write_text('# First\n```yaml\nsources:\n- reference: tmp/cycle/materials/second.md # retain comment\n  instruction: Verify the exact approved conditions.\n```\n', encoding='utf-8', newline='')
+    source.with_name('second.md').write_text('# Second\n', encoding='utf-8', newline='')
     transforms = temporary_transforms(runtime)
     retarget_temporary(transforms, {}, {})
     text = transforms['tmp/cycle/materials/first.md']['text']
@@ -222,7 +226,7 @@ def test_pending_permanent_text_cannot_depend_on_temporary_sources(tmp_path):
     runtime = fixture_runtime(tmp_path)
     source = tmp_path / 'tmp/cycle/materials/first.md'
     source.parent.mkdir(parents=True)
-    source.write_text('# First\n')
+    source.write_text('# First\n', encoding='utf-8', newline='')
     text = '# Permanent draft\n```yaml\nsources:\n- reference: tmp/cycle/materials/first.md\n  instruction: Retain this unfinished source condition.\n```\n'
     assert permanent_temporary_references(text, temporary_transforms(runtime)) == ['tmp/cycle/materials/first.md']
 
@@ -245,8 +249,8 @@ def test_metadata_source_paths_block_and_custom_fields_survive_retarget(tmp_path
     metadata = {'id': 'first-id', 'type': 'knowledge', 'links': ['[[tmp/cycle/materials/second.md|Author alias]]'],
                 'custom': {'nested': ['verbatim condition', 42]},
                 field: [{key: 'tmp/cycle/materials/second.md', 'instruction': 'Preserve exactly', 'custom_source': True}]}
-    source.write_text(record_text(metadata, '# First\n'))
-    source.with_name('second.md').write_text('# Second\n')
+    source.write_text(record_text(metadata, '# First\n'), encoding='utf-8', newline='')
+    source.with_name('second.md').write_text('# Second\n', encoding='utf-8', newline='')
     transforms = temporary_transforms(runtime)
     assert permanent_temporary_references(source.read_text(), transforms)
     retarget_temporary(transforms, {}, {})
@@ -275,7 +279,7 @@ def test_cross_context_permanent_reference_blocks_migration(tmp_path):
         b.tmp_write(cb, '# Foreign evidence\nTransient results.')
         (a.engine.knowledge / 'Foreign dependency.md').write_text(record_text(
             {'id': 'foreign-dependent', 'type': 'knowledge', 'links': [],
-             'sources': [{'reference': 'Foreign evidence.md', 'instruction': 'Retain source condition'}]}, '# Permanent\n'))
+             'sources': [{'reference': 'Foreign evidence.md', 'instruction': 'Retain source condition'}]}, '# Permanent\n'), encoding='utf-8', newline='')
         a.control.write(a._format_path(), encode({'format_version': 4}))
         planned = a.upgrade_plan()
         assert not planned['ready']
@@ -304,7 +308,7 @@ def test_migration_readable_names_share_portable_device_and_unicode_rules(tmp_pa
                               ('evidence.md', 'ascii-id', '# First finding\n'),
                               ('ＥＶＩＤＥＮＣＥ.md', 'unicode-id', '# Other finding\n')]:
         text = record_text({'id': ident, 'type': 'knowledge', 'links': [], 'custom': 'Keep this field'}, body)
-        (directory / name).write_text(text)
+        (directory / name).write_text(text, encoding='utf-8', newline='')
         sources['tmp/cycle/materials/' + name] = text
     transforms = temporary_transforms(runtime)
     assert transforms['tmp/cycle/materials/CON.MD']['path'] == '.tmp/cycle/materials/Note - CON.md'
@@ -353,14 +357,16 @@ def test_malformed_foreign_draft_is_preserved_with_scoped_source_diagnostic(tmp_
         a.close(); b.close()
 
 
-def test_malformed_draft_keeps_condition_while_exact_source_address_moves(tmp_path):
+@pytest.mark.parametrize('newline', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_malformed_draft_keeps_condition_while_exact_source_address_moves(tmp_path, newline):
     from contextopus.modules.workspace.temporary_migration import retarget_temporary, permanent_temporary_references
     runtime = fixture_runtime(tmp_path)
     directory = tmp_path / 'tmp/cycle/materials'
     directory.mkdir(parents=True)
     body = '# First\n```yaml\nrequired_sources:\n- url: tmp/cycle/materials/second.md # retain address comment\n  extract: Keep condition: malformed until explicitly corrected.\n```\n'
-    (directory / 'first.md').write_text(body)
-    (directory / 'second.md').write_text('# Second\n')
+    body = body.replace('\n', newline)
+    (directory / 'first.md').write_text(body, encoding='utf-8', newline='')
+    (directory / 'second.md').write_text('# Second' + newline, encoding='utf-8', newline='')
     transforms = temporary_transforms(runtime)
     retarget_temporary(transforms, {}, {})
     item = transforms['tmp/cycle/materials/first.md']
@@ -368,6 +374,9 @@ def test_malformed_draft_keeps_condition_while_exact_source_address_moves(tmp_pa
     assert 'url: ".tmp/cycle/materials/Second.md" # retain address comment' in item['text']
     assert 'extract: Keep condition: malformed until explicitly corrected.' in item['text']
     assert 'required_sources:' in item['text']
+    assert _parse(item['text'])[1] == body.replace('url: tmp/cycle/materials/second.md',
+        'url: ".tmp/cycle/materials/Second.md"')
+    assert (directory / 'first.md').read_bytes() == body.encode('utf-8')
     assert permanent_temporary_references(item['text'], transforms, allow_malformed=True)
 
 
@@ -442,7 +451,7 @@ def test_external_same_tail_is_not_an_actual_temporary_inventory_path(tmp_path):
     runtime = fixture_runtime(tmp_path)
     path = tmp_path / 'tmp/cycle/materials/Evidence.md'
     path.parent.mkdir(parents=True)
-    path.write_text('# Evidence\n')
+    path.write_text('# Evidence\n', encoding='utf-8', newline='')
     transforms = temporary_transforms(runtime)
     external = '/unrelated/project/tmp/cycle/materials/Evidence.md'
     assert permanent_temporary_references('# Permanent\n[source](' + external + ')', transforms) == []
