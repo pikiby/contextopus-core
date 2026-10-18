@@ -80,9 +80,18 @@ def test_release_bundles_hash_only_the_exact_asset_set(tmp_path, monkeypatch):
     skill = tmp_path / 'src/contextopus/resources/skills/w/SKILL.md'
     skill.parent.mkdir(parents=True)
     skill.write_text('A fixture entrypoint')
+    guide = tmp_path / 'docs/integrations/hermes.md'
+    guide.parent.mkdir(parents=True)
+    guide.write_text('Reviewed Hermes native integration guide')
     module.main()
     entries = (destination / 'SHA256SUMS').read_text().splitlines()
-    assert len(entries) == 6
+    assert len(entries) == 7
+    assert {line.split('  ')[1] for line in entries} == {
+        'contextopus_core-1.3.0-py3-none-any.whl',
+        'contextopus_core-1.3.0.tar.gz',
+        *(f'contextopus-{client}-1.3.0.zip' for client in
+          ('codex', 'claude-code', 'opencode', 'crush', 'hermes')),
+    }
     assert all('candidate' not in line for line in entries)
     for line in entries:
         checksum, name = line.split('  ')
@@ -92,6 +101,19 @@ def test_release_bundles_hash_only_the_exact_asset_set(tmp_path, monkeypatch):
         instructions = archive.read('INSTALL.txt').decode()
         assert 'guide, read, write' in instructions
         assert 'CONTEXTOPUS_LEGACY_TOOLS=1' in instructions
+    with zipfile.ZipFile(destination / 'contextopus-hermes-1.3.0.zip') as archive:
+        assert archive.read('skills/w/SKILL.md') == skill.read_bytes()
+        assert archive.read('HERMES.md') == guide.read_bytes()
+        instructions = archive.read('INSTALL.txt').decode()
+        assert 'contextopus integrate hermes --user --apply' in instructions
+        assert '$HERMES_HOME/config.yaml' in instructions
+        assert '~/.hermes on Linux/macOS' in instructions
+        assert '%LOCALAPPDATA%/hermes on Windows' in instructions
+        assert 'fallback ~/AppData/Local/hermes' in instructions
+        assert 'HERMES_DATA_DIR_SUFFIX' in instructions
+        assert '$HERMES_HOME/skills/' in instructions
+        assert '--hermes-home <directory>' in instructions
+        assert '--project' not in instructions
 
 
 def test_bundle_build_requires_matching_runtime_artifacts(tmp_path, monkeypatch):

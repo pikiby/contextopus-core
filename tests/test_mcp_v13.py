@@ -1,4 +1,4 @@
-"""Three-tool transport and lossless presentation across the journal boundary."""
+"""Workspace transport and lossless presentation across the journal boundary."""
 import asyncio
 import copy
 import json
@@ -93,7 +93,7 @@ def value(result):
 def test_default_tools_and_direct_guide_selectors(monkeypatch, tmp_path):
     mcp, app = fixture_server(monkeypatch, tmp_path)
     tools = asyncio.run(mcp.list_tools())
-    assert {t.name for t in tools} == {'guide', 'read', 'write'}
+    assert {t.name for t in tools} == {'guide', 'read', 'write', 'finish'}
     guide_description = next(t.description for t in tools if t.name == 'guide')
     assert 'only a signature, not a replacement for a procedure' in guide_description
     schemas = {t.name: t.inputSchema for t in tools}
@@ -108,6 +108,30 @@ def test_default_tools_and_direct_guide_selectors(monkeypatch, tmp_path):
     with pytest.raises(Exception, match='Choose procedure'):
         asyncio.run(mcp.call_tool('guide', {'procedure': 'workspace', 'catalog': True}))
     assert app.query.call_count == before
+
+
+def test_dedicated_finish_exposes_bounded_scope_and_preserves_runtime_guards(monkeypatch, tmp_path):
+    mcp, app = fixture_server(monkeypatch, tmp_path)
+    tools = asyncio.run(mcp.list_tools())
+    finish = next(tool for tool in tools if tool.name == 'finish')
+    assert finish.annotations.readOnlyHint is False
+    assert finish.annotations.destructiveHint is True
+    assert finish.annotations.idempotentHint is True
+    assert finish.inputSchema['required'] == ['cycle_id']
+    app.execute.return_value = {'status': 'blocked', 'incoming_dependencies': ['other-card']}
+    result = value(asyncio.run(mcp.call_tool('finish', {
+        'cycle_id': 'selected', 'expected_revision': 'revision', 'confirmation': 'Delete these files',
+        'work_root': str(tmp_path), 'context': 'project',
+    })))
+    assert result['status'] == 'blocked'
+    assert result['incoming_dependencies'] == ['other-card']
+    app.execute.assert_called_once_with('workspace.finish', {
+        'cycle_id': 'selected', 'expected_revision': 'revision',
+        'confirmation': 'Delete these files', 'cancel': False,
+    })
+    with pytest.raises(Exception, match='context and workspace disagree'):
+        asyncio.run(mcp.call_tool('finish', {'cycle_id': 'selected', 'context': 'one', 'workspace': 'two'}))
+    assert app.execute.call_count == 1
 
 
 def test_initialize_delivers_native_tool_routing_and_preserves_real_tool_names(monkeypatch, tmp_path):
@@ -136,7 +160,7 @@ def test_initialize_delivers_native_tool_routing_and_preserves_real_tool_names(m
                     assert "only an operation signature and does not replace a procedure" in instructions
                     assert "reload only when unknown, lost, changed or after a plugin update" in instructions
                     tools = (await session.list_tools()).tools
-                    assert {tool.name for tool in tools} == {"guide", "read", "write"}
+                    assert {tool.name for tool in tools} == {"guide", "read", "write", "finish"}
                     # Shell-specific aliases belong to the client, not the server catalog.
                     assert "mcp_contextopus_guide" not in instructions
                     await session.call_tool("guide", {})
@@ -284,7 +308,7 @@ def test_mcp_search_inherits_saved_n_and_keeps_explicit_override(monkeypatch, tm
 def test_legacy_aliases_are_explicit_full_responses(monkeypatch, tmp_path):
     mcp, app = fixture_server(monkeypatch, tmp_path, legacy_tools=True)
     assert {t.name for t in asyncio.run(mcp.list_tools())} == {
-        'guide', 'read', 'write', 'contextopus_query', 'contextopus_execute', 'pcw_query', 'pcw_execute'}
+        'guide', 'read', 'write', 'finish', 'contextopus_query', 'contextopus_execute', 'pcw_query', 'pcw_execute'}
     result = {'results': [dict(material(), excerpt='Retained body')]}
     app.query.return_value = result
     assert value(asyncio.run(mcp.call_tool('contextopus_query', {'operation': 'workspace.search'}))) == result
@@ -491,7 +515,7 @@ def test_remote_http_roundtrip_preserves_empty_single_many_and_scalars(tmp_path)
                     async with ClientSession(read,write) as session:
                         await session.initialize()
                         tools = (await session.list_tools()).tools
-                        assert {tool.name for tool in tools} == {'guide','read','write'}
+                        assert {tool.name for tool in tools} == {'guide','read','write','finish'}
                         for tool in tools:
                             Draft202012Validator.check_schema(tool.inputSchema)
                             if tool.outputSchema is not None:

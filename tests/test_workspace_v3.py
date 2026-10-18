@@ -25,6 +25,13 @@ def create(runtime, **settings):
                                     project_description="Project purpose and boundaries for this test context")
 
 
+def finish_with_cleanup_approval(runtime, cycle):
+    preview = runtime.finish(cycle)
+    if preview["status"] == "blocked" and "cleanup_revision" in preview:
+        return runtime.finish(cycle, confirmation="Delete the reviewed temporary files", expected_revision=preview["cleanup_revision"])
+    return preview
+
+
 @pytest.fixture
 def workspace(tmp_path):
     runtime = CycleRuntime(tmp_path, "project", provider_factory=Factory())
@@ -112,7 +119,7 @@ def test_parallel_tasks_revision_conflicts_and_tmp_lifetime(workspace):
     with pytest.raises(PCWError, match="changed"):
         workspace.proposal_prepare(b, [change])
     workspace.tmp_write(b, "ongoing")
-    assert workspace.finish(a)["status"] == "closed"
+    assert finish_with_cleanup_approval(workspace, a)["status"] == "closed"
     assert "Checked source" in workspace.read(material_id=first["id"])["content"]
     assert workspace.tmp_list(b)["total"] == 1
     assert workspace.startup("resume-a", task_id=first["id"])["task_id"] == first["id"]
@@ -334,9 +341,9 @@ def test_upgrade_preserves_pending_and_applied_work_and_both_backup_trees(tmp_pa
     with pytest.raises(PCWError, match="confirmation"):
         cold.proposal_apply(pending, proposal["proposal_id"], proposal["revision"])
     assert cold.proposal_apply(pending, proposal["proposal_id"], proposal["revision"], confirmation="Approve now")["status"] == "applied"
-    assert cold.finish(pending)["status"] == "closed"
+    assert finish_with_cleanup_approval(cold, pending)["status"] == "closed"
     assert cold.proposal_apply(saved, applied["proposal_id"], applied["revision"])["replayed"]
-    assert cold.finish(saved)["status"] == "closed"
+    assert finish_with_cleanup_approval(cold, saved)["status"] == "closed"
     cold.close()
 
 
@@ -414,7 +421,8 @@ def test_upgrade_reports_incompatible_work_before_apply(tmp_path, problem):
     assert not runtime._format_path().exists()
 
 
-def test_snapshot_interruption_resumes_same_backup_without_overwrite(tmp_path):
+@pytest.mark.parametrize("backup_directory", [".backups", "backups"])
+def test_snapshot_interruption_resumes_same_backup_without_overwrite(tmp_path, backup_directory):
     runtime, _, _, _, _ = legacy_with_work(tmp_path)
     plan = runtime.upgrade_plan()
     copy = runtime._migration_copy
@@ -426,12 +434,24 @@ def test_snapshot_interruption_resumes_same_backup_without_overwrite(tmp_path):
         with pytest.raises(OSError):
             runtime.upgrade_apply(plan["revision"], "Upgrade")
     operation = json.loads(runtime._migration_receipt_path().read_text())
+    assert Path(operation["backup"]).parent.parent.name == ".backups"
+    if backup_directory == "backups":
+        # Reconstruct a pre-change interrupted receipt without changing its
+        # revision, source manifests or retained snapshot bytes.
+        source = Path(operation["backup"]).parent
+        destination = runtime.control.root / "backups" / source.name
+        destination.parent.mkdir()
+        source.rename(destination)
+        operation["backup"] = str(destination / "workspace")
+        operation["control_backup"] = str(destination / "control")
+        runtime.control.write(runtime._migration_receipt_path(), _json(operation))
     first = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in Path(operation["backup"]).rglob("*") if p.is_file()}
     assert runtime.upgrade_plan()["resume_revision"] == plan["revision"]
     result = runtime.upgrade_apply(plan["revision"], "Retry same operation")
     assert result["backup"] == operation["backup"]
     assert all((p.read_bytes(), p.stat().st_mtime_ns) == values for p, values in first.items())
-    assert len(list((runtime.control.root / "backups").iterdir())) == 1
+    assert len(list((runtime.control.root / backup_directory).iterdir())) == 1
+    runtime._migration_verify_backup(json.loads(runtime._migration_receipt_path().read_text()))
 
 
 def test_changed_work_after_interruption_blocks_resume(tmp_path):
@@ -493,7 +513,7 @@ def test_rework_split_redirects_links_and_keeps_whole_procedure(workspace):
         {"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "mixed", "content": "# Storage\nConnect with A.\nRecovery requires B."},
         {"description": "Verified knowledge used to exercise workspace lifecycle and proposal rules", "key": "entry", "content": "# Entry", "links": ["@mixed"]}])
     workspace.proposal_apply(first, seed["proposal_id"], seed["revision"])
-    workspace.finish(first)
+    assert finish_with_cleanup_approval(workspace, first)["status"] == "closed"
     c = workspace.startup("rework", purpose="rework")["cycle_id"]
     old = workspace.read(c, seed["created_ids"]["mixed"])
     workspace.tmp_write(c, "Both facts and their conditions were retained in separate topics")
@@ -505,4 +525,15 @@ def test_rework_split_redirects_links_and_keeps_whole_procedure(workspace):
     assert workspace.finish(c)["status"] == "blocked"
     workspace.proposal_apply(c, plan["proposal_id"], plan["revision"])
     assert workspace.read(material_id=seed["created_ids"]["entry"])["links"] == [plan["created_ids"]["connection"]]
-    assert workspace.finish(c)["tmp_cleared"]
+    assert finish_with_cleanup_approval(workspace, c)["tmp_cleared"]
+
+
+def test_control_snapshot_excludes_hidden_and_legacy_backup_trees(workspace):
+    for name in ("backups", ".backups"):
+        path = workspace.control.root / name / "previous" / "control"
+        path.mkdir(parents=True)
+        (path / "retained.txt").write_text("Do not recursively copy or modify this snapshot")
+    manifest = workspace._migration_tree(workspace.control.root, control=True)
+    assert not any(key.split("/", 1)[0] in {"backups", ".backups"} for key in manifest)
+    for name in ("backups", ".backups"):
+        assert (workspace.control.root / name / "previous/control/retained.txt").read_text() == "Do not recursively copy or modify this snapshot"

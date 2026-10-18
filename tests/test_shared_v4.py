@@ -233,5 +233,8 @@ def test_legacy_partial_proposal_resumes_after_migration(tmp_path):
     assert runtime.upgrade_apply(plan["revision"], automatic=True)["status"] == "complete"
     assert runtime.proposal_apply(cycle, proposal["proposal_id"], proposal["revision"], "Retry approved write")["status"] == "applied"
     assert runtime.read(material_id=ident)["path"] == "knowledge/Contract-setup.md"
-    assert runtime.finish(cycle)["status"] == "closed"
+    cleanup = runtime.finish(cycle)
+    assert cleanup["status"] == "blocked" and cleanup["tmp_preserved"]
+    assert runtime.finish(cycle, confirmation="Approve removal of the reviewed temporary files",
+                          expected_revision=cleanup["cleanup_revision"])["status"] == "closed"
     runtime.close()

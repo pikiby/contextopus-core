@@ -7,6 +7,7 @@ WORKSPACE_POLICY_DEFAULTS = {
     "allow_implicit_updates": False,
     "knowledge_approval_required": True,
     "instructions_approval_required": True,
+    "cleanup_approval_required": True,
     "git_history_enabled": False,
     "material_max_tokens": None,
     "create_required_sources": False,
@@ -18,6 +19,7 @@ WORKSPACE_SETTINGS = {
 }
 WORKSPACE_CREATION_DEFAULTS = {
     **WORKSPACE_POLICY_DEFAULTS,
+    "cleanup_approval_required": False,
     "knowledge_approval_required": False,
     "git_history_enabled": True,
     "material_max_tokens": 1024,

@@ -47,7 +47,7 @@ def test_missing_policy_and_creation(workspace):
     current = '---\n' + yaml.safe_dump(WORKSPACE_CREATION_DEFAULTS) + '---\nLegacy rules\n'
     assert r.settings_read(fields=['instructions_approval_required'])['values']['instructions_approval_required']
     assert policies(current, creation=True)['instructions_approval_required'] is True
-    with pytest.raises(PCWError, match='six settings'):
+    with pytest.raises(PCWError, match='settings'):
         policies(current.replace('instructions_approval_required: true\n', ''), creation=True)
 
 

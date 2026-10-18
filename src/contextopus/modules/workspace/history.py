@@ -165,6 +165,7 @@ class HistoryMixin(HistoryCatalogMixin, HistoryQueriesMixin):
                     value
                     for value in (
                         "/tmp/",
+                        "/.tmp/",
                         "/current/",
                         "/.pcw-runtime/",
                         "/.analytics/",

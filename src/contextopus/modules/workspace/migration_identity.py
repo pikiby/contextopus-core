@@ -48,7 +48,9 @@ def pending_sources(runtime, root, version):
             if entry.get('state') not in {'prepared', 'applying', 'partial', 'index_pending'}:
                 continue
             _id(proposal_id)
-            path = root / 'tmp' / cycle_id / 'proposals' / (proposal_id + '.json')
+            path = root / '.tmp' / cycle_id / 'proposals' / (proposal_id + '.json')
+            if not path.is_file():
+                path = root / 'tmp' / cycle_id / 'proposals' / (proposal_id + '.json')
             runtime.engine._assert_safe(path)
             plan = json.loads(read_utf8(path))
             revision = _revision(json.dumps(plan, ensure_ascii=False, sort_keys=True, indent=2) + '\n')
@@ -87,7 +89,9 @@ class MigrationIdentity:
             marker = control / 'format.json'
             runtime.engine._assert_safe(marker)
             version = json.loads(read_utf8(marker)).get('format_version', 0) if marker.is_file() else 0
-            receipt = control / 'migration-v4.json'
+            receipt = control / 'migration-v5.json'
+            if not receipt.is_file():
+                receipt = control / 'migration-v4.json'
             runtime.engine._assert_safe(receipt)
             retained_revision = None
             if receipt.is_file():
@@ -232,7 +236,9 @@ def catalog_fingerprints(runtime):
         marker = control_store(runtime.engine.work_root, root.name).root / 'format.json'
         runtime.engine._assert_safe(marker)
         version = json.loads(read_utf8(marker)).get('format_version', 0) if marker.is_file() else 0
-        receipt = marker.parent / 'migration-v4.json'
+        receipt = marker.parent / 'migration-v5.json'
+        if not receipt.is_file():
+            receipt = marker.parent / 'migration-v4.json'
         runtime.engine._assert_safe(receipt)
         retained_revision = (_revision(json.dumps(json.loads(read_utf8(receipt)).get('identity_map', []), sort_keys=True))
                              if receipt.is_file() else None)
@@ -254,7 +260,9 @@ def legacy_reference(engine, ident, *, local_task=False):
     if ident is None:
         return None
     _id(ident)
-    receipt = engine.control.root / 'migration-v4.json'
+    receipt = engine.control.root / 'migration-v5.json'
+    if not receipt.is_file():
+        receipt = engine.control.root / 'migration-v4.json'
     engine._assert_safe(receipt)
     if not receipt.is_file():
         return ident

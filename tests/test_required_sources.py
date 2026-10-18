@@ -53,7 +53,9 @@ def test_creation_choice_and_repeated_read_roundtrip(tmp_path, enabled):
         assert all(item["content"] == BODY for item in (first, second, third))
         assert all(item["links"] == [] for item in (first, second, third))
         assert len(factory.calls) == calls  # Repeated reading does not re-embed.
-        assert runtime.finish(cycle)["status"] == "closed"
+        cleanup = runtime.status(cycle)
+        assert runtime.finish(cycle, expected_revision=cleanup["cleanup_revision"],
+                              confirmation="Delete the isolated source-test drafts")["status"] == "closed"
         assert runtime.read(material_id=ident)["content"] == BODY
     finally:
         runtime.close()

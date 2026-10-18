@@ -1,9 +1,5 @@
-# Automatic indexing
+# Prepare Search
 
-Applying a proposal under the workspace's approval policy automatically tokenizes new or changed Markdown topics, embeds overlapping windows and updates LanceDB. Tmp returns and prepared proposals are not indexed. The agent supplies each proposed body during preparation; application uses that exact stored body without retransmission. No semantic helper, boundary arrays or splitting assignment exists.
+This compatibility reference delegates to the current installed Contextopus procedure. Obtain and read `guide(procedure="reference/prepare-search")` through the available Contextopus MCP tools, then follow that procedure. Obtain unknown operation schemas through `guide(operation=...)`.
 
-Defaults are 512 tokens per window with 64-token overlap, using the selected model's tokenizer. These are engineering defaults, not a calibrated optimum. Windows advance by size minus overlap and preserve literal Unicode text; they may cross Markdown paragraphs, code or tables. Formatting and special tokens must fit the model's input limit.
-
-Saved knowledge remains authoritative after an indexing failure. The apply returns `index_pending` or a partial result and keeps tmp. Fix the reported cause and retry the same proposal. Alternatively run `reconcile`, then retry the same apply to record its completion. Old vectors of changed bodies do not appear as current facts. Normal closure waits for applications/indexing to complete; explicit user cancellation reports their incomplete state.
-
-Search covers permanent knowledge only and returns bounded unique IDs, paths and distances. Read suitable full topics and useful exact links. Links-only edits and moves retain embeddings. Changing tokenizer, window size or embedding space rebuilds an inactive table through `switch_embeddings`, then activates it after revision checks; failure preserves the previous active source/index. Startup and status never load model weights.
+Follow the current context-selection and approval policies. Preserve unfinished work; temporary cards are optional `.tmp` materials, and their cleanup follows the independent cleanup policy. Do not infer current behavior from this legacy package. If MCP is unavailable, report the connection failure.

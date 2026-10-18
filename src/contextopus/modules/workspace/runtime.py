@@ -290,6 +290,17 @@ class PCWRuntime:
 
     def _write(self, path: Path, text: str):
         self._assert_safe(path)
+        format_path = self.control.root / "format.json"
+        # Recovery of a preceding migration must reproduce its immutable bytes;
+        # the current migration adds owner tags after that recovery completes.
+        current_format = (json.loads(read_utf8(format_path)).get("format_version", 0)
+                          if format_path.is_file() else 0)
+        if current_format >= 5 and path.is_relative_to(self.knowledge) and path.suffix == ".md":
+            from .context_identity import context_metadata
+            metadata, body = _parse(text)
+            if metadata.get("id"):
+                metadata = context_metadata(metadata, self.root.name)
+                text = "---\n" + yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True) + "---\n" + body
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:

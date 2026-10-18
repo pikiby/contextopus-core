@@ -77,12 +77,16 @@ def parser():
     relocation.add_argument("--apply", action="store_true")
     integration = commands.add_parser("integrate")
     integration.add_argument(
-        "client", choices=("codex", "claude-code", "opencode", "crush")
+        "client", choices=("codex", "claude-code", "opencode", "crush", "hermes")
     )
     integration_scope = integration.add_mutually_exclusive_group(required=True)
     integration_scope.add_argument("--project", type=Path)
     integration_scope.add_argument(
         "--user", action="store_true", help="Merge the native user configuration"
+    )
+    integration.add_argument(
+        "--hermes-home", type=Path,
+        help="Native Hermes home or profile home (requires hermes --user; defaults to HERMES_HOME or the platform's native Hermes home)",
     )
     integration.add_argument(
         "--native-plugin",
@@ -199,6 +203,7 @@ def main(argv=None):
                 native_plugin=args.native_plugin,
                 legacy_skills=args.legacy_skills,
                 root=root,
+                hermes_home=args.hermes_home,
             )
             # Configuration content may contain credentials from other entries.
             emit(

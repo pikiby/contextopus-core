@@ -298,7 +298,7 @@ def test_format_three_upgrade_preserves_user_bytes_settings_work_and_backups(tmp
         old = legacy_instructions(allow_implicit_updates=True, material_max_tokens=None)
         downgrade(runtime, old)
         plan = runtime.upgrade_plan()
-        assert plan["from_version"] == 3 and plan["to_version"] == 4 and plan["ready"]
+        assert plan["from_version"] == 3 and plan["to_version"] == 5 and plan["ready"]
         result = runtime.upgrade_apply(plan["revision"], "Upgrade to 1.3")
         assert result["status"] == "complete"
         assert (Path(result["backup"]) / "INSTRUCTIONS.md").read_bytes() == old.encode()
@@ -460,14 +460,14 @@ def test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag(
     # Git objects/index, control state, SQLite snapshot and shared RAG tree.
     with layout.guard():
         # Include only actual object stores in this closed, disposable root.
-        # Migration retains additional copies under .control/.../backups.
+        # Migration retains additional copies in hidden .backups (and legacy backups).
         git_object_stores = tuple(path / "objects" for path in root.rglob(".git")
                                   if path.is_dir() and not path.is_symlink()
                                   and (path / "objects").is_dir() and not (path / "objects").is_symlink()
                                   and (path / "objects").resolve().is_relative_to(root.resolve()))
         assert git_objects in git_object_stores
         retained_stores = [store for store in git_object_stores
-                           if store.is_relative_to(runtime.control.root / "backups")]
+                           if any(store.is_relative_to(runtime.control.root / name) for name in ("backups", ".backups"))]
         assert retained_stores, "The full restore must cover retained migration backups too"
         for store in retained_stores:
             retained_object = store / git_object.relative_to(git_objects)

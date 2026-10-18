@@ -117,7 +117,9 @@ class PluginContractTests(unittest.TestCase):
                 if resolved not in reached:
                     reached.add(resolved)
                     pending.append(resolved)
-        self.assertTrue(set((SKILL / "references").glob("*.md")) <= reached)
+        # Compatibility references independently route to canonical procedures.
+        for reference in (SKILL / "references").glob("*.md"):
+            self.assertIn("guide(procedure=", reference.read_text())
 
 
     def test_documented_tools_exist_in_runtime(self):
@@ -125,8 +127,13 @@ class PluginContractTests(unittest.TestCase):
         for path in (PLUGIN / "skills").rglob("*.md"):
             # The package path pcw_runtime/... is not a tool reference.
             documented.update(re.findall(r"\bpcw_[a-z_]+\b(?!/)", path.read_text()))
-        self.assertTrue(documented)
         self.assertEqual(set(), documented - server_tools())
+        procedures = ROOT / "src/contextopus/resources/procedures"
+        for path in (PLUGIN / "skills").rglob("*.md"):
+            text = path.read_text()
+            for name in re.findall(r'guide\(procedure="([^"]+)"\)', text):
+                self.assertTrue((procedures / (name + ".md")).is_file(), name)
+        self.assertIn("guide()", (SKILL / "SKILL.md").read_text())
 
     def test_packaged_docs_have_no_legacy_entrypoints_or_scaffolds(self):
         paths = [ROOT / "README.md", ROOT / "PLAN.md", *(PLUGIN / "skills").rglob("*.md")]
@@ -313,9 +320,10 @@ class LauncherTests(unittest.TestCase):
                     self.assertIn("expected_revision", operations["proposal_apply"]["required"])
                     self.assertIn("confirmation", operations["proposal_apply"]["properties"])
                     self.assertNotIn("confirmation", operations["proposal_apply"]["required"])
-                    self.assertNotIn("confirmation", operations["finish"]["properties"])
+                    self.assertIn("confirmation", operations["finish"]["properties"])
+                    self.assertIn("expected_revision", operations["finish"]["properties"])
                     self.assertIn("no_changes_reason", operations["proposal_prepare"]["properties"])
-                    self.assertEqual({"request_id", "purpose", "restart_cycle_id", "invocation", "task_id"},
+                    self.assertEqual({"request_id", "purpose", "restart_cycle_id", "invocation", "task_id", "user_request"},
                                      set(operations["startup"]["properties"]))
                     self.assertIn("user_request", operations["instructions_prepare"]["required"])
                     self.assertNotIn("confirmation", operations["instructions_apply"]["required"])
@@ -343,7 +351,8 @@ class LauncherTests(unittest.TestCase):
                         # model/tokenizer is replaced by the explicit test provider.
                         instructions_content=(ROOT / "src/contextopus/modules/workspace/default_instructions.md").read_text(),
                         settings={'allow_implicit_updates': False, 'knowledge_approval_required': False,
-                                  'instructions_approval_required': True, 'git_history_enabled': True,
+                                  'instructions_approval_required': True, 'cleanup_approval_required': True,
+                                  'git_history_enabled': True,
                                   'material_max_tokens': None, 'create_required_sources': False},
                         project_description='Purpose and boundaries of this isolated stdio protocol fixture.',
                         project_content="# Protocol fixture\nA temporary test project.\n")
@@ -352,9 +361,9 @@ class LauncherTests(unittest.TestCase):
                     opened = call("startup", request_id="protocol-invocation")
                     cycle_id = opened["cycle_id"]
                     self.assertEqual(1, opened["materials"])
-                    self.assertEqual("blocked", call("finish")["status"])
-                    self.assertEqual("no_changes", call("proposal_prepare", changes=[],
-                                     no_changes_reason="No results yet; this fixture has no permanent changes.")["status"])
+                    self.assertEqual("closed", call("finish")["status"])
+                    opened = call("startup", request_id="protocol-materials", user_request="Save this fixture")
+                    cycle_id = opened["cycle_id"]
                     pending = call("tmp_write", content="Protocol fixture content")
                     self.assertEqual("blocked", call("finish")["status"])
                     self.assertEqual(1, call("status")["materials"])
@@ -392,9 +401,10 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual("recovery_required", call("status")["status"])
                     self.assertEqual("recovered", call("recover_workspace")["status"])
                     self.assertEqual("Protocol fixture content", call("read", material_id=item["id"])["content"])
-                    closed = call("finish", cancel=True)
+                    closed = call("finish", cancel=True, confirmation="Cancel the isolated fixture and delete its drafts",
+                                  expected_revision=call("status")["cleanup_revision"])
                     self.assertEqual("cancelled", closed["status"])
-                    self.assertFalse((Path(directory) / ".pcw/protocol/tmp" / cycle_id).exists())
+                    self.assertFalse((Path(opened["workspace"]) / ".tmp" / cycle_id).exists())
                 finally:
                     if process.stdin:
                         process.stdin.close()

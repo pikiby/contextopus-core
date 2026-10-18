@@ -180,8 +180,9 @@ def verify(cwd, expected_root, delivery="direct"):
             tool = select_read_tool(server['tools'])
             guide_tool = next((name for name in server['tools'] if name == 'guide' or name.endswith('__guide')), None)
             write_tool = next((name for name in server['tools'] if name == 'write' or name.endswith('__write')), None)
-            if guide_tool is None or write_tool is None or len(server['tools']) != 3:
-                raise RuntimeError('Fresh Codex did not expose exactly guide/read/write')
+            finish_tool = next((name for name in server['tools'] if name == 'finish' or name.endswith('__finish')), None)
+            if guide_tool is None or write_tool is None or finish_tool is None or len(server['tools']) != 4:
+                raise RuntimeError('Fresh Codex did not expose exactly guide/read/write/finish')
             if tool is None:
                 raise RuntimeError("Fresh Codex did not expose Contextopus read tool")
             base = {"threadId": thread, "server": server["name"], "tool": tool}

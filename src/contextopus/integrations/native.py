@@ -1,7 +1,8 @@
 """Merge native MCP configuration and Agent Skills without replacing other entries.
 
-Project scope is explicit. TOML comments survive; JSONC is refused rather than
-rewritten incorrectly. A differing existing server or skill is a collision.
+Project scope is explicit; Hermes uses native user/profile homes. TOML and YAML
+comments survive; unsupported formats are refused rather than rewritten
+incorrectly. A differing existing server or skill is a collision.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ CLIENTS = {
     "claude-code": (".mcp.json", ".claude/skills", "mcpServers"),
     "opencode": ("opencode.json", ".opencode/skills", "mcp"),
     "crush": ("crush.json", ".agents/skills", "mcp"),
+    "hermes": ("config.yaml", "skills", "mcp_servers"),
 }
 
 
@@ -49,6 +51,7 @@ def plan(
     legacy_skills: str | Path | None = None,
     endpoint: str = "http://127.0.0.1:8765/mcp",
     root: str | Path | None = None,
+    hermes_home: str | Path | None = None,
 ) -> dict:
     if client not in CLIENTS:
         raise ValueError(f"Unknown client: {client}")
@@ -56,8 +59,17 @@ def plan(
     project = Path(project).expanduser().resolve()
     if scope not in {"project", "user"}:
         raise ValueError("Integration scope must be project or user")
+    if hermes_home is not None and client != "hermes":
+        raise ValueError("--hermes-home applies only to Hermes")
+    if client == "hermes" and scope != "user":
+        raise ValueError("Hermes supports user scope; use --user and optionally --hermes-home for a native profile")
     config_name, skills_name, section = CLIENTS[client]
-    if scope == "user":
+    if client == "hermes":
+        from .hermes import resolve_home
+
+        native_home = resolve_home(project, hermes_home)
+        config, skills_root = native_home / config_name, native_home / skills_name
+    elif scope == "user":
         config_base = (
             Path(os.environ.get("LOCALAPPDATA", str(project / "AppData/Local")))
             if os.name == "nt"
@@ -78,14 +90,24 @@ def plan(
     if client == "opencode" and config.with_suffix(".jsonc").exists():
         config = config.with_suffix(".jsonc")
     server = {"url": endpoint}
-    if client == "claude-code":
+    if client == "hermes":
+        # Hermes otherwise fabricates resource/prompt tools even when the MCP
+        # server intentionally provides only its four operation tools.
+        server["tools"] = {"resources": False, "prompts": False}
+    elif client == "claude-code":
         server["type"] = "http"
     elif client == "opencode":
         server = {"type": "remote", "url": endpoint, "enabled": True}
     elif client == "crush":
         server["type"] = "http"
     original = config.read_bytes() if config.exists() else None
-    if client == "codex":
+    if client == "hermes":
+        from .hermes import merge_config
+
+        # Validate before planning any skill changes; preserve the original YAML.
+        content = merge_config(original, server)
+        data = {}
+    elif client == "codex":
         import tomlkit
 
         data = tomlkit.parse(original.decode() if original is not None else "")
@@ -135,10 +157,11 @@ def plan(
         servers["contextopus"] = server
     if client == "codex":
         content = tomlkit.dumps(data).encode()
-    else:
+    elif client != "hermes":
         content = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode()
     writes = [(config, original, content)]
-    managed_path = project / ".contextopus" / (client + "-integration.json")
+    managed_base = native_home if client == "hermes" else project
+    managed_path = managed_base / ".contextopus" / (client + "-integration.json")
     managed_prior = managed_path.read_bytes() if managed_path.exists() else None
     managed = json.loads(managed_prior) if managed_prior else {"skills": {}}
     hashes = dict(managed.get("skills", {}))

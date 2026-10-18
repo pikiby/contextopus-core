@@ -29,7 +29,7 @@ mcp = FastMCP(
         "Contexts under one memory root share an index. Search categories or all_categories without changing active rules. "
         "Material IDs are stable YAML values, independent of descriptive filenames. On every receipt of a sources block, "
         "freshly obtain each reference according to its instruction; prior checks never substitute, even when authoring is disabled. "
-        "Work cycles follow workspace invocation and approval settings. Keep progress in typed task records and results in tmp. "
+        "Work cycles follow workspace invocation and approval settings. Keep durable progress in typed task records; use optional .tmp for shared inputs, intermediate results or handoff. "
         "Review results, prepare changes or a grounded no-change conclusion, show actual changed passages and links in chat, "
         "apply under the current policy, then finish. Never replace the review with a file link. "
         "Instructions changes require the user's direct request; current instructions_approval_required controls approval. Tools bind revisions but cannot "

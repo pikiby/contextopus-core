@@ -45,6 +45,7 @@ class WorkspaceEligibility:
     def eligible_documents(self, rows):
         from .shared import SharedRuntime
         from .runtime import PCWError
+        from .workspaces import FORMAT_VERSION
         import json
 
         names = sorted(
@@ -66,7 +67,7 @@ class WorkspaceEligibility:
                     json.loads((marker / "format.json").read_text()).get(
                         "format_version"
                     )
-                    in (2, 3, 4)
+                    in range(2, FORMAT_VERSION + 1)
                 ):
                     selected = name
                     break

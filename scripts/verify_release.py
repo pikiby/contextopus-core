@@ -9,6 +9,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+CLIENTS = ("codex", "claude-code", "opencode", "crush", "hermes")
 
 
 def verify():
@@ -23,7 +24,7 @@ def verify():
         sdist.name,
         *(
             f"contextopus-{client}-{version}.zip"
-            for client in ("codex", "claude-code", "opencode", "crush")
+            for client in CLIENTS
         ),
     }
     observed = {}
@@ -119,7 +120,7 @@ def verify():
     for path in source.glob('*/SKILL.md'):
         if (plugin_skills / path.parent.name / 'SKILL.md').read_bytes() != path.read_bytes():
             raise ValueError('Stale client plugin skill copy: ' + path.parent.name)
-    for client in ("codex", "claude-code", "opencode", "crush"):
+    for client in CLIENTS:
         with zipfile.ZipFile(
             destination / f"contextopus-{client}-{version}.zip"
         ) as archive:
@@ -131,8 +132,21 @@ def verify():
                    for name in archive.namelist()):
                 raise ValueError(f'Unsafe {client} bundle member path')
             instructions = archive.read('INSTALL.txt').decode()
-            if f'contextopus_core-{version}-py3-none-any.whl' not in instructions or 'guide, read, write' not in instructions:
+            if f'contextopus_core-{version}-py3-none-any.whl' not in instructions or 'guide, read, write, finish' not in instructions:
                 raise ValueError(f'Stale {client} installation instructions')
+            if client == "hermes":
+                for required_text in (
+                    "contextopus integrate hermes --user",
+                    "--hermes-home <directory>",
+                    "$HERMES_HOME/config.yaml",
+                    "$HERMES_HOME/skills/",
+                    "%LOCALAPPDATA%/hermes",
+                    "HERMES_DATA_DIR_SUFFIX",
+                ):
+                    if required_text not in instructions:
+                        raise ValueError("Incomplete Hermes installation instructions")
+                if archive.read("HERMES.md") != (ROOT / "docs/integrations/hermes.md").read_bytes():
+                    raise ValueError("Stale Hermes integration guide")
             for name in ("LICENSE", "NOTICE"):
                 if archive.read(name) != (ROOT / name).read_bytes():
                     raise ValueError(f"{client} bundle misses the exact {name}")

@@ -422,7 +422,7 @@ def test_mcp_upgrade_copy_uses_own_vault_boundary_inside_another_vault(tmp_path,
 
     async def exercise():
         async with create_connected_server_and_client_session(mcp) as client:
-            assert {tool.name for tool in (await client.list_tools()).tools} == {"guide", "read", "write"}
+            assert {tool.name for tool in (await client.list_tools()).tools} == {"guide", "read", "write", "finish"}
 
             async def call(name, **arguments):
                 result = await client.call_tool(name, {"work_root": str(root), "context": "alpha", **arguments})

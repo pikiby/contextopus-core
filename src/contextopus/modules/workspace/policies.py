@@ -5,7 +5,7 @@ from __future__ import annotations
 import yaml
 import re
 
-from contextopus.core.settings import WORKSPACE_POLICY_DEFAULTS
+from contextopus.core.settings import WORKSPACE_POLICY_DEFAULTS, WORKSPACE_CREATION_DEFAULTS
 
 from .runtime import PCWError
 
@@ -18,6 +18,8 @@ def policies(content: str, *, creation: bool = False) -> dict:
     if not isinstance(content, str):
         raise PCWError("INSTRUCTIONS content must be text")
     result = dict(DEFAULTS)
+    if creation:
+        result["cleanup_approval_required"] = WORKSPACE_CREATION_DEFAULTS["cleanup_approval_required"]
     supplied = set()
     lines = content.splitlines()
     if lines and lines[0] == "---":
@@ -61,37 +63,45 @@ def policies(content: str, *, creation: bool = False) -> dict:
                 ):
                     raise PCWError(f"{name} must be one boolean true or false")
                 result[name] = value.value.lower() == "true"
-    if creation and supplied != set(DEFAULTS):
+    # Existing clients supplied the original six settings. Creation uses the
+    # current cleanup preset when omitted; legacy imports keep their safe fallback.
+    if creation and not (set(DEFAULTS) - {"cleanup_approval_required"}) <= supplied:
         raise PCWError(
-            "Creation requires all six settings explicitly supplied in INSTRUCTIONS, including the source-link choice: "
+            "Creation requires the original policy settings explicitly supplied in INSTRUCTIONS, including the source-link choice: "
             + ", ".join(DEFAULTS)
         )
     return result
 
 
-def extract_settings(content: str) -> tuple[dict, str]:
+def extract_settings(content: str, *, creation: bool = False) -> tuple[dict, str]:
     """Remove only known legacy keys, retaining all other lines and newline bytes."""
     if not isinstance(content, str):
         raise PCWError("INSTRUCTIONS content must be text")
+    defaults = dict(DEFAULTS)
+    if creation:
+        defaults["cleanup_approval_required"] = WORKSPACE_CREATION_DEFAULTS["cleanup_approval_required"]
     lines = content.splitlines(keepends=True)
     if not lines or lines[0].rstrip("\r\n") != "---":
-        return dict(DEFAULTS), content
+        return dict(defaults), content
     end = next((i for i in range(1, len(lines)) if lines[i].rstrip("\r\n") == "---"), None)
     if end is None:
-        return dict(DEFAULTS), content
+        return dict(defaults), content
     frontmatter = "".join(lines[1:end])
     try:
         node = yaml.compose(frontmatter, Loader=yaml.SafeLoader)
     except yaml.YAMLError:
         if re.search(r"^\s*(?:" + "|".join(DEFAULTS) + r")\s*:", frontmatter, re.MULTILINE):
             policies(content)  # Preserve legacy validation for actual machine settings.
-        return dict(DEFAULTS), content
+        return dict(defaults), content
     if not isinstance(node, yaml.MappingNode):
-        return dict(DEFAULTS), content
+        return dict(defaults), content
     known = any(isinstance(key, yaml.ScalarNode) and key.value in DEFAULTS for key, _ in node.value)
     if not known:
-        return dict(DEFAULTS), content
+        return dict(defaults), content
     settings = policies(content)
+    if creation and not any(key.value == "cleanup_approval_required" for key, _ in node.value
+                            if isinstance(key, yaml.ScalarNode)):
+        settings["cleanup_approval_required"] = defaults["cleanup_approval_required"]
     removed = set()
     for key, value in node.value if node else []:
         if isinstance(key, yaml.ScalarNode) and key.value in DEFAULTS:

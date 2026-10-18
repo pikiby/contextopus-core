@@ -6,6 +6,7 @@ Use this checklist to propose rules for one selected context. Read its current I
 allow_implicit_updates: false
 knowledge_approval_required: false
 instructions_approval_required: true
+cleanup_approval_required: false
 git_history_enabled: true
 material_max_tokens: 1024
 create_required_sources: false

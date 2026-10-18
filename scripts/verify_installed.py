@@ -111,6 +111,8 @@ def verify(expected_version, prefix=None, module_example=None):
             defaults = app.query('procedure', {'name': 'default-instructions'})
             if defaults['content'].startswith('---') or defaults['creation_defaults']['reread_instructions'] is not False:
                 raise ValueError('Installed creation rules/defaults contract is stale')
+            if defaults['creation_defaults']['cleanup_approval_required'] is not False:
+                raise ValueError('Installed new-context cleanup default is stale')
             for operation, kind in [('workspace.settings_read', 'query'),
                                     ('workspace.settings_preview', 'execute'),
                                     ('workspace.settings_apply', 'execute'),
@@ -125,8 +127,8 @@ def verify(expected_version, prefix=None, module_example=None):
         smoke = module_smoke(root, example)
         mcp = create_server(root)
         tools = sorted(tool.name for tool in asyncio.run(mcp.list_tools()))
-        if tools != ['guide', 'read', 'write']:
-            raise ValueError('Installed default MCP surface is not guide/read/write')
+        if tools != ['finish', 'guide', 'read', 'write']:
+            raise ValueError('Installed default MCP surface is not guide/read/write/finish')
     return {'version': installed, 'source': str(source), 'cli': cli, 'tools': tools,
             'skills': skills, 'algorithms': len(algorithms), 'base_context_version': manifest['version'],
             'module_smoke': smoke, 'model_loaded': False, 'scope': 'temporary_data_only', 'model_behavior_verified': False}

@@ -1,5 +1,8 @@
 # Contextopus 1.3 implementation contracts
 
+Historical contracts for version 1.3. The [temporary-memory update](workspace-temporary-memory.md)
+supersedes the cycle and temporary-storage rules in version 1.4.
+
 These contracts implement the [accepted plan](contextopus-1.3.md). They describe
 the target implementation; passing tests and delivery evidence establish completion.
 

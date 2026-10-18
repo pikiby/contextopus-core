@@ -115,13 +115,14 @@ class WorkspaceSourceAdapter(PCWRuntime):
             self._assert_safe(previous)
             if previous.is_file():
                 reserved.update(json.loads(read_utf8(previous)))
-            receipt = directory / "migration-v4.json"
-            self._assert_safe(receipt)
-            if receipt.is_file():
-                from .migration_identity import validate_mapping
-                for item in json.loads(read_utf8(receipt)).get("identity_map", []):
-                    validate_mapping(item)
-                    reserved[item["new_id"]] = {"workspace": item["workspace"]}
+            for version in (4, 5):
+                receipt = directory / f"migration-v{version}.json"
+                self._assert_safe(receipt)
+                if receipt.is_file():
+                    from .migration_identity import validate_mapping
+                    for item in json.loads(read_utf8(receipt)).get("identity_map", []):
+                        validate_mapping(item)
+                        reserved[item["new_id"]] = {"workspace": item["workspace"]}
         reserved.update({ident: {} for ident in self.catalog})
         while True:
             ident = uuid.uuid4().hex + ".md"
@@ -134,6 +135,8 @@ class WorkspaceSourceAdapter(PCWRuntime):
                 return ident
 
     def _scan(self):
+        from .context_identity import assert_unique_context_names, context_metadata
+        assert_unique_context_names(self.layout)
         self.materials, self.catalog, self.owners = {}, {}, {}
         self.unregistered, self.incompatible = [], []
         self._legacy_ids, self._legacy_id_paths, self._legacy_link_paths = (
@@ -154,7 +157,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
             self._assert_safe(marker)
             compatible = (
                 marker.is_file()
-                and json.loads(read_utf8(marker)).get("format_version") in (2, 3, 4)
+                and json.loads(read_utf8(marker)).get("format_version") in (2, 3, 4, 5)
             )
             if root != self.root and not compatible:
                 self.incompatible.append(root.name)
@@ -182,6 +185,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
                 else:
                     metadata, body = _parse(path.read_bytes().decode("utf-8"))
                 cache[key] = (signature, copy.deepcopy(metadata), body)
+                metadata = context_metadata(metadata, root.name)
                 if "id" not in metadata or needs_source_upgrade(body):
                     raise PCWError(
                         f"Workspace {root.name} requires pcw-upgrade: {path.name}"
@@ -279,6 +283,8 @@ class WorkspaceSourceAdapter(PCWRuntime):
         ]
 
     def _save(self, material):
+        from .context_identity import context_metadata
+        material.metadata = context_metadata(material.metadata, self.workspace)
         material.metadata["id"] = material.id
         declarations(material.content)
         material.metadata.setdefault("saved_at", datetime.now(timezone.utc).isoformat())
@@ -403,6 +409,7 @@ class WorkspaceSourceAdapter(PCWRuntime):
             "description": material.metadata.get("description", ""),
             "type": material.metadata.get("type", "knowledge"),
             "status": material.metadata.get("status"),
+            "tags": list(material.metadata.get("tags", [])),
             "workspace": self.owners.get(ident, self.workspace),
             "path": material.path,
         }

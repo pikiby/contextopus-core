@@ -15,10 +15,10 @@ import uuid
 from .runtime import PCWError, _id, _revision, _parse
 from .policies import policies, extract_settings
 from .settings import WorkspaceSettingsMixin, configuration_text, save_configuration
-from contextopus.core.settings import Settings, WORKSPACE_SETTINGS, WORKSPACE_POLICY_DEFAULTS
+from contextopus.core.settings import Settings, WORKSPACE_SETTINGS, WORKSPACE_POLICY_DEFAULTS, WORKSPACE_CREATION_DEFAULTS
 
 
-FORMAT_VERSION = 4  # Workspace format, deliberately independent of plugin releases.
+FORMAT_VERSION = 5  # Workspace format, deliberately independent of plugin releases.
 EMPTY_PROJECT = "# Project\n\nPurpose, goals, requirements and boundaries have not been specified.\n"
 
 
@@ -165,19 +165,22 @@ class WorkspaceMixin(WorkspaceSettingsMixin):
             )
         if not isinstance(project_content, str) or not project_content.strip():
             raise PCWError("Supply the project description agreed with the user")
-        imported, instruction_text = extract_settings(instructions_content)
+        imported, instruction_text = extract_settings(instructions_content, creation=True)
         supplied_settings = settings
         settings = imported if settings is None else settings
         if not isinstance(settings, dict) or set(settings) - set(WORKSPACE_SETTINGS):
             raise PCWError("Invalid Workspace settings")
         Settings(self.control.layout)._validate_changes(settings)
-        if supplied_settings is not None and not set(WORKSPACE_POLICY_DEFAULTS) <= settings.keys():
+        if supplied_settings is not None and not (set(WORKSPACE_POLICY_DEFAULTS) - {"cleanup_approval_required"}) <= settings.keys():
             raise PCWError("Creation requires all six Workspace policy settings")
+        settings = {"cleanup_approval_required": WORKSPACE_CREATION_DEFAULTS["cleanup_approval_required"], **settings}
         signature_input = [request_id, instructions_content, project_content, user_request]
         if supplied_settings is not None or project_description is not None:
             signature_input += [supplied_settings, project_description]
         signature = _revision(encode(signature_input))
         with self.control.guard():
+            from .context_identity import assert_unique_context_names
+            assert_unique_context_names(self.control.layout, self.engine.workspace)
             record = self.control.root / "creation.json"
             self.control.safe(record)
             previous = json.loads(read_utf8(record)) if record.exists() else None
@@ -278,7 +281,7 @@ class WorkspaceMixin(WorkspaceSettingsMixin):
         check(root)
         for directory, dirs, names in os.walk(root):
             if control and Path(directory) == root:
-                dirs[:] = [name for name in dirs if name != "backups"]
+                dirs[:] = [name for name in dirs if name not in {"backups", ".backups"}]
                 names = [
                     name for name in names if name not in {"lock", "migration.json"}
                 ]

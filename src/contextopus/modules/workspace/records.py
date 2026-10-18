@@ -36,7 +36,9 @@ def document_id(workspace, name):
 
 
 def project_record(workspace, text, *, description=None, require_description=False):
+    from .context_identity import context_metadata
     metadata, body = _parse(text)
+    metadata = context_metadata(metadata, workspace)
     metadata.setdefault("id", document_id(workspace, "project"))
     _id(metadata["id"])
     metadata.update(type="project")
@@ -52,7 +54,7 @@ def task_record(ident, text):
     metadata, body = _parse(text)
     # Earlier Current files put their entire content in YAML. Move every field
     # into searchable Markdown, retaining arbitrary/unknown fields as well.
-    fields = {k: v for k, v in metadata.items() if k not in {"id", "type", "links", "status", "description"}}
+    fields = {k: v for k, v in metadata.items() if k not in {"id", "type", "links", "status", "description", "tags"}}
     sections = [f"# {fields.get('goal') or 'Task state'}\n"]
     sections.extend(f"\n## {key}\n\n{value if isinstance(value, str) else yaml.safe_dump(value, allow_unicode=True)}\n" for key, value in fields.items())
     if body:
@@ -62,6 +64,8 @@ def task_record(ident, text):
         result["status"] = metadata["status"]
     if "description" in metadata:
         result["description"] = metadata["description"]
+    if "tags" in metadata:
+        result["tags"] = metadata["tags"]
     return record_text(result, "".join(sections))
 
 

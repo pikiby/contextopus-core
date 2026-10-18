@@ -13,6 +13,7 @@ from .text_io import read_utf8
 import contextlib
 import copy
 import difflib
+import hashlib
 from importlib.resources import files
 import json
 import os
@@ -36,6 +37,8 @@ from .history import HistoryMixin
 from .history_events import transformations as validate_transformations
 from .analytics import AnalyticsMixin
 from .audit import AuditMixin
+from .temporary_materials import TemporaryMaterialsMixin
+from .context_identity import context_metadata
 
 
 
@@ -90,6 +93,7 @@ def _knowledge_approval_required(content):
 
 
 class CycleRuntime(
+    TemporaryMaterialsMixin,
     FormatMigrationMixin,
     WorkspaceMixin,
     DocumentsMixin,
@@ -121,8 +125,12 @@ class CycleRuntime(
         self.control.write(self.record_path, _json(records))
 
     def _tmp(self, cycle_id):
-        path = self.engine.root / "tmp" / _id(cycle_id)
+        path = self.engine.root / ".tmp" / _id(cycle_id)
         self.engine._assert_safe(path)
+        legacy = self.engine.root / "tmp" / _id(cycle_id)
+        self.engine._assert_safe(legacy)
+        if not path.exists() and legacy.exists():
+            return legacy
         return path
 
     def _purge(self, cycle_id):
@@ -133,14 +141,6 @@ class CycleRuntime(
                 self.engine._assert_safe(entry)
             shutil.rmtree(path)
             _sync_directory(path.parent)
-
-    def _tmp_revision(self, cycle_id):
-        """Bind knowledge review to the temporary work results."""
-        materials = {}
-        for path in sorted((self._tmp(cycle_id) / "materials").glob("*.md")):
-            self.engine._assert_safe(path)
-            materials[path.name] = _revision(path.read_bytes().decode("utf-8"))
-        return _revision(_json(materials))
 
     @contextlib.contextmanager
     def _cycle(self, cycle_id, states=("active",)):
@@ -202,6 +202,7 @@ class CycleRuntime(
         restart_cycle_id: str | None = None,
         invocation: str = "explicit",
         task_id: str | None = None,
+        user_request: str | None = None,
     ):
         """One fresh request_id per human invocation; retries reuse that ID."""
         _id(request_id)
@@ -219,7 +220,9 @@ class CycleRuntime(
             if purpose not in {"work", "rework"}:
                 raise PCWError("Only work and rework cycles bind a task")
             self.read(material_id=self.engine.effective_task_id(task_id))
-        signature = _revision(_json([purpose, restart_cycle_id, invocation, task_id]))
+        if user_request is not None:
+            _text(user_request, "user_request")
+        signature = _revision(_json([purpose, restart_cycle_id, invocation, task_id] + ([user_request] if user_request is not None else [])))
         with self.control.guard():
             records = self._records()
             cycle_id = records["starts"].get(request_id)
@@ -255,6 +258,11 @@ class CycleRuntime(
                         raise PCWError(
                             "restart_cycle_id must identify the explicitly restarted work"
                         )
+                    if self._cleanup_snapshot(restart_cycle_id)["temporary_files"] or any(
+                        entry["state"] not in {"applied", "discarded", "no_changes"}
+                        for entry in old.get("proposals", {}).values()
+                    ):
+                        raise PCWError("Existing work has temporary files or pending proposals; continue it or explicitly finish it before restarting")
                     old["state"] = "restarting"
                 cycle_id = uuid.uuid4().hex
                 cycle = {
@@ -265,6 +273,8 @@ class CycleRuntime(
                     "purpose": purpose,
                     "invocation": invocation,
                     "task_id": task_id,
+                    "user_request": user_request,
+                    "clarifications": [],
                 }
                 records["starts"][request_id] = cycle_id
                 records["cycles"][cycle_id] = cycle
@@ -287,7 +297,6 @@ class CycleRuntime(
                         ],
                     }
                 self._purge(cycle_id)
-                self._tmp(cycle_id).mkdir(parents=True, exist_ok=True)
                 cycle["state"] = "active"
                 self._persist(records)
                 status = self.engine.status()
@@ -318,11 +327,43 @@ class CycleRuntime(
             return {
                 "cycle_id": cycle_id,
                 "cycle_status": cycle["state"],
+                **self._cleanup_snapshot(cycle_id),
+                "user_request": cycle.get("user_request"),
+                "clarifications": cycle.get("clarifications", []),
                 "proposals": outstanding[:50],
                 "outstanding_proposal_count": len(outstanding),
                 **self.engine.status(),
                 "task_id": self.engine.effective_task_id(cycle.get("task_id")),
             }
+
+    def _cleanup_snapshot(self, cycle_id):
+        files = {}
+        root = self._tmp(cycle_id)
+        for path in sorted(root.rglob("*")) if root.exists() else []:
+            self.engine._assert_safe(path)
+            if path.is_file():
+                files[path.relative_to(self.engine.root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return {"cleanup_revision": _revision(_json(files)), "temporary_files": list(files)}
+
+    def cycles_list(self, offset: int = 0, limit: int = 50):
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            raise PCWError("Use a nonnegative offset and limit between 1 and 100")
+        with self.control.guard():
+            items = [{"cycle_id": ident, "status": cycle["state"],
+                      "purpose": cycle.get("purpose", "work"),
+                      "user_request": cycle.get("user_request"),
+                      "outstanding_proposal_count": sum(entry["state"] not in {"applied", "discarded", "no_changes"}
+                                                        for entry in cycle.get("proposals", {}).values())}
+                     for ident, cycle in self._records()["cycles"].items()
+                     if cycle["state"] not in {"closed", "cancelled", "replaced"}]
+            return {"cycles": items[offset:offset + limit], "total": len(items)}
+
+    def clarification_add(self, cycle_id: str, text: str):
+        _text(text, "text")
+        with self._cycle(cycle_id) as (records, cycle):
+            cycle.setdefault("clarifications", []).append(text)
+            self._persist(records)
+            return {"cycle_id": cycle_id, "clarifications": list(cycle["clarifications"])}
 
     def _read_call(self, cycle_id, method, **kwargs):
         self._require_format()
@@ -392,82 +433,6 @@ class CycleRuntime(
         with self._cycle(cycle_id) if cycle_id else self.control.guard():
             return self._instructions()
 
-    def tmp_write(
-        self,
-        cycle_id: str,
-        content: str,
-        material_id: str | None = None,
-        expected_revision: str | None = None,
-    ):
-        with self._cycle(cycle_id) as (_, cycle):
-            self._require_work(cycle)
-            if not isinstance(content, str):
-                raise PCWError("content must be ordinary Markdown text")
-            ident = _id(material_id) if material_id else uuid.uuid4().hex + ".md"
-            if not ident.endswith(".md"):
-                raise PCWError("Temporary material IDs end with .md")
-            path = self._tmp(cycle_id) / "materials" / ident
-            self.engine._assert_safe(path)
-            if material_id is not None:
-                if not path.is_file():
-                    raise PCWError(
-                        "Temporary material is missing in this cycle; use tmp_list with the same cycle_id "
-                        "to find existing material IDs before writing"
-                    )
-                if (not isinstance(expected_revision, str) or len(expected_revision) != 64
-                        or any(char not in "0123456789abcdef" for char in expected_revision)):
-                    raise PCWError(
-                        "Temporary material expected_revision must be exactly 64 lowercase hexadecimal characters; "
-                        "use tmp_read with the same cycle_id and material_id and copy its revision unchanged"
-                    )
-                if expected_revision != _revision(path.read_bytes().decode("utf-8")):
-                    raise PCWError(
-                        "Temporary material changed: revision is stale; use tmp_read with the same cycle_id "
-                        "and material_id, then retry with its current expected_revision"
-                    )
-            self.engine._write(path, content)
-            if path.read_bytes().decode("utf-8") != content:
-                raise PCWError("Temporary write verification failed")
-            return {
-                "id": ident,
-                "path": path.relative_to(self.engine.root).as_posix(),
-                "revision": _revision(content),
-                "status": "temporary",
-            }
-
-    def tmp_read(self, cycle_id: str, material_id: str):
-        with self._cycle(cycle_id):
-            path = self._tmp(cycle_id) / "materials" / _id(material_id)
-            self.engine._assert_safe(path)
-            content = path.read_bytes().decode("utf-8")
-            return {
-                "id": material_id,
-                "content": content,
-                "revision": _revision(content),
-                "status": "temporary",
-            }
-
-    def tmp_list(self, cycle_id: str, offset: int = 0, limit: int = 50):
-        with self._cycle(cycle_id):
-            if (
-                type(offset) is not int
-                or offset < 0
-                or type(limit) is not int
-                or not 1 <= limit <= 100
-            ):
-                raise PCWError("Use a nonnegative offset and limit between 1 and 100")
-            paths = sorted((self._tmp(cycle_id) / "materials").glob("*.md"))
-            items = []
-            for path in paths[offset : offset + limit]:
-                self.engine._assert_safe(path)
-                items.append(
-                    {
-                        "id": path.name,
-                        "revision": _revision(path.read_bytes().decode("utf-8")),
-                    }
-                )
-            return {"materials": items, "total": len(paths), "status": "temporary"}
-
     def _snapshot(self, material):
         path = self.engine.root / material.path
         self.engine._assert_safe(path)
@@ -478,6 +443,10 @@ class CycleRuntime(
     def _plan_path(self, cycle_id, proposal_id):
         path = self._tmp(cycle_id) / "proposals" / (_id(proposal_id) + ".json")
         self.engine._assert_safe(path)
+        legacy = self.engine.root / "tmp" / _id(cycle_id) / "proposals" / (_id(proposal_id) + ".json")
+        self.engine._assert_safe(legacy)
+        if not path.exists() and legacy.exists():
+            return legacy
         return path
 
     def _load_plan(self, cycle_id, proposal_id, entry):
@@ -488,6 +457,13 @@ class CycleRuntime(
             )
         review = self._plan_path(cycle_id, proposal_id).with_suffix(".md")
         self.engine._assert_safe(review)
+        if not review.exists():
+            for temporary_root in (".tmp", "tmp"):
+                alternate = self.engine.root / temporary_root / _id(cycle_id) / "proposals" / (_id(proposal_id) + ".md")
+                self.engine._assert_safe(alternate)
+                if alternate.exists():
+                    review = alternate
+                    break
         if read_utf8(review) != self._review(plan):
             raise PCWError("Prepared review was changed; prepare and present it again")
         return plan
@@ -899,6 +875,10 @@ class CycleRuntime(
                 after = entry["after"]
                 if after is None:
                     continue
+                temporary = self._temporary_cards()
+                dependencies = self._temporary_dependencies(after, temporary)
+                if dependencies:
+                    raise PCWError("Permanent knowledge cannot depend on temporary materials; move the source into knowledge first")
                 raw = after["metadata"].get("links", [])
                 if not isinstance(raw, list):
                     raise PCWError("links must be a list")
@@ -930,6 +910,7 @@ class CycleRuntime(
                     _parse(entry['before']['text'])[0].get('links', []), key
                 ) if entry['before'] else {}
                 after['link_ids'] = list(after['metadata']['links'])
+                after["metadata"] = context_metadata(after["metadata"], self.engine.workspace)
                 after["text"] = codec.record_text(after["metadata"], after.pop("content"), aliases=display_aliases)
                 after.pop("metadata")
                 after["fingerprint"] = _revision(after["text"])
@@ -939,7 +920,6 @@ class CycleRuntime(
                 "proposal_id": ident,
                 "created_ids": aliases,
                 "entries": entries,
-                "tmp_revision": self._tmp_revision(cycle_id),
                 "instructions_revision": instructions["revision"],
                 "settings_revision": self._settings_snapshot()["revision"],
                 "knowledge_approval_required": approval_required,
@@ -1310,6 +1290,7 @@ class CycleRuntime(
             self.engine.assert_no_foreign_incoming(
                 [i for i, e in plan["entries"].items() if e["after"] is None]
             )
+            self._assert_permanent_temporary_free(change["after"] for change in plan["entries"].values())
             self._preflight(plan, entry["state"] != "prepared")
             entry["state"] = "applying"
             self._persist(records)
@@ -1374,7 +1355,8 @@ class CycleRuntime(
                     "next_action": "proposal_apply",
                 }
 
-    def finish(self, cycle_id: str, cancel: bool = False):
+    def finish(self, cycle_id: str, cancel: bool = False, confirmation: str | None = None,
+               expected_revision: str | None = None):
         if type(cancel) is not bool:
             raise PCWError("cancel must be a boolean")
         with self._cycle(
@@ -1403,40 +1385,31 @@ class CycleRuntime(
                         "unfinished_proposals": unfinished,
                         "reason": "Apply or discard proposals before closing; tmp is preserved",
                     }
-                if not cancel and cycle.get("purpose") != "audit":
-                    temporary_revision = self._tmp_revision(cycle_id)
-                    plans = [
-                        self._execution_plan(self._load_plan(cycle_id, key, entry))
-                        for key, entry in cycle["proposals"].items()
-                    ]
-                    instructions_only = cycle.get("purpose") == "instructions"
-                    instructions_revision = self._instructions()["revision"]
-                    reviewed = any(
-                        plan.get("kind") == "instructions"
-                        if instructions_only
-                        else plan.get("kind", "knowledge") == "knowledge"
-                        and plan.get("tmp_revision") == temporary_revision
-                        and plan.get("instructions_revision") == instructions_revision
-                        and (plan.get("settings_revision") is None
-                             or plan["settings_revision"] == self._settings_snapshot()["revision"])
-                        for plan in plans
-                    )
-                    if not reviewed:
-                        if instructions_only:
-                            return {
-                                "status": "blocked",
-                                "tmp_preserved": True,
-                                "reason": "Complete the requested instructions review before closing",
-                                "next_action": "instructions_prepare",
-                            }
-                        return {
-                            "status": "blocked",
-                            "tmp_preserved": True,
-                            "reason": "Current results have not completed memory review. Search by the conclusion, "
-                            "read relevant knowledge and prepare the changes; if none are needed, "
-                            "prepare changes=[] with no_changes_reason. No closure permission is needed.",
-                            "next_action": "proposal_prepare",
-                        }
+                snapshot = self._cleanup_snapshot(cycle_id)
+                if expected_revision is not None and expected_revision != snapshot["cleanup_revision"]:
+                    return {"status": "blocked", "tmp_preserved": True,
+                            "reason": "Temporary files changed: cleanup revision is stale; read status again",
+                            **snapshot}
+                if snapshot["temporary_files"] and self._policies().get("cleanup_approval_required", True):
+                    if (not isinstance(confirmation, str) or not confirmation.strip()
+                            or expected_revision != snapshot["cleanup_revision"]):
+                        return {"status": "blocked", "tmp_preserved": True,
+                                "reason": "Confirm deletion of the exact temporary files shown",
+                                **snapshot}
+                deleting = {card["id"] for path, card in self._temporary_cards()
+                            if path.parent.parent == self._tmp(cycle_id)}
+                dependencies = [card["id"] for path, card in self._temporary_cards()
+                                if path.parent.parent != self._tmp(cycle_id)
+                                and deleting.intersection(self._temporary_dependencies(card, self._temporary_cards()))]
+                permanent = self._permanent_temporary_incoming(deleting)
+                if permanent:
+                    return {"status": "blocked", "tmp_preserved": True,
+                            "reason": "Permanent knowledge depends on temporary materials; repair it before cleanup",
+                            "incoming_dependencies": permanent}
+                if dependencies:
+                    return {"status": "blocked", "tmp_preserved": True,
+                            "reason": "Other temporary cards depend on this work",
+                            "incoming_dependencies": dependencies}
                 cycle["cancelled_operations"] = unfinished if cancel else []
                 cycle["closing_as"] = "cancelled" if cancel else "closed"
                 cycle["state"] = "closing"

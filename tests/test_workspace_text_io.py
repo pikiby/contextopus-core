@@ -80,7 +80,7 @@ def test_unicode_root_upgrade_receipt_replays_after_reopen(tmp_path):
         assert reopened.upgrade_apply(revision, automatic=True)["replayed"] is True
         from contextopus.modules.workspace.policies import extract_settings
         assert reopened.instructions_read()["content"] == extract_settings(rules)[1]
-        assert reopened.upgrade_plan()["from_version"] == 4
+        assert reopened.upgrade_plan()["from_version"] == 5
     finally:
         reopened.close()
 

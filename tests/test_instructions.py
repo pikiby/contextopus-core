@@ -107,7 +107,7 @@ def test_instructions_mode_cannot_run_work_or_apply_knowledge(workspace):
                       lambda: r.proposal_prepare(c, [], no_changes_reason="bypass")):
         with pytest.raises(PCWError, match="only for instructions"):
             operation()
-    assert r.finish(c)["next_action"] == "instructions_prepare"
+    assert not r._tmp(c).exists()  # Instructions-only invocation requires no fabricated proposal.
     with pytest.raises(PCWError, match="direct request"):
         r.instructions_prepare(c, "new", r.instructions_read(c)["revision"], "")
     with pytest.raises(PCWError, match="different invocation"):
@@ -140,9 +140,7 @@ def test_instruction_edit_does_not_cover_work_review_or_cross_apply(workspace):
     with pytest.raises(PCWError, match="kind"):
         edit(r, c, "other", k["proposal_id"])
     apply(r, c, p)
-    assert r.finish(c)["status"] == "blocked"
-    r.proposal_prepare(c, [], no_changes_reason="No changes under updated rules")
-    assert r.finish(c)["status"] == "closed"
+    assert r.finish(c)["status"] == "closed"  # New rules do not require a fabricated no-change review.
 
 
 def test_changed_instructions_block_pending_knowledge_proposal(workspace):
@@ -201,7 +199,7 @@ def test_empty_instructions_are_a_user_choice_not_default_fallback(workspace):
     assert r.startup("next")["instructions"]["content"] == ""
 
 
-def test_started_knowledge_write_can_recover_after_rule_change_then_requires_review(workspace):
+def test_started_knowledge_write_can_recover_after_rule_change_without_fake_closure_review(workspace):
     r, _ = workspace
     c = r.startup("work")["cycle_id"]
     p = r.proposal_prepare(c, [{"description": "Verified behavior used to test historical replay and policy evidence", "key": "a", "content": "Fact already approved"}])
@@ -214,6 +212,4 @@ def test_started_knowledge_write_can_recover_after_rule_change_then_requires_rev
         assert r.proposal_apply(c, p["proposal_id"], p["revision"], "yes")["status"] == "partial"
     apply(r, c, edit(r, c, "Changed project instructions"))
     assert r.proposal_apply(c, p["proposal_id"], p["revision"], "yes")["status"] == "applied"
-    assert r.finish(c)["status"] == "blocked"
-    r.proposal_prepare(c, [], no_changes_reason="Stored fact also meets the updated project instructions")
     assert r.finish(c)["status"] == "closed"

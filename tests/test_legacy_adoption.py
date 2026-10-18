@@ -1,6 +1,7 @@
 """Old sparse contexts are adopted only with reviewed explicit human rules."""
 
 from importlib.resources import files
+from pathlib import Path
 import subprocess
 import pytest
 from contextopus.modules.workspace.cycles import CycleRuntime
@@ -91,7 +92,9 @@ def test_sparse_legacy_needs_reviewed_rules_preserves_originals(
         tasks = [m for m in runtime.list()["materials"] if m["type"] == "task"]
         assert len(tasks) == 1
         assert expected_current.decode().strip() in runtime.read(material_id=tasks[0]["id"])["content"]
-        assert (runtime.engine.root / "tmp/result.md").read_bytes() == expected_tmp
+        assert (runtime.engine.root / ".tmp/result.md").read_bytes() == expected_tmp
+        assert (Path(result["backup"]) / "tmp/result.md").read_bytes() == expected_tmp
+        assert not (runtime.engine.root / "tmp").exists()
         assert runtime.project_read()["status"] == "missing"
         material = next(m for m in runtime.list()["materials"] if m["type"] == "knowledge")
         assert (

@@ -76,7 +76,8 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             "Native skill loading and obtaining declared external sources still use the readers required by "
             "the client and procedure. If Contextopus MCP is unavailable, report the connection failure "
             "instead of bypassing it. Use this server's read tool for queries and write tool only for "
-            "authorized changes under the existing approval rules. guide() returns the ordinary Workspace "
+            "authorized changes under the existing approval rules. Use finish to close one completed cycle under "
+            "its cleanup policy. guide() returns the ordinary Workspace "
             "workflow; guide(operation=...) returns only an operation signature and does not replace a "
             "procedure. Request signatures only when unknown. Reuse procedures already obtained for the same "
             "task; reload only when unknown, lost, changed or after a plugin update. Workspace operations "
@@ -155,6 +156,31 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
     ) -> Any:
         """Run an authorized mutation under its existing review and approval policy."""
         return await dispatch('execute', operation, arguments, work_root, context, workspace, detail)
+
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False,
+    ))
+    async def finish(
+        cycle_id: str,
+        expected_revision: str | None = None,
+        confirmation: str | None = None,
+        cancel: bool = False,
+        work_root: str | None = None,
+        context: str | None = None,
+        workspace: str | None = None,
+    ) -> Any:
+        """Close one reviewed work cycle and remove only its temporary files.
+
+        Read workspace.status for the exact cleanup revision and deletion scope.
+        Follow cleanup_approval_required independently of knowledge approval.
+        Pending proposals, indexing and incoming dependencies block completion.
+        Cancellation needs the user's actual cancellation. Native clients can
+        authorize this bounded tool separately from general write operations.
+        """
+        return await dispatch('execute', 'workspace.finish', {
+            'cycle_id': cycle_id, 'expected_revision': expected_revision,
+            'confirmation': confirmation, 'cancel': cancel,
+        }, work_root, context, workspace, 'compact')
 
     # Explicit temporary compatibility for old clients. It preserves full legacy
     # responses and is never advertised by the default server.

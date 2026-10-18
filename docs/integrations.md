@@ -11,6 +11,15 @@ Preview `contextopus integrate <client> --project <directory>`, then add `--appl
 | OpenCode | `opencode.json` | `.opencode/skills` | `mcp.contextopus`, remote |
 | Crush | `crush.json` | `.agents/skills` | `mcp.contextopus`, HTTP |
 
+Hermes uses a native user or profile home rather than project configuration:
+`contextopus integrate hermes --user [--hermes-home <directory>]` previews
+`config.yaml` and `skills/` under `$HERMES_HOME` (default `~/.hermes`). Add
+`--apply` after reviewing the paths. Its `mcp_servers.contextopus.url` connects to
+the same HTTP owner; its seven native skills are invoked as `/w`, `/w-search`,
+`/w-create`, `/w-settings`, `/w-context`, `/w-analyze` and `/m`.
+See the [Hermes installation and verification guide](integrations/hermes.md)
+for release/source checks, profile placement and recovery.
+
 Existing unrelated values survive. A differing `contextopus` server or short skill name stops integration. OpenCode files with genuine JSONC comments/trailing commas require native editing rather than destructive rewriting; JSON-compatible `.jsonc` files merge in place. Preview output lists affected paths and never prints existing configuration contents. Clients may require project trust and MCP approval; restart/reload and verify tools from the actual client before declaring a connection ready.
 
 Primary references checked during implementation:
@@ -19,14 +28,18 @@ Primary references checked during implementation:
 - [Claude Code MCP and project configuration](https://code.claude.com/docs/en/mcp).
 - [OpenCode local and remote MCP](https://opencode.ai/docs/mcp-servers/) and [skills](https://opencode.ai/docs/skills/).
 - [Crush MCP and skill configuration](https://github.com/charmbracelet/crush/blob/main/README.md).
+- [Hermes stable source](https://github.com/NousResearch/hermes-agent/tree/v0.22.2)
+  and [Hermes integration guide](integrations/hermes.md).
 
 Configuration schema support is implemented; live compatibility remains subject to the installed client version and verification. Existing 0.14.0 plugin cache remains available to active sessions during transition.
 
 ## MCP protocol and transition
 
-The default advertised tools are exactly `guide`, `read`, and `write`. Obtain an applicable procedure with `guide(procedure="workspace")` once for an ordinary task, or a single unknown registry signature with `guide(operation="workspace.search")`. `guide(catalog=true)` is opt-in. Queries and mutations retain stable module-qualified operation names inside `read` / `write`; coordinates stay outside `arguments`. Both default to `detail="compact"`; explicit `detail="full"` preserves the complete operation response. Presentation runs after operation journaling, so compact search does not discard candidate evidence.
+The default advertised tools are `guide`, `read`, `write`, and `finish`. Obtain an applicable procedure with `guide(procedure="workspace")` once for an ordinary task, or a single unknown registry signature with `guide(operation="workspace.search")`. `guide(catalog=true)` is opt-in. Queries and mutations retain stable module-qualified operation names inside `read` / `write`; coordinates stay outside `arguments`. Both default to `detail="compact"`; explicit `detail="full"` preserves the complete operation response. Presentation runs after operation journaling, so compact search does not discard candidate evidence.
 
-An old client can deliberately use temporary compatibility: launch the service with `CONTEXTOPUS_LEGACY_TOOLS=1`, or embed `create_server(..., legacy_tools=True)`. This advertises the three current tools plus `contextopus_query`, `contextopus_execute`, `pcw_query`, `pcw_execute`, whose full response contract remains intact. Default clients never enable aliases automatically. The Python CLI/TUI facade uses current `read` / `write` with full detail; `RemoteApplication(..., legacy_tools=True)` explicitly selects an older server. Upgrade the client or deliberately enable compatibility when protocols disagree; never retry a failed mutation under a guessed alias, because the first attempt may have committed.
+`finish` closes only the named work cycle after pending work and exact cleanup-revision checks. It uses the independent `cleanup_approval_required` policy; native clients can authorize this bounded tool separately from general writes. Host permissions still apply.
+
+An old client can deliberately use temporary compatibility: launch the service with `CONTEXTOPUS_LEGACY_TOOLS=1`, or embed `create_server(..., legacy_tools=True)`. This advertises the four current tools plus `contextopus_query`, `contextopus_execute`, `pcw_query`, `pcw_execute`, whose full response contract remains intact. Default clients never enable aliases automatically. The Python CLI/TUI facade uses current `read` / `write` with full detail; `RemoteApplication(..., legacy_tools=True)` explicitly selects an older server. Upgrade the client or deliberately enable compatibility when protocols disagree; never retry a failed mutation under a guessed alias, because the first attempt may have committed.
 
 A tool call proves that client/transport path for the tested root. It does not prove a model obtained or followed the procedure; behavioral checks need actual model-operation evidence. Procedure reuse/rereading is per-agent conversation state, never a shared server flag.
 

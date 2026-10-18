@@ -207,6 +207,20 @@ class BaseContext:
         with self.layout.guard():
             state = self._read()
             pending = state.get('pending')
+            managed = state.get('managed', {})
+            if not pending and managed.get('plan_revision') == plan_revision:
+                runtime = self.runtime_factory(self.layout.root, managed['context'])
+                try:
+                    cycle = {'cycle_id': managed['cycle_id'],
+                             **runtime._cleanup_snapshot(managed['cycle_id'])}
+                finally:
+                    runtime.close()
+                cleanup = ({'cycle_id': cycle['cycle_id'], 'status': 'blocked', 'tmp_preserved': True,
+                            'cleanup_revision': cycle['cleanup_revision'], 'temporary_files': cycle['temporary_files']}
+                           if cycle['temporary_files'] else None)
+                return {**self.status(), 'status': 'installed', 'replayed': True,
+                        'plan_revision': plan_revision,
+                        **({'cleanup': cleanup, 'next_action': 'finish'} if cleanup else {})}
             preview = self.plan()
             if preview['plan_revision'] != plan_revision:
                 raise PCWError('Base context changed since preview; read core.base_plan again')
@@ -307,14 +321,22 @@ class BaseContext:
             pending['stage'] = 'finish'
             self._write(state)
         result = runtime.finish(pending['cycle_id'])
-        if result['status'] != 'closed':
+        cleanup_pending = (result['status'] == 'blocked' and result.get('tmp_preserved')
+                           and 'cleanup_revision' in result)
+        if result['status'] != 'closed' and not cleanup_pending:
             return {'status': 'partial', 'plan_revision': revision, 'result': result}
+        # Installed records and their managed receipt are durable already.
+        # Temporary-file deletion has its own approval and must not make a
+        # successful documentation install look incomplete or approve cleanup.
+        cleanup = {'cycle_id': pending['cycle_id'], **result} if cleanup_pending else None
         state['managed'] = {'context': preview['context'], 'version': preview['version'],
-                            'documents': pending['documents']}
+                            'documents': pending['documents'], 'plan_revision': revision,
+                            'cycle_id': pending['cycle_id']}
         state.setdefault('context', preview['context'])
         state.pop('pending', None)
         self._write(state)
-        return {**self.status(), 'status': 'installed', 'plan_revision': revision}
+        return {**self.status(), 'status': 'installed', 'plan_revision': revision,
+                **({'cleanup': cleanup, 'next_action': 'finish'} if cleanup else {})}
 
 
 def register(app):

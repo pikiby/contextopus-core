@@ -48,7 +48,8 @@ def test_unicode_neighbors_and_managed_update_ignore_implicit_locale(base, monke
     neighbor = base.runtime_factory(base.layout.root, 'neighbor')
     try:
         neighbor.workspace_create('neighbor-create', rules, '# Соседний проект Н', 'Create the independent context',
-                                  settings=base.bundle['settings'], project_description='Описывает независимые записи Н и их связи.')
+                                  settings={**base.bundle['settings'], 'cleanup_approval_required': True},
+                                  project_description='Описывает независимые записи Н и их связи.')
         cycle = neighbor.startup('neighbor-records')['cycle_id']
         bodies = {'target': lines('# Цель Н 🙂\nТочные условия применения.\n'),
                   'source': lines('# Источник Н\nПроверить связанную цель.\n')}
@@ -58,7 +59,10 @@ def test_unicode_neighbors_and_managed_update_ignore_implicit_locale(base, monke
              'links': [] if key == 'target' else ['@target']}
             for key, body in bodies.items()])
         assert neighbor.proposal_apply(cycle, proposal['proposal_id'], proposal['revision'])['status'] == 'applied'
-        assert neighbor.finish(cycle)['status'] == 'closed'
+        cleanup = neighbor.finish(cycle)
+        assert cleanup['status'] == 'blocked' and cleanup['tmp_preserved']
+        assert neighbor.finish(cycle, confirmation='Delete the reviewed temporary files',
+                               expected_revision=cleanup['cleanup_revision'])['status'] == 'closed'
         originals = {key: neighbor.read(material_id=ident) for key, ident in proposal['created_ids'].items()}
         neighbor_bytes = {neighbor.engine.root / item['path']: (neighbor.engine.root / item['path']).read_bytes()
                           for item in originals.values()}
@@ -144,16 +148,28 @@ def test_unicode_neighbors_and_managed_update_ignore_implicit_locale(base, monke
 
 
 def test_passive_preview_then_shared_index_and_history(base):
+    base.bundle['settings']['cleanup_approval_required'] = True  # Explicit approval branch.
     assert base.status()['context'] is None
     assert base.status()['next_action'] == 'core.base_plan'
     preview = base.plan()
     assert preview['create'] and preview['material_max_tokens'] is None
     assert not base.path.exists()
     assert not base._context_path(preview['context']).exists()
-    install(base)
+    installed = install(base)
+    assert installed['next_action'] == 'finish'
+    assert installed['cleanup']['status'] == 'blocked'
+    assert installed['cleanup']['tmp_preserved']
     state = base._read()
     runtime = base.runtime_factory(base.layout.root, state['context'])
     try:
+        cleanup = installed['cleanup']
+        assert runtime._tmp(cleanup['cycle_id']).is_dir()
+        assert all((runtime.engine.root / path).is_file() for path in cleanup['temporary_files'])
+        cycles_before = copy.deepcopy(runtime._records())
+        retry = base.install(installed['plan_revision'])
+        assert retry['status'] == 'installed' and retry['replayed']
+        assert retry['cleanup'] == {key: cleanup[key] for key in retry['cleanup']}
+        assert runtime._records() == cycles_before
         assert runtime.record_types()['types'] == [
             {'type': 'guide', 'count': 1}, {'type': 'project', 'count': 1}, {'type': 'template', 'count': 1}]
         for receipt in state['managed']['documents'].values():
@@ -161,6 +177,11 @@ def test_passive_preview_then_shared_index_and_history(base):
         assert (runtime.engine.root / '.git').is_dir()
         assert base.plan()['status'] == 'current'
         assert base.install(base.plan()['plan_revision'])['status'] == 'current'
+        assert runtime.finish(cleanup['cycle_id'],
+                              confirmation='Delete the reviewed installer temporary files',
+                              expected_revision=cleanup['cleanup_revision'])['status'] == 'closed'
+        assert base.plan()['status'] == 'current'
+        assert 'cleanup' not in base.install(installed['plan_revision'])
     finally:
         runtime.close()
 
@@ -396,3 +417,19 @@ def test_missing_native_target_is_a_reviewable_conflict_with_no_rewrite(base):
     assert any(item['reason'] == 'navigation_conflict' for item in plan['conflicts'])
     assert base.install(plan['plan_revision'])['status'] == 'conflicts'
     assert guide.read_bytes() == before and not target.exists()
+
+
+def test_default_base_install_closes_and_cleans_without_cleanup_approval(base):
+    assert base.bundle['settings']['cleanup_approval_required'] is False
+    installed = install(base)
+    assert installed['next_action'] is None
+    assert 'cleanup' not in installed
+    managed = base._read()['managed']
+    runtime = base.runtime_factory(base.layout.root, managed['context'])
+    try:
+        assert runtime._records()['cycles'][managed['cycle_id']]['state'] == 'closed'
+        assert not runtime._tmp(managed['cycle_id']).exists()
+        for receipt in managed['documents'].values():
+            assert runtime.read(material_id=receipt['id'])['index_status'] == 'indexed'
+    finally:
+        runtime.close()

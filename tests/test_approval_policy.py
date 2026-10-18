@@ -128,8 +128,8 @@ def test_automatic_retry_recovers_same_partial_write_after_policy_changes(worksp
     set_policy(r, True)
     assert apply_knowledge(r, c, p)["status"] == "applied"
     assert r.status(c)["materials"] == 2
-    assert r.finish(c)["status"] == "blocked"
-    r.proposal_prepare(c, [], no_changes_reason="The same stored fact meets the updated rules")
+    # A completed recovery has no unfinished proposal; the fixture explicitly
+    # disables cleanup approval so knowledge policy cannot gate cycle closure.
     assert r.finish(c)["status"] == "closed"
 
 

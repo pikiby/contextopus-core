@@ -8,7 +8,7 @@ An exposed server with a broken workspace returns `recovery_required`. A small s
 
 ## Check the installed service
 
-Contextopus advertises `guide`, `read`, and `write`. Legacy aliases appear only with explicit CONTEXTOPUS_LEGACY_TOOLS=1 compatibility mode. First check actual host tool discovery, then the service tools/list and `guide(operation=...)` for one unknown signature. A source function or generated config does not prove model-visible access. Use MCP for workspace operations; direct internal calls bypass validation and observation.
+Contextopus advertises `guide`, `read`, `write`, and the bounded `finish` tool. Legacy aliases appear only with explicit CONTEXTOPUS_LEGACY_TOOLS=1 compatibility mode. First check actual host tool discovery, then the service tools/list and `guide(operation=...)` for one unknown signature. A source function or generated config does not prove model-visible access. Use MCP for workspace operations; direct internal calls bypass validation and observation.
 
 Run `contextopus --version`, `contextopus service status` and `contextopus doctor` using the installed runtime. The application requires Python 3.12+. uv manages the application environment from a verified local wheel or GitHub release asset. Runtime and persistent storage are independent of plugin caches. An old cache remains a compatibility source for active old sessions, not the new runtime owner.
 

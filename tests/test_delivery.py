@@ -186,16 +186,19 @@ def test_user_scope_and_existing_plain_jsonc_are_merged(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("crlf", [False, True])
-def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path, crlf):
+@pytest.mark.parametrize("skill_name", ["pcw", "pcw-analyze", "pcw-audit", "pcw-create",
+                                       "pcw-edit-instructions", "pcw-rework", "pcw-search", "pcw-upgrade"])
+def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path, crlf, skill_name):
     import hashlib
     from importlib.resources import files
 
-    old = tmp_path / ".claude/skills/pcw/SKILL.md"
+    old = tmp_path / ".claude/skills" / skill_name / "SKILL.md"
     old.parent.mkdir(parents=True)
-    # The fixture uses the exact retained pre-transition packaged entrypoint.
+    # The fixture uses the exact shipped compatibility redirect, not a fuzzy
+    # content match; historical shipped hashes remain accepted independently.
     source = (
         Path(__file__).resolve().parents[1]
-        / "plugins/persistent-context-workspace/skills/pcw/SKILL.md"
+        / "plugins/persistent-context-workspace/skills" / skill_name / "SKILL.md"
     )
     original = source.read_bytes().replace(b"\r\n", b"\n")
     old.write_bytes(original.replace(b"\n", b"\r\n") if crlf else original)
@@ -204,9 +207,12 @@ def test_known_legacy_skill_upgrade_and_modified_collision(tmp_path, crlf):
     )
     assert not old.exists()
     old.parent.mkdir(parents=True)
-    old.write_text("user customized old skill")
+    modified = original + b"\nUser customization must remain.\n"
+    old.write_bytes(modified)
     review = plan("claude-code", tmp_path, scope="user", legacy_skills=old.parent.parent)
     assert review["preserved"]
+    integrate(review)
+    assert old.read_bytes() == modified
     cache = tmp_path / ".codex/plugins/cache/old/old/0.14.0/skills"
     with pytest.raises(IntegrationConflict, match="caches"):
         plan("codex", tmp_path, legacy_skills=cache)

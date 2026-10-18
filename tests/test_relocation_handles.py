@@ -124,3 +124,21 @@ def test_open_layout_unicode_review_survives_owned_artifact_reload(tmp_path):
     assert (
         destination / "modules/workspace/workspace_contexts/проект/knowledge/тема.md"
     ).read_text(encoding="utf-8") == "Исходный текст"
+
+
+def test_relocation_preserves_unfinished_temporary_cards_and_pending_proposals(tmp_path):
+    source, destination = source_tree(tmp_path)
+    relative = 'alpha/.tmp/unfinished'
+    files = {
+        f'{relative}/materials/Readable finding.md': '---\nid: stable-card\ntype: knowledge\nlinks: []\n---\n# Unfinished evidence\n',
+        f'{relative}/proposals/pending.json': '{"revision": "exact pending proposal"}\n',
+    }
+    for name, content in files.items():
+        path = source / '.pcw' / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    with Application(source, discover=False) as app:
+        review = app.query('core.relocation_plan', {'destination': str(destination)})
+        assert app.execute('core.relocation_apply', {'plan_revision': review['revision']})['status'] == 'complete'
+    for name, content in files.items():
+        assert (destination / 'modules/workspace/workspace_contexts' / name).read_text() == content

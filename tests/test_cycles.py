@@ -15,7 +15,7 @@ from test_workspace_v3 import create
 def workspace(tmp_path):
     factory = Factory()
     runtime = CycleRuntime(tmp_path, "project", provider_factory=factory)
-    create(runtime)
+    create(runtime, cleanup_approval_required=False)  # Most cases exercise knowledge approval; cleanup policy has dedicated tests.
     factory.calls.clear()  # Measure the cycle, excluding initial project indexing.
     yield runtime, factory
     runtime.close()
@@ -194,12 +194,18 @@ def test_parallel_cycles_are_isolated_and_startup_retries_do_not_purge(workspace
     assert runtime.tmp_read(b, item["id"])
 
 
-def test_restart_cleans_only_explicitly_restarted_work_and_drops_approval(workspace):
+def test_restart_preserves_unfinished_work_until_explicit_finish(workspace):
     runtime, _ = workspace
     a = start(runtime, "a"); b = start(runtime, "b")
-    runtime.tmp_write(a, "Old return")
+    old = runtime.tmp_write(a, "Old return")
     other = runtime.tmp_write(b, "Keep this")
     proposal = prepare(runtime, a)
+    with pytest.raises(PCWError, match="continue it or explicitly finish"):
+        start(runtime, "restart-a", restart_cycle_id=a)
+    assert runtime.tmp_read(a, old["id"])["content"] == "Old return"
+    assert runtime.proposal_read(a, proposal["proposal_id"])
+    runtime.proposal_discard(a, proposal["proposal_id"], proposal["revision"])
+    assert runtime.finish(a)["status"] == "closed"
     new = start(runtime, "restart-a", restart_cycle_id=a)
     assert not runtime._tmp(a).exists()
     assert runtime.tmp_list(new)["total"] == 0
@@ -221,7 +227,7 @@ def test_no_changes_and_rejected_changes_close_without_dummy_save(workspace):
     runtime.proposal_discard(a, proposal["proposal_id"], proposal["revision"])
     assert runtime.finish(a)["status"] == "closed"
     b = start(runtime, "b")
-    assert runtime.finish(b)["status"] == "blocked"
+    assert not runtime._tmp(b).exists()  # Direct work needs no fabricated temporary report or no-change proposal.
     reviewed = runtime.proposal_prepare(b, [], no_changes_reason="No new results or corrections after comparison.")
     assert reviewed["status"] == "no_changes"
     assert reviewed["next_action"] == "report_no_changes"
@@ -232,13 +238,10 @@ def test_no_changes_and_rejected_changes_close_without_dummy_save(workspace):
     assert factory.calls == []
 
 
-def test_finish_cannot_delete_results_without_preparation_and_decision(workspace):
+def test_finish_requires_pending_decision_but_not_a_fabricated_review(workspace):
     runtime, _ = workspace
     cycle = start(runtime)
     result = runtime.tmp_write(cycle, "Verified reusable result")
-    blocked = runtime.finish(cycle)
-    assert blocked["status"] == "blocked"
-    assert blocked["next_action"] == "proposal_prepare"
     assert runtime.tmp_read(cycle, result["id"])["content"] == "Verified reusable result"
     proposal = prepare(runtime, cycle, "Verified reusable result")
     assert runtime.finish(cycle)["status"] == "blocked"
@@ -250,16 +253,16 @@ def test_finish_cannot_delete_results_without_preparation_and_decision(workspace
 
 
 @pytest.mark.parametrize("update", [False, True])
-def test_new_or_changed_results_need_another_review(workspace, update):
+def test_temporary_churn_does_not_replace_semantic_review_or_invalidate_proposals(workspace, update):
     runtime, _ = workspace
     cycle = start(runtime)
     result = runtime.tmp_write(cycle, "Initial working note")
     runtime.proposal_prepare(cycle, [], no_changes_reason="The initial note adds no reusable knowledge.")
     args = {"material_id": result["id"], "expected_revision": result["revision"]} if update else {}
     runtime.tmp_write(cycle, "New verified finding", **args)
-    assert runtime.finish(cycle)["status"] == "blocked"
     assert runtime._tmp(cycle).exists()
     proposal = prepare(runtime, cycle, "New verified finding")
+    runtime.tmp_write(cycle, "Unrelated later scratch note")
     assert apply(runtime, cycle, proposal)["status"] == "applied"
     assert runtime.finish(cycle)["status"] == "closed"
 
@@ -411,7 +414,8 @@ def test_cleanup_failure_can_retry_without_touching_other_cycles(workspace):
 def test_start_cleanup_failure_is_not_active_and_retry_does_not_reuse_old_context(workspace):
     runtime, _ = workspace
     old = start(runtime, "old")
-    runtime.tmp_write(old, "discard on restart")
+    runtime.tmp_write(old, "Explicitly finish this work before restarting")
+    assert runtime.finish(old)["status"] == "closed"
     with patch.object(runtime, "_purge", side_effect=OSError("cleanup failed")):
         with pytest.raises(OSError): start(runtime, "new", restart_cycle_id=old)
     with pytest.raises(PCWError): runtime.status(old)

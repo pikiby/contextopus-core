@@ -16,7 +16,9 @@ Carry out the user's project task within its stated scope and constraints. Prese
 
 Retain established project states, principles, patterns, procedures and decisions with their evidence, applicability and verification status. Distinguish observed facts, hypotheses and user decisions. Approval to store a statement does not turn a hypothesis into a verified fact.
 
-Action reports, intermediate calculations, working notes and unfinished investigations belong in tmp. Performing work alone is not a reason for a permanent-memory change.
+Use .tmp when shared inputs, intermediate findings or handoff require temporary memory. Simple knowledge corrections and short replies need no temporary report. Keep original user requests and relevant clarifications verbatim, separate from interpretation. Native agent communication carries assignments and references.
+
+At a new task/cycle assess existing temporary materials; update needed files, preserve useful verified knowledge and remove unneeded files. Use existing ordinary and required links; .tmp may reference .tmp or knowledge, while knowledge must not depend on .tmp. Do not retain obsolete comments or a mandatory review ledger. Respect parallel work and incoming dependencies. The independent cleanup_approval_required setting controls temporary deletion and finish approval; new contexts default to false and the user can enable confirmation. Existing context settings remain effective. Performing work alone is not a reason for a permanent-memory change.
 
 ## Structure and maintenance
 
