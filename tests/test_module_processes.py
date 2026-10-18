@@ -15,7 +15,13 @@ def child(exited=True):
                            kill=Mock(), wait=Mock(return_value=1))
 
 
-def test_exited_leader_permission_failure_never_resignals_a_reusable_group_id(monkeypatch):
+@pytest.fixture
+def posix_signal(monkeypatch):
+    # Fake POSIX process tests must not depend on Windows exposing SIGKILL.
+    monkeypatch.setattr(processes, 'signal', SimpleNamespace(SIGKILL=9))
+
+
+def test_exited_leader_permission_failure_never_resignals_a_reusable_group_id(monkeypatch, posix_signal):
     process = child()
     denied = PermissionError(errno.EPERM, 'group cleanup unverified')
     killpg = Mock(side_effect=denied)
@@ -28,7 +34,7 @@ def test_exited_leader_permission_failure_never_resignals_a_reusable_group_id(mo
     process.wait.assert_called_once_with(timeout=5)
 
 
-def test_live_leader_permission_failure_reaps_direct_child_but_reports_group_unverified(monkeypatch):
+def test_live_leader_permission_failure_reaps_direct_child_but_reports_group_unverified(monkeypatch, posix_signal):
     process = child(exited=False)
     denied = PermissionError(errno.EPERM, 'group remains inaccessible')
     killpg = Mock(side_effect=denied)
@@ -41,7 +47,7 @@ def test_live_leader_permission_failure_reaps_direct_child_but_reports_group_unv
     process.wait.assert_called_once_with(timeout=5)
 
 
-def test_missing_group_still_terminates_a_live_direct_child(monkeypatch):
+def test_missing_group_still_terminates_a_live_direct_child(monkeypatch, posix_signal):
     process = child(exited=False)
     monkeypatch.setattr(processes, 'os', SimpleNamespace(name='posix',
         killpg=Mock(side_effect=ProcessLookupError(errno.ESRCH, 'gone'))))
