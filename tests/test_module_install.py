@@ -256,7 +256,39 @@ def assert_terminated(pid):
             return
         # An orphan may briefly remain as an already terminated zombie under PID 1.
         state = Path(f'/proc/{pid}/stat')
-        assert state.exists() and state.read_text().split()[2] == 'Z'
+        try:
+            status = state.read_text()
+        except FileNotFoundError:
+            # The OS may reap it after kill(0) but before the status read.
+            # Recheck rather than treating a missing /proc mount as success.
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            raise AssertionError(f'Process {pid} is still alive without a status file') from None
+        assert status.split()[2] == 'Z'
+
+
+@pytest.mark.parametrize('still_alive', [False, True])
+def test_termination_probe_rechecks_process_when_status_disappears(monkeypatch, still_alive):
+    import os
+
+    monkeypatch.setitem(assert_terminated.__globals__, 'sys', SimpleNamespace(platform='linux'))
+    probes = []
+    def kill(pid, signal):
+        probes.append((pid, signal))
+        if len(probes) == 2 and not still_alive:
+            raise ProcessLookupError
+    def vanished(path, *args, **kwargs):
+        raise FileNotFoundError(str(path))
+    monkeypatch.setattr(os, 'kill', kill)
+    monkeypatch.setattr(Path, 'read_text', vanished)
+    if still_alive:
+        with pytest.raises(AssertionError, match='still alive'):
+            assert_terminated(12345)
+    else:
+        assert_terminated(12345)
+    assert probes == [(12345, 0), (12345, 0)]
 
 
 def test_rejected_write_reaps_handler(tmp_path):
