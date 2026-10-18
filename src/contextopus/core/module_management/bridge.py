@@ -1,5 +1,6 @@
 """Parent-side request-scoped Core RPC over a module child's existing stdio."""
 import json
+import logging
 import os
 import queue
 import subprocess
@@ -11,6 +12,22 @@ from .processes import terminate, windows_job
 
 PROTOCOL = 'contextopus-core-v1'
 MAX_MESSAGE = 1024 * 1024
+logger = logging.getLogger(__name__)
+
+
+def _terminate_preserving_error(process, job=None, primary=None):
+    """Keep an operation failure primary while exposing failed child cleanup."""
+    try:
+        terminate(process, job)
+    except BaseException as cleanup_error:
+        # MCP serializes str(primary), dropping traceback notes and causes.
+        # Report incomplete cleanup without logging handler arguments/messages.
+        logger.error('Module child cleanup failed (%s, pid=%s); descendant termination is unverified',
+                     type(cleanup_error).__name__, process.pid)
+        if primary is not None:
+            primary.add_note('Module child cleanup failed: ' + repr(cleanup_error))
+            raise primary from cleanup_error
+        raise
 
 
 def invoke(command, *, arguments, module, kind, storage, declared_storage,
@@ -37,10 +54,12 @@ def invoke(command, *, arguments, module, kind, storage, declared_storage,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
         try:
             job = windows_job(process)
-        except BaseException:
-            terminate(process)
-            process.stdin.close()
-            process.stdout.close()
+        except BaseException as primary:
+            try:
+                _terminate_preserving_error(process, primary=primary)
+            finally:
+                process.stdin.close()
+                process.stdout.close()
             raise
 
         def reader():
@@ -74,6 +93,7 @@ def invoke(command, *, arguments, module, kind, storage, declared_storage,
         readers = [threading.Thread(target=reader, daemon=True), threading.Thread(target=writer, daemon=True)]
         for thread in readers:
             thread.start()
+        primary = None
         try:
             put(outgoing, {'protocol': PROTOCOL, 'type': 'request',
                 'module': module, 'kind': kind, 'arguments': arguments})
@@ -121,11 +141,14 @@ def invoke(command, *, arguments, module, kind, storage, declared_storage,
                 except Exception as exc:
                     response['error'] = {'type': type(exc).__name__, 'message': str(exc)}
                 put(outgoing, response)
+        except BaseException as error:
+            primary = error
+            raise
         finally:
             stopped.set()
             try:
                 # Also terminate descendants when the direct child already exited.
-                terminate(process, job)
+                _terminate_preserving_error(process, job, primary=primary)
             finally:
                 for stream in (process.stdin, process.stdout):
                     stream.close()

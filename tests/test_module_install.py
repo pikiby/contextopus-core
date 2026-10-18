@@ -76,6 +76,38 @@ def test_folder_install_uses_parent_storage_and_application_guard(tmp_path, monk
         assert restored.query('sample.read')['rows'][0]['title'] == 'First session'
 
 
+@pytest.mark.parametrize('operation', ['sample.read', 'sample.forbidden'])
+def test_real_module_cleanup_failure_never_hides_operation_failure_or_returns_success(tmp_path, monkeypatch, caplog, operation):
+    from contextopus.core.module_management import bridge
+
+    release(tmp_path / 'modules/sample')
+    with Application(tmp_path, discover=False) as app:
+        app.execute('core.module_install', {'module': 'sample'})
+        terminate = bridge.terminate
+        children = []
+        def cleanup_failed(process, job=None):
+            terminate(process, job)
+            children.append(process)
+            raise PermissionError('Simulated unverified group cleanup')
+        monkeypatch.setattr(bridge, 'terminate', cleanup_failed)
+        if operation == 'sample.forbidden':
+            with pytest.raises(RuntimeError, match='Query operations cannot write') as failure:
+                app.query(operation)
+            assert isinstance(failure.value.__cause__, PermissionError)
+            assert any('cleanup failed' in note for note in failure.value.__notes__)
+        else:
+            try:
+                raise LookupError('Unrelated caller exception during retry')
+            except LookupError:
+                with pytest.raises(PermissionError, match='unverified group cleanup'):
+                    app.query(operation)
+        assert len(children) == 1 and children[0].poll() is not None
+        assert children[0].stdin.closed and children[0].stdout.closed
+        assert 'Module child cleanup failed (PermissionError' in caplog.text
+        assert 'descendant termination is unverified' in caplog.text
+        assert 'Simulated unverified group cleanup' not in caplog.text
+
+
 @pytest.mark.parametrize('storage', [None, {'engine': 'postgres'},
     {'engine': 'sqlite', 'schema_version': 1, 'migrations': '../outside', 'compatible_versions': {'min': 1,'max': 1}}])
 def test_manifest_storage_is_validated_without_creation(tmp_path, storage):

@@ -178,6 +178,12 @@ their intended UTF-8/newline bytes explicitly. Context-name tests count actual
 directory entries on case-insensitive filesystems; the uniqueness guard remains
 unchanged. These changes do not require a separate Windows product version.
 
+Module-child cleanup also preserves the original operation failure when the OS
+denies process-group termination. Cleanup still attempts to reap the direct child; a bounded
+error log explicitly marks descendant termination as unverified. A successful
+operation does not become successful overall if cleanup fails. This reports the
+failure without a speculative signal retry after reaping and possible PID reuse.
+
 Final cross-platform acceptance uses the executed results for the release commit in
 [GitHub Actions](https://github.com/pikiby/contextopus-core/actions/workflows/ci.yml)
 for final CI evidence. Earlier checkpoint counts and local package checks are

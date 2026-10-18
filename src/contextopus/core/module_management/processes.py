@@ -47,6 +47,7 @@ def windows_job(process):
 
 
 def terminate(process, job=None):
+    cleanup_error = None
     if os.name == 'nt':
         if job is not None:
             api, handle = job
@@ -56,6 +57,12 @@ def terminate(process, job=None):
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError as error:
+            # Still reap our direct child, but do not claim its group stopped.
+            # Never retry by numeric PGID after poll()/wait() can release it.
+            cleanup_error = error
     if process.poll() is None:
         process.kill()
     process.wait(timeout=5)
+    if cleanup_error is not None:
+        raise cleanup_error
