@@ -1,4 +1,4 @@
-"""Installed 1.1/1.2 writers create fixtures; source 1.3 migrates their copies.
+"""Installed 1.1/1.2 writers create fixtures; current source migrates their copies.
 
 Set CONTEXTOPUS_V11_PYTHON and/or CONTEXTOPUS_V12_PYTHON to isolated installed
 interpreters. CONTEXTOPUS_OLD_PYTHON with CONTEXTOPUS_OLD_VERSION is an alternative.
@@ -23,6 +23,7 @@ from contextopus.interfaces.mcp import server
 from contextopus.modules.workspace.analytics import EventStore
 from contextopus.modules.workspace.cycles import CycleRuntime
 from contextopus.modules.workspace.runtime import _parse
+from contextopus.modules.workspace.workspaces import FORMAT_VERSION
 from test_runtime import Factory
 
 
@@ -201,7 +202,7 @@ def result_value(result):
 
 @pytest.mark.parametrize(('old_version', 'python_variable'), [
     ('1.1.0', 'CONTEXTOPUS_V11_PYTHON'), ('1.2.0', 'CONTEXTOPUS_V12_PYTHON')], ids=['1.1', '1.2'])
-def test_installed_writer_to_13_runtime_and_mcp_copy(tmp_path, monkeypatch, old_version, python_variable):
+def test_installed_writer_to_current_runtime_and_mcp_copy(tmp_path, monkeypatch, old_version, python_variable):
     configured_python = os.environ.get(python_variable)
     if os.environ.get('CONTEXTOPUS_OLD_VERSION', '1.1.0') == old_version:
         configured_python = os.environ.get('CONTEXTOPUS_OLD_PYTHON') or configured_python
@@ -210,7 +211,7 @@ def test_installed_writer_to_13_runtime_and_mcp_copy(tmp_path, monkeypatch, old_
     old_python = Path(configured_python)
     if not old_python.is_file():
         pytest.skip(f'Set {python_variable} to an installed Contextopus {old_version} Python')
-    source, migrated = tmp_path / ('source-' + old_version), tmp_path / 'migrated-13'
+    source, migrated = tmp_path / ('source-' + old_version), tmp_path / 'migrated-current'
     writer, manifest_path = tmp_path / 'old_writer.py', tmp_path / 'writer_manifest.json'
     writer.write_text(OLD_WRITER)
     completed = subprocess.run([str(old_python), '-I', str(writer), str(source), str(manifest_path), old_version],
@@ -239,17 +240,22 @@ def test_installed_writer_to_13_runtime_and_mcp_copy(tmp_path, monkeypatch, old_
     def invoke(tool, operation, arguments=None, **kwargs):
         return asyncio.run(call(tool, operation, arguments, **kwargs))
     migrations = {}
+    temporary_paths = {}
     try:
-        assert {tool.name for tool in asyncio.run(mcp.list_tools())} == {'guide', 'read', 'write'}
+        assert {tool.name for tool in asyncio.run(mcp.list_tools())} == {'guide', 'read', 'write', 'finish'}
         guide = result_value(asyncio.run(mcp.call_tool('guide', {'procedure': 'upgrade', 'context': 'alpha'})))
         assert guide
         for name in ('alpha', 'beta'):
             plan = invoke('read', 'workspace.upgrade_plan', context=name)
-            assert plan['ready'] and plan['from_version'] == 3 and plan['to_version'] == 4, plan
+            assert plan['ready'] and plan['from_version'] == 3 and plan['to_version'] == FORMAT_VERSION, plan
             applied = invoke('write', 'workspace.upgrade_apply', {
                 'expected_revision': plan['revision'], 'user_request': f'Upgrade only this isolated {old_version} fixture copy'}, context=name)
-            assert applied['status'] == 'complete', applied
+            assert applied['status'] == 'complete' and applied['format_version'] == FORMAT_VERSION, applied
             migrations[name] = {'revision': plan['revision'], 'result': applied}
+            workspace_prefix = Path('modules/workspace/workspace_contexts') / name
+            for before, transformed in plan['temporary_transforms'].items():
+                temporary_paths[(workspace_prefix / before).as_posix()] = (
+                    workspace_prefix / transformed['path']).as_posix()
             policies = invoke('read', 'workspace.settings_read', {'fields': list(old['settings'])}, context=name)
             assert policies['values'] == old['settings']
             rules = invoke('read', 'workspace.instructions_read', context=name)
@@ -301,17 +307,44 @@ def test_installed_writer_to_13_runtime_and_mcp_copy(tmp_path, monkeypatch, old_
                 'catalog_state': catalog_state['catalog_state'], 'catalog_next_action': catalog_state['next_action'],
                 'catalog_rows_preserved': len(rows), 'selected_algorithm': 'nearest_n'}
             catalog_index.table = catalog_index.db = None
+        pending_after_migration = {}
         for relative, data in old['pending_bytes'].items():
-            assert (migrated / relative).read_bytes() == base64.b64decode(data)
+            original = base64.b64decode(data)
+            destination = temporary_paths[relative]
+            assert '/.tmp/' in destination and not (migrated / relative).exists()
+            actual = (migrated / destination).read_bytes()
+            legacy_relative = Path(relative).relative_to('modules/workspace/workspace_contexts/alpha')
+            assert (Path(migrations['alpha']['result']['backup']) / legacy_relative).read_bytes() == original
+            if Path(relative).parent.name == 'proposals':
+                # Only location changes for immutable proposal/review evidence.
+                assert actual == original
+            else:
+                # Format 5 adds readable YAML identity without changing the
+                # authored temporary body, including its original CRLF bytes.
+                metadata, body = _parse(actual.decode('utf-8'))
+                assert metadata == {'id': old['temporary']['id'], 'type': 'knowledge', 'links': []}
+                assert body.encode('utf-8') == original
+                assert Path(destination).name != old['temporary']['id']
+            pending_after_migration[destination] = actual
         for ident, before in old['records'].items():
             read = invoke('read', 'workspace.read', {'material_id': ident})
-            for key in ('id', 'type', 'content', 'links', 'description', 'revision'):
+            for key in ('id', 'type', 'content', 'links', 'description'):
                 assert read.get(key) == before.get(key), (key, before, read)
             if before.get('status'):
                 assert read['status'] == before['status']
             assert read.get('sources') == before.get('sources')
             physical = migrated / 'modules/workspace/workspace_contexts' / read['workspace'] / read['path']
             metadata, _ = _parse(physical.read_bytes().decode())
+            original_physical = source / 'modules/workspace/workspace_contexts' / before['workspace'] / before['path']
+            original_metadata, original_body = _parse(original_physical.read_bytes().decode('utf-8'))
+            # Authoring revisions include metadata. Format 5 deliberately adds
+            # the owner tag; decoded links and all authored data stay unchanged.
+            expected_metadata = {**original_metadata, 'tags': ['context/' + read['workspace']]}
+            assert {**metadata, 'links': read['links']} == expected_metadata
+            assert before['content'] == original_body
+            expected_revision = hashlib.sha256((json.dumps(expected_metadata, sort_keys=True,
+                ensure_ascii=False) + '\n' + original_body).encode('utf-8')).hexdigest()
+            assert read['revision'] == expected_revision
             for link in metadata.get('links', []):
                 assert link.startswith('[[') and (migrated / link[2:-2].split('|', 1)[0]).is_file()
         search = invoke('read', 'workspace.search', {'query': 'retention ownership', 'all_categories': True,
@@ -325,9 +358,12 @@ def test_installed_writer_to_13_runtime_and_mcp_copy(tmp_path, monkeypatch, old_
         reviewed = invoke('read', 'workspace.proposal_read', pending_args)
         assert reviewed['revision'] == old['pending']['revision'] and reviewed['approval_required']
         temporary = invoke('read', 'workspace.tmp_read', {'cycle_id': old['pending_cycle'], 'material_id': old['temporary']['id']})
-        assert temporary['revision'] == old['temporary']['revision']
-        assert temporary['content'].encode() == base64.b64decode(old['pending_bytes'][
-            next(path for path in old['pending_bytes'] if path.endswith(old['temporary']['id']))])
+        old_temporary_path = next(path for path in old['pending_bytes'] if Path(path).parent.name == 'materials')
+        current_temporary = pending_after_migration[temporary_paths[old_temporary_path]]
+        assert temporary['id'] == old['temporary']['id'] and temporary['temporary'] is True
+        assert temporary['revision'] == hashlib.sha256(current_temporary).hexdigest()
+        assert temporary['revision'] != old['temporary']['revision']
+        assert temporary['content'].encode('utf-8') == base64.b64decode(old['pending_bytes'][old_temporary_path])
         apply_args = {**pending_args, 'expected_revision': old['pending']['revision']}
         permanent = migrated / 'modules/workspace/workspace_contexts/alpha/knowledge'
         before_denied = tree_hashes(permanent)
@@ -341,9 +377,9 @@ def test_installed_writer_to_13_runtime_and_mcp_copy(tmp_path, monkeypatch, old_
         assert task['status'] == 'completed' and 'consumer ownership are verified' in task['content']
         created = invoke('read', 'workspace.read', {'material_id': old['pending']['created_ids']['new']})
         assert created['links'] == [old['ids']['guide'], old['ids']['task']]
-        # Immutable authoring evidence and tmp survive both migration and apply.
-        for relative, data in old['pending_bytes'].items():
-            assert (migrated / relative).read_bytes() == base64.b64decode(data)
+        # Original proposal evidence and migrated temporary cards survive apply.
+        for relative, content in pending_after_migration.items():
+            assert (migrated / relative).read_bytes() == content
         for name, commits in old['git_commits'].items():
             workspace = migrated / 'modules/workspace/workspace_contexts' / name
             after = subprocess.check_output(['git', '-C', str(workspace), 'rev-list', '--all'], text=True).splitlines()
@@ -355,9 +391,13 @@ def test_installed_writer_to_13_runtime_and_mcp_copy(tmp_path, monkeypatch, old_
             'new_reader_module': str(Path(__import__('contextopus.modules.workspace.cycles', fromlist=['x']).__file__).resolve()),
             'source_version': tomllib.loads((Path(__file__).parents[1] / 'pyproject.toml').read_text())['project']['version'],
             'source_root_unchanged': True, 'migrations': migrations, 'graph': {ident: data['links'] for ident, data in old['records'].items()},
-            'pending_revision_preserved': old['pending']['revision'], 'pending_bytes_preserved': list(old['pending_bytes']),
+            'pending_revision_preserved': old['pending']['revision'],
+            'pending_bytes_preserved_in_backup': list(old['pending_bytes']),
+            'proposal_bytes_preserved': [path for path in old['pending_bytes'] if Path(path).parent.name == 'proposals'],
+            'temporary_body_bytes_preserved': True,
+            'temporary_paths': temporary_paths, 'temporary_revision': temporary['revision'],
             'settings_preserved': old['settings'], 'old_git_commits_preserved': old['git_commits'],
-            'old_analytics_event_preserved': old['old_event'], 'mcp_tools': ['guide', 'read', 'write'],
+            'old_analytics_event_preserved': old['old_event'], 'mcp_tools': ['guide', 'read', 'write', 'finish'],
             'pending_apply': applied_pending['status'], 'network_embedding_calls': 0}
         evidence['search_metadata_preserved'] = preserved_search
         (tmp_path / 'upgrade-evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2))

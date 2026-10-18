@@ -1,8 +1,68 @@
-# Native client integrations
+# Connect clients to Contextopus
 
 Contextopus runs one loopback MCP owner at `http://127.0.0.1:8765/mcp`. Install its native user service with `contextopus service install`; use `service start|stop|restart|status` afterwards. Native skills contain routing only; procedures come from `guide(procedure=...)` on the installed service.
 
-Preview `contextopus integrate <client> --project <directory>`, then add `--apply` to merge. Supported project configurations:
+## Install the runtime and shared service
+
+Install the verified Contextopus wheel with uv using the [quick start](../README.md#quick-start).
+Client ZIPs carry skills and installation instructions; they do not install the
+Python runtime or a private database for that client. Use the same persistent
+root for CLI, TUI and coding clients:
+
+```console
+contextopus root --set /absolute/path/to/contextopus-data
+contextopus init
+contextopus service status
+```
+
+The root binding creates no Workspace. `--root <directory>` before a subcommand
+or `CONTEXTOPUS_ROOT` overrides it. `init` installs the native service; explicit
+service control is also available:
+
+```console
+contextopus service install
+contextopus service start
+contextopus service status
+```
+
+Finish model setup when initialization reports `model_setup_required`. Keep the
+existing root and extras when upgrading an installation.
+
+## Five native adapters
+
+For a user installation, replace `codex` below with `claude-code`, `opencode`,
+`crush` or `hermes`:
+
+```console
+contextopus integrate codex --user
+contextopus integrate codex --user --apply
+```
+
+`--user` selects native user configuration. The adapter previews affected paths
+without printing existing configuration contents; `--apply` performs the reviewed
+merge. These are the paths written by Contextopus:
+
+| Client | User config | User skills |
+|---|---|---|
+| Codex | `~/.codex/config.toml` | `~/.agents/skills` |
+| Claude Code | `~/.claude.json` | `~/.claude/skills` |
+| OpenCode | `<config-base>/opencode/opencode.json` | `<config-base>/opencode/skills` |
+| Crush | `<config-base>/crush/crush.json` | `<config-base>/crush/skills` |
+| Hermes | `<hermes-home>/config.yaml` | `<hermes-home>/skills` |
+
+`<config-base>` is `$XDG_CONFIG_HOME` or `~/.config` on Linux/macOS, and
+`%LOCALAPPDATA%` (fallback `~/AppData/Local`) on Windows. Hermes uses a nonblank
+`HERMES_HOME`, otherwise `~/.hermes` on Linux/macOS or `%LOCALAPPDATA%/hermes`
+on Windows; its [guide](integrations/hermes.md) covers the fallback, suffix and
+explicit profile selection. An existing compatible OpenCode `.jsonc` is used
+in place of `.json`.
+
+Codex, Claude Code, OpenCode and Crush also support project scope:
+
+```console
+contextopus integrate codex --project /absolute/path/to/project
+contextopus integrate codex --project /absolute/path/to/project --apply
+```
 
 | Client | Config | Skills | MCP form |
 |---|---|---|---|
@@ -11,21 +71,75 @@ Preview `contextopus integrate <client> --project <directory>`, then add `--appl
 | OpenCode | `opencode.json` | `.opencode/skills` | `mcp.contextopus`, remote |
 | Crush | `crush.json` | `.agents/skills` | `mcp.contextopus`, HTTP |
 
-Hermes uses a native user or profile home rather than project configuration:
-`contextopus integrate hermes --user [--hermes-home <directory>]` previews
-`config.yaml` and `skills/` under `$HERMES_HOME` (default `~/.hermes`). Add
-`--apply` after reviewing the paths. Its `mcp_servers.contextopus.url` connects to
-the same HTTP owner; its seven native skills are invoked as `/w`, `/w-search`,
-`/w-create`, `/w-settings`, `/w-context`, `/w-analyze` and `/m`.
-See the [Hermes installation and verification guide](integrations/hermes.md)
-for release/source checks, profile placement and recovery.
+Hermes requires user scope. For an explicitly selected profile home:
+
+```console
+contextopus integrate hermes --user --hermes-home /absolute/path/to/hermes/profiles/work
+contextopus integrate hermes --user --hermes-home /absolute/path/to/hermes/profiles/work --apply
+```
+
+Launch the matching Hermes profile; a remembered active profile can differ from
+the default home. See the [Hermes guide](integrations/hermes.md) before installing
+Hermes itself or choosing a native home.
 
 Existing unrelated values survive. A differing `contextopus` server or short skill name stops integration. OpenCode files with genuine JSONC comments/trailing commas require native editing rather than destructive rewriting; JSON-compatible `.jsonc` files merge in place. Preview output lists affected paths and never prints existing configuration contents. Clients may require project trust and MCP approval; restart/reload and verify tools from the actual client before declaring a connection ready.
+
+### Invoke the installed skills
+
+The seven canonical names are `w`, `w-search`, `w-create`, `w-settings`,
+`w-context`, `w-analyze` and `m`. Use the client's native mechanism:
+
+| Client | Example |
+|---|---|
+| Codex | `$w-search In release-tools, find and read the retry-policy decision.` |
+| Claude Code | `/w-search In release-tools, find and read the retry-policy decision.` |
+| OpenCode 1.18.32 | `opencode run --command w-search "In release-tools, find and read the retry-policy decision."` |
+| Crush | Ask `Use the w-search skill in release-tools to find and read the retry-policy decision.`; verify its native skill loader was used. |
+| Hermes 0.22.2 | `/w-search In release-tools, find and read the retry-policy decision.` |
+
+OpenCode 1.18.32 promotes discovered skills into native commands, including
+`/w-search` in the TUI; Contextopus writes skill files, not generated
+`.opencode/commands` files. Its [versioned command implementation](https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/command/index.ts)
+and the [current skills documentation](https://opencode.ai/docs/skills/) describe
+different version contracts. Check discovery in the client version you use.
+Crush's command palette requires user-invocable metadata that the canonical
+Contextopus routing skills do not add. A request to load the native skill is
+distinct from pasting `$w` as ordinary text.
+
+For a write task, choose `w`; for a lookup without a work cycle, choose
+`w-search`. [Usage scenarios](usage.md) show the resulting workflow. A discovered
+skill and an HTTP connection do not prove that a model followed its procedure.
+
+## Manual connection from another MCP client
+
+An MCP client outside these five adapters can be configured manually if it
+supports **Streamable HTTP**. Use the client's own configuration format with:
+
+| Setting | Value |
+|---|---|
+| Server name | `contextopus` |
+| Transport | Streamable HTTP |
+| URL | `http://127.0.0.1:8765/mcp` |
+| Advertised tools | `guide`, `read`, `write`, `finish` |
+
+Start the installed service first. In the client, permit the intended tools,
+obtain `guide(procedure="workspace")`, then make an actual
+`read(operation="core.status")` call and inspect the returned root. Use explicit
+`work_root` and context coordinates when selecting data; context discovery never
+creates a Workspace. Clients may prefix tool names with the server name.
+
+Native skills, trust controls, dialogs and reconnection differ between hosts.
+Manual MCP configuration supplies the transport; it does not create a tested
+native adapter, a skill menu or a guarantee of model compliance. Only loopback
+access is configured here; remote network exposure is a separate deployment.
+
+## References and compatibility
 
 Primary references checked during implementation:
 
 - [Codex MCP](https://developers.openai.com/codex/mcp/), [Agent Skills](https://developers.openai.com/codex/skills/) and [plugin packaging](https://developers.openai.com/plugins/build/plugins).
-- [Claude Code MCP and project configuration](https://code.claude.com/docs/en/mcp).
+- [Claude Code MCP and project configuration](https://code.claude.com/docs/en/mcp)
+  and [native skills](https://code.claude.com/docs/en/skills).
 - [OpenCode local and remote MCP](https://opencode.ai/docs/mcp-servers/) and [skills](https://opencode.ai/docs/skills/).
 - [Crush MCP and skill configuration](https://github.com/charmbracelet/crush/blob/main/README.md).
 - [Hermes stable source](https://github.com/NousResearch/hermes-agent/tree/v0.22.2)
@@ -63,6 +177,7 @@ The complete repeatable installation/data/skills sequence is fetched with `guide
 | OpenCode 1.18.32 | `contextopus reconnect opencode --client-url URL --directory PROJECT` | Inspects the running client's `/doc`, then disconnects/connects Contextopus in that project. HTTP status is not a model tool-call check. Basic auth uses existing `OPENCODE_SERVER_USERNAME/PASSWORD` environment variables. |
 | Claude Code 2.1.126 | Existing session's `/mcp` menu, Contextopus, Reconnect | Native user action; this release does not remotely control an existing Claude conversation. |
 | Crush 0.87.0 | Native renewal on use of a previously established connection | Initial connection failure has no verified external retry adapter here. Resume the saved session after restarting its workspace if needed. |
+| Hermes 0.22.2 | Existing session's `/reload-mcp`, or restart the matching profile | Native source supports an approval prompt and reload of all configured MCP servers. Connection/re-registration is verified; the interactive dialog and in-flight model recovery are not covered by that check. |
 
 Codex's action affects more than Contextopus; TUI labels its loaded-thread scope. Its existing daemon's proxy carries WebSocket frames, handled with wsproto; JSON-lines stdio is a different transport. A queued action is reported separately from successful discovery and a real call. If the native aggregate status call times out, the result remains unverified; a read call in the existing session can establish recovery. A new native process cannot prove an old session recovered. OpenCode requires the URL of the **existing** client server; the adapter never launches a substitute.
 

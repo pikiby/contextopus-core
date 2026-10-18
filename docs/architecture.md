@@ -8,6 +8,7 @@ flowchart LR
     ClaudeCode --> Service
     OpenCode --> Service
     Crush --> Service
+    Hermes --> Service
     Service[Local MCP HTTP owner] --> Application
     Application --> Core[Core: storage, RAG, settings, resources]
     Application --> Registry[Typed operation registry]

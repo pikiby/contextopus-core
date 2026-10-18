@@ -217,8 +217,12 @@ def test_duplicate_yaml_ids_and_paths_are_rejected(tmp_path):
         a.close(); b.close()
 
 
-def test_legacy_partial_proposal_resumes_after_migration(tmp_path):
+@pytest.mark.parametrize("cleanup_required", [False, True])
+def test_legacy_partial_proposal_resumes_after_migration(tmp_path, monkeypatch, cleanup_required):
+    from contextopus.core.settings import WORKSPACE_CREATION_DEFAULTS
     from test_workspace_v3 import legacy_with_work
+
+    monkeypatch.setitem(WORKSPACE_CREATION_DEFAULTS, "cleanup_approval_required", cleanup_required)
     runtime, cycle, proposal, _, _ = legacy_with_work(tmp_path)
     entry = runtime._records()["cycles"][cycle]["proposals"][proposal["proposal_id"]]
     raw = runtime._load_plan(cycle, proposal["proposal_id"], entry)
@@ -233,8 +237,12 @@ def test_legacy_partial_proposal_resumes_after_migration(tmp_path):
     assert runtime.upgrade_apply(plan["revision"], automatic=True)["status"] == "complete"
     assert runtime.proposal_apply(cycle, proposal["proposal_id"], proposal["revision"], "Retry approved write")["status"] == "applied"
     assert runtime.read(material_id=ident)["path"] == "knowledge/Contract-setup.md"
+    assert runtime._policies()["cleanup_approval_required"] is cleanup_required
     cleanup = runtime.finish(cycle)
-    assert cleanup["status"] == "blocked" and cleanup["tmp_preserved"]
-    assert runtime.finish(cycle, confirmation="Approve removal of the reviewed temporary files",
-                          expected_revision=cleanup["cleanup_revision"])["status"] == "closed"
+    if cleanup_required:
+        assert cleanup["status"] == "blocked" and cleanup["tmp_preserved"]
+        assert runtime.finish(cycle, confirmation="Approve removal of the reviewed temporary files",
+                              expected_revision=cleanup["cleanup_revision"])["status"] == "closed"
+    else:
+        assert cleanup["status"] == "closed" and cleanup["tmp_cleared"]
     runtime.close()

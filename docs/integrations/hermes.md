@@ -31,7 +31,7 @@ Primary source references:
 ## Install and select the native home
 
 Install Contextopus from the verified wheel using the normal
-[installation and upgrade sequence](../../README.md#install). Preserve an
+[installation and upgrade sequence](../../README.md#quick-start). Preserve an
 existing data root and selected inference extras. Install Hermes separately
 from its reviewed official stable source. Its installer prepares a managed
 runtime and dependencies; installing the checkout with an ordinary editable

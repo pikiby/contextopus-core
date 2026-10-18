@@ -4,6 +4,8 @@ A module contributes a domain adapter and registered operations to Core. The aut
 
 Discovery reads the manifest without importing handlers, preparing dependencies, applying migrations, loading models or starting jobs. Disabled modules remain passive. `core.modules` reports compatibility, lifecycle and storage errors. A failed or incompatible module must not be treated as enabled. Retry installation through Core after resolving its cause. Low-level prepare/enable operations remain available for diagnosis; enable does not apply migrations.
 
+Example: first inspect `core.modules` for a supplied catalog module. Once installation is authorized, install it through `core.module_install`, inspect its declared procedure/signature, then verify its own status and a bounded query through the shared registry. A visible folder or successful dependency preparation alone does not establish operational readiness.
+
 ## Package contract
 
 A minimal dependency-free release is:
@@ -76,3 +78,5 @@ Domain tables and RAG are separate services. Use the common Core index and suppo
 Mutable user files belong in `data/` and `config/`. An authorized `core.module_update(module=<id>, source=<unpacked release>)` stages the new package and prepares its dependencies and schema before activation. Previously disabled modules stay disabled. Preserve user files and retained releases; incompatible code must not resume against a changed schema. Disabling removes operations and keeps data.
 
 Test installation through an actual Application in an isolated root, exercise relevant query/write operations, then rebuild the Application to verify persisted state and existing rows. Test schema failure and retry, incompatible versions, and passive discovery. Fetch unknown signatures through `guide(operation=...)` rather than inventing API calls. This guide and its template describe module authoring; they do not authorize unrelated installation or publication.
+
+Implementation references: `src/contextopus/core/module_management/`, `src/contextopus/core/module_storage/`, `src/contextopus/core/module_management/child.py`. Detailed procedure: `modules`; runnable repository example: `examples/modules/catalog-demo`.

@@ -29,6 +29,48 @@ def install(service):
     return result
 
 
+def test_packaged_scenario_upgrade_keeps_existing_ids_and_resolves_navigation(tmp_path):
+    """Exercise the real bundle graph, including links to newly shipped topics."""
+    (tmp_path / 'modules/workspace/workspace_contexts').mkdir(parents=True)
+    bundle = packaged_bundle()
+    original_keys = {'installed-version', 'workspace-guide', 'module-guide', 'algorithm-guide',
+                     'module-template', 'algorithm-template', 'rules-template'}
+    previous = copy.deepcopy(bundle)
+    previous['documents'] = [item for item in previous['documents'] if item['key'] in original_keys]
+    assert {item['key'] for item in previous['documents']} == original_keys
+    for item in previous['documents']:
+        item['links'] = [key for key in item.get('links', []) if key in original_keys]
+        if item['key'] == 'workspace-guide':
+            item['content'] = '# Earlier Workspace guide\n\nPreviously shipped documentation.\n'
+    factory = Factory()
+    service = BaseContext(tmp_path, runtime_factory=lambda root, context:
+        CycleRuntime(root, context, provider_factory=factory), bundle=previous)
+    install(service)
+    before = copy.deepcopy(service._read()['managed']['documents'])
+
+    # Resource changes are reviewable even within the same unreleased version.
+    service.bundle = bundle
+    preview = service.plan()
+    assert not preview['create'] and preview['status'] == 'ready' and not preview['conflicts']
+    assert {'contextopus-guide', 'retrieval-guide', 'evidence-guide', 'integrations-guide'} <= {
+        item['key'] for item in preview['changes']}
+    assert service.install(preview['plan_revision'])['status'] == 'installed'
+    managed = service._read()['managed']
+    assert all(managed['documents'][key]['id'] == entry['id'] for key, entry in before.items())
+    runtime = service.runtime_factory(service.layout.root, managed['context'])
+    try:
+        project_id = runtime.project_read()['id']
+        for item in bundle['documents']:
+            record = runtime.read(material_id=managed['documents'][item['key']]['id'])
+            assert record['content'] == item['content'] and record['description'] == item['description']
+            assert record['index_status'] == 'indexed'
+            expected = {managed['documents'][key]['id'] for key in item.get('links', [])}
+            assert expected | {project_id} <= set(record['links'])
+    finally:
+        runtime.close()
+    assert service.plan()['status'] == 'current'
+
+
 def settings(service, changes):
     runtime = service.runtime_factory(service.layout.root, service.status()['managed_context'])
     try:

@@ -4,89 +4,181 @@
 
 # Contextopus
 
-Persistent context for people and coding agents. Keep project knowledge, working instructions and unfinished work outside a chat, then use the same context from a terminal or your coding assistant.
+Persistent project memory for people and coding agents. Keep decisions, goals,
+tasks, source references and working rules outside a chat, then find and update
+them from your terminal or coding assistant.
 
-Contextopus is a standalone Python application with a shared Core, a Workspace module, a terminal interface and an MCP service. Coding-client integrations connect to that service and expose short skills.
-
-**This checkout prepares Contextopus 1.4.0:** optional working memory in `.tmp`, reusable assignments and evidence, dependency-aware cleanup through a dedicated `finish` tool, context tags and portable name uniqueness. Existing knowledge, custom rules and pending proposals are preserved by format migration. [Changes and upgrade instructions](docs/releases/1.4.0.md).
+A Workspace gives a project its own instructions and linked Markdown records.
+Contextopus searches those records, explains result selection, prepares reviewable
+changes and keeps history. The terminal interface and coding clients use one
+shared Core and local MCP service, so they work with the same data.
 
 ![Contextopus terminal example](docs/media/tui/main-wide.png)
 
-Actual Textual render with clearly marked synthetic example data. [Keyboard settings demo](docs/media/tui/settings-demo.gif) · [Narrow terminal](docs/media/tui/main-narrow.png) · [Capture method and limits](docs/media/tui/README.md).
+**EXAMPLE:** actual Textual render with synthetic data.
+[Keyboard settings demo](docs/media/tui/settings-demo.gif) ·
+[Narrow terminal](docs/media/tui/main-narrow.png) ·
+[Capture method and limits](docs/media/tui/README.md).
 
-![Search selection in Contextopus 1.2.0](docs/media/tui/selection-1.2-wide.png)
+**1.4.0** adds optional shared working memory in `.tmp`, dependency-aware cleanup,
+context tags, portable context names and native Hermes support alongside Codex,
+Claude Code, OpenCode and Crush. [Changes from 1.3.3 and upgrade guide](docs/releases/1.4.0.md).
 
-The existing 1.2 search-selection capture shows inherited values, a pending algorithm choice and revision preview. [Modules screen](docs/media/tui/modules-1.2-wide.png). Both captures render the actual TUI with explicitly synthetic fixtures; they do not show a live installation.
+## Quick start
 
-## Use it
-
-| Scenario | Entry |
-|---|---|
-| Continue project work with persistent knowledge | `w` skill |
-| Find prior decisions without modifying memory | `w-search` skill |
-| Analyze actual agent operations and historical instructions | `w-analyze` skill |
-| Review a requested instructions change | `w-settings` skill |
-| Create an explicitly requested Workspace | `w-create` skill |
-| Find a context by name, path or meaning | `w-context` skill |
-| Install or update a module placed in `modules/` | `m` skill |
-| Inspect status/settings/modules | `contextopus status`, `settings`, `modules` |
-| Work from a terminal interface | `contextopus tui` |
-
-Full procedures are served by the installed runtime when needed. Workspace selection stays explicit, source-reading rules persist, and permanent changes follow the selected Workspace's review and approval policy.
-
-Module authors follow the [module guide](docs/modules.md) and ship their code,
-dependencies and database migrations together. Put the package in the root's
-`modules/` directory and ask `$m` to install it. Core prepares its dependencies,
-creates or upgrades its tables and enables its operations. The same installation
-is available through CLI and the TUI Modules page.
-
-## Install
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), obtain the exact verified 1.4.0 wheel and SHA256SUMS from the authorized local build or a published [release](https://github.com/pikiby/contextopus-core/releases). This source tree does not establish that 1.4.0 has been published. Verify its checksum before installation. From the download directory:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and obtain the
+matching wheel and `SHA256SUMS` from the project's
+[release assets](https://github.com/pikiby/contextopus-core/releases). Verify the
+wheel's SHA-256 before installation. The commands below use the local embedding
+extra; choose an actual persistent data directory instead of the example path.
 
 ```console
-uv tool install --python 3.12 ./contextopus_core-1.4.0-py3-none-any.whl
+uv tool install --python 3.12 "./contextopus_core-1.4.0-py3-none-any.whl[local]"
 contextopus --version
+contextopus root --set /absolute/path/to/contextopus-data
 contextopus init
+contextopus setupmodel
+contextopus setupmodel --apply
 contextopus tui
 ```
 
-For local embedding inference, install the same verified wheel with its `local` extra: `uv tool install --python 3.12 "./contextopus_core-1.4.0-py3-none-any.whl[local]"`. Models download only when an explicitly requested operation needs inference; status and setup previews do not load a model. Explicit init/model setup prepares bundled documentation and the algorithm catalog after a profile is configured. A first init without a model reports `model_setup_required`; use `contextopus setupmodel` to review the model plan, then `contextopus setupmodel --apply` when ready. Python and application dependencies are managed by uv.
+`init` installs the user service and prepares Core. A first initialization without
+an embedding profile reports `model_setup_required`; `setupmodel` previews the
+profile and device, and `--apply` performs the reviewed setup and index rebuild.
+Local weights download only when an explicit setup or inference action needs
+them. The base wheel without `[local]` also supports an explicitly configured API
+embedding profile. [Model setup](docs/architecture.md#explicit-embedding-setup).
 
-Use `--root <directory>` before a subcommand or `CONTEXTOPUS_ROOT` to select persistent storage. The default is the platform's user-data directory, outside plugin caches. Keep the same root across clients.
+You can ask an agent to do the installation using the same documented steps:
 
-For an existing installation, follow the [migration and recovery sequence](docs/releases/1.4.0.md#upgrade) before replacing anything: coherent whole-set backup, isolated migration/retry/restore test, preserved root/extras/pending work, reviewed managed-client update and actual fresh-client verification. An intermediate 1.2 installation is unnecessary. Do not initialize an empty replacement root or launch old code against incompatible converted data.
+> Install Contextopus from this verified 1.4.0 wheel with local embeddings. Use
+> `/absolute/path/to/contextopus-data` as the persistent root, connect Codex at
+> user scope, show configuration changes, then verify a real context read.
 
+Keep one data root across clients. `--root <directory>` before a subcommand or
+`CONTEXTOPUS_ROOT` overrides the persistent root binding. An existing installation
+needs the [upgrade and recovery sequence](docs/releases/1.4.0.md#upgrade), preserving
+its root, inference extras, custom rules and unfinished work.
+
+## Connect your coding assistant
+
+Native adapters install short skills and an HTTP MCP entry. Preview the paths,
+then apply the reviewed configuration:
 
 ```console
-contextopus integrate codex --project <project-directory>
-contextopus integrate codex --project <project-directory> --apply
+contextopus integrate codex --user
+contextopus integrate codex --user --apply
+contextopus service status
 ```
 
-Other client names: `claude-code`, `opencode`, `crush`. Integration refuses name collisions and preserves unrelated configuration. Start the service once; clients connect over loopback HTTP. Verify the actual client's MCP connection after reload.
+Other adapter names are `claude-code`, `opencode`, `crush` and `hermes`.
+Codex, Claude Code, OpenCode and Crush also support `--project <directory>`.
+Hermes uses its native user or profile
+home: `contextopus integrate hermes --user --hermes-home <directory>`.
+Use `contextopus service start` if the shared owner is stopped, then reload your
+client and verify a real Contextopus read.
 
-Hermes uses `contextopus integrate hermes --user`, then the same command with
-`--apply` after review. It installs native `/w` and the other six canonical skills
-in the selected Hermes home and connects to the same MCP service. See the
-[Hermes setup and verification guide](docs/integrations/hermes.md).
+| Client | Native entry for a read-only request |
+|---|---|
+| Codex | `$w-search In release-tools, find the retry-policy decision and read its linked evidence.` |
+| Claude Code | `/w-search In release-tools, find the retry-policy decision and read its linked evidence.` |
+| OpenCode 1.18.32 | `opencode run --command w-search "In release-tools, find the retry-policy decision and read its linked evidence."` |
+| Crush | Ask: `Use the w-search skill in release-tools to find the retry-policy decision and read its linked evidence.` |
+| Hermes | `/w-search In release-tools, find the retry-policy decision and read its linked evidence.` |
 
-## Structure and readiness
+Skill activation differs between clients and versions. Other MCP clients can
+connect manually when they support Streamable HTTP and the required permissions;
+they do not receive a native Contextopus adapter automatically.
+[Connection paths, invocation details and recovery](docs/integrations.md) ·
+[Hermes homes and profiles](docs/integrations/hermes.md).
 
-[Architecture](docs/architecture.md) describes Core, Workspace, MCP, CLI/TUI and module boundaries. Workspace format 5 keeps typed records, machine policies in Core configuration and Obsidian navigation and preserves older memory through recoverable migration. Session search is optional and depends on a separate indexer. GraphFrontier integration is planned; the skills registry remains an idea.
+## From question to saved result
 
-- [Canonical old-installation/context/skills upgrade procedure](src/contextopus/resources/procedures/upgrade.md)
-- [Native integration details and primary references](docs/integrations.md)
-- [Module installation and authoring](docs/modules.md)
+```mermaid
+flowchart LR
+    Question[Question or task] --> Find[Find context and read rules]
+    Find --> Search[Search linked records and sources]
+    Search --> Answer[Answer with evidence]
+    Search --> Work[Do authorized work]
+    Work --> Review[Show permanent changes]
+    Review --> Save[Apply under context policy]
+    Save --> Finish[Close completed temporary work]
+```
+
+| Need | Example request |
+|---|---|
+| Resume a project | `Use w in release-tools: continue the existing packaging task and save the verified result.` |
+| Track a goal and its tasks | `Use w: record the rollout goal, link its verification task and the deployment decision.` |
+| Keep facts tied to current sources | `Use w: update the API limit from the official reference and declare what must be rechecked.` |
+| Hand work to another agent | `Use w: retain the shared test inputs and findings for the next agent; keep unfinished work open.` |
+| Investigate an earlier run | `Use w-analyze: inspect yesterday's release-tools search failures using the rules in force then.` |
+| Review project rules | `Use w-settings in release-tools: show the proposed instructions change before applying it.` |
+
+Use `w-create` to explicitly create a Workspace and agree its rules/settings;
+`w-context` finds an existing context by name, path or meaning. Prefix skill names
+as your client requires. [Walk through these scenarios](docs/usage.md).
+
+Records have stable YAML IDs, descriptive filenames, types such as `project`,
+`goal`, `task` or `decision`, optional status, descriptions and Obsidian-compatible
+links. Required source references
+tell the agent what to obtain freshly before relying on a dependent fact.
+Permanent changes follow the selected context's review and approval policy.
+Optional `.tmp` cards hold reusable assignments, inputs and intermediate findings;
+direct answers and small knowledge corrections need no temporary report.
+
+Search inherits the context's algorithm and limits. Diagnostics distinguish
+relevance boundaries, result/candidate caps and unindexed material. Git can keep
+permanent record and settings versions; SQLite journals retain operation and
+search evidence for bounded analysis. These records establish what ran and what
+was saved, with explicit limits on claims about model behavior.
+
+## One Core, several interfaces
+
+```mermaid
+flowchart TD
+    Clients[Codex / Claude Code / OpenCode / Crush / Hermes] --> MCP[Local HTTP MCP owner]
+    Terminal[CLI and TUI] --> MCP
+    MCP --> Core[Core: operations / storage / settings / search / evidence]
+    Core --> Workspace[Workspace: rules / linked records / optional temporary work]
+    Core --> Modules[Root-local modules: operations / schema / procedures / skills]
+```
+
+The TUI shows service state, storage metrics, search/model settings and modules.
+`contextopus status`, `contextopus settings` and `contextopus modules` expose the
+same shared operations from the command line. There is no separate TUI data store.
+
+![Search selection in Contextopus 1.2.0](docs/media/tui/selection-1.2-wide.png)
+
+**EXAMPLE:** existing 1.2 search-selection capture with synthetic data, inherited
+values, a pending algorithm choice and revision preview.
+[Modules screen](docs/media/tui/modules-1.2-wide.png).
+These captures render the actual TUI; they do not show a live installation.
+
+Put a trusted module package in `<root>/modules/<id>` and install it through `m`,
+`contextopus modules install <id>` or the TUI Modules page. Its manifest declares
+operations, dependencies and any SQLite schema migrations. Core prepares the
+package, applies declared migrations and enables the operations; user data and
+configuration remain separate from replaceable package code. Modules can also
+contribute procedures, skills and search algorithms.
+[Module installation and authoring](docs/modules.md).
+
+## Documentation and verification
+
+- [Usage and concrete scenarios](docs/usage.md)
+- [Native clients and manual MCP connections](docs/integrations.md)
+- [Architecture and data layout](docs/architecture.md)
 - [Search algorithms and settings](docs/search-selection.md)
 - [Search evidence and analysis](docs/search-analysis.md)
 - [Base documentation context](docs/base-context.md)
-- [Transition acceptance and evidence](docs/implementation/contextopus-transition.md)
-- [1.4.0 temporary memory and upgrade guide](docs/releases/1.4.0.md)
-- [1.3 implementation and delivery evidence](docs/implementation/contextopus-1.3.md)
-- [Previous 1.2.0 release notes](docs/releases/1.2.0.md)
-- [Previous changelog](CHANGELOG.md)
+- [1.4.0 changes and migration](docs/releases/1.4.0.md)
+- [1.4 implementation and local verification](docs/implementation/contextopus-1.4.md)
+- [Hermes acceptance evidence and limits](docs/implementation/hermes-integration.md)
+- [Changelog](CHANGELOG.md)
 
-The CI matrix tests, builds, verifies and installs the wheel on Linux, macOS and Windows with Python 3.12 and 3.13. Native service login and recovery checks are recorded separately; a passing Python test does not establish OS startup behavior.
+The CI matrix covers Python 3.12/3.13 on Linux, macOS and Windows. Native-client,
+OS startup and model-driven checks have their own versioned evidence; a passing
+package test does not establish universal client compatibility.
+The client ZIPs contain skills and instructions; the wheel installs the runtime.
 
 ## License
 
