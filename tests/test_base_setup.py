@@ -64,7 +64,7 @@ def test_init_keeps_user_docs_changes_and_returns_explicit_upgrade_plan(app):
     state = app.base_context._read()
     entry = state['managed']['documents']['workspace-guide']
     path = app.base_context._context_path(state['managed']['context']) / entry['path']
-    path.write_text(path.read_text() + '\nUser documentation note\n')
+    path.write_bytes(path.read_bytes() + b'\nUser documentation note\n')
     original = path.read_bytes()
     result = app.execute('core.init')
     assert result['status'] == 'initialized'
