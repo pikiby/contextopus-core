@@ -435,7 +435,7 @@ def test_model_lease_is_shared_across_requests_and_shutdown_does_not_wait_for_in
             worker.join(2)
 
 
-def test_background_prints_are_logs_and_start_timeout_leaves_module_disabled(tmp_path):
+def test_background_prints_are_logs_and_start_timeout_leaves_module_disabled(tmp_path, monkeypatch):
     code = ADAPTER.replace("while not self.stop.wait(.02):", "while not self.stop.wait(.02):\n                print('background log', flush=True)")
     release(tmp_path / 'modules/sample', code=code)
     with Application(tmp_path, discover=False) as app:
@@ -446,12 +446,30 @@ def test_background_prints_are_logs_and_start_timeout_leaves_module_disabled(tmp
     stalled = tmp_path / 'stalled'
     code = ADAPTER.replace("if (self.data / 'fail').exists():", "time.sleep(30)\n        if (self.data / 'fail').exists():")
     release(stalled / 'modules/sample', code=code, ready_timeout=.15, stop_timeout=.1)
+    from contextopus.core.module_management.services import ModuleService
+    original_start = ModuleService.start
+    started, waits = [], []
+
+    def checked_start(service):
+        original_wait = service._ready.wait
+        def checked_wait(timeout=None):
+            # Check the actual bounded wait rather than total install latency,
+            # which also includes durable writes and native process startup.
+            assert timeout == .15
+            waits.append(timeout)
+            return original_wait(timeout)
+        monkeypatch.setattr(service._ready, 'wait', checked_wait)
+        started.append(service)
+        return original_start(service)
+
+    monkeypatch.setattr(ModuleService, 'start', checked_start)
     with Application(stalled, discover=False) as app:
         app.resources.start_services()
-        before = time.monotonic()
         with pytest.raises(TimeoutError, match='readiness'):
             app.execute('core.module_install', {'module': 'sample'})
-        assert time.monotonic() - before < 2
+        assert waits == [.15] and len(started) == 1
+        assert started[0]._finished.is_set()
+        assert started[0].process.poll() is not None
         assert app.module_manager.state['sample']['enabled'] is False
         assert app.query('core.modules')[0]['state'] == 'error'
 

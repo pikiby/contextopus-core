@@ -31,15 +31,15 @@ CREATE TABLE "alpha::without_rowid" (key TEXT PRIMARY KEY, body BLOB) WITHOUT RO
 '''
 
 
-def shared(tmp_path):
+def shared(tmp_path, *, alpha_sql=ALPHA_SQL):
     root = tmp_path / "root"
     path = root / "core/storage/modules.sqlite3"
     path.parent.mkdir(parents=True)
     with sqlite3.connect(path) as conn:
-        conn.executescript(LEDGER_SQL + ";" + ALPHA_SQL)
+        conn.executescript(LEDGER_SQL + ";" + alpha_sql)
         conn.execute('CREATE TABLE "beta::items" (id INTEGER PRIMARY KEY, body TEXT)')
         conn.executemany('INSERT INTO "_contextopus_module_migrations" VALUES (?,1,?,?)',
-                         [("alpha", "001-schema.sql", hashlib.sha256(ALPHA_SQL.encode()).hexdigest()),
+                         [("alpha", "001-schema.sql", hashlib.sha256(alpha_sql.encode()).hexdigest()),
                           ("beta", "001-schema.sql", "beta-checksum")])
         conn.execute('INSERT INTO "alpha::parents" VALUES (80,\'deleted maximum\')')
         conn.execute('DELETE FROM "alpha::parents"')
@@ -202,11 +202,15 @@ def test_changed_partial_destination_refuses_recovery_without_overwrite(tmp_path
     assert legacy.legacy_pending(root)
 
 
-def test_apply_existing_current_schema_performs_layout_cutover(tmp_path):
-    root, source = shared(tmp_path)
+@pytest.mark.parametrize('line_ending', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_apply_existing_current_schema_performs_layout_cutover(tmp_path, line_ending):
+    sql = ALPHA_SQL.replace('\n', line_ending)
+    root, source = shared(tmp_path, alpha_sql=sql)
     package = tmp_path / "package"
     (package / "migrations").mkdir(parents=True)
-    (package / "migrations/001-schema.sql").write_text(ALPHA_SQL)
+    # Migration checksums bind exact bytes. Text-mode writes translate LF to
+    # CRLF on Windows, which would differ from the fixture's applied ledger.
+    (package / "migrations/001-schema.sql").write_bytes(sql.encode('utf-8'))
     contract = {"engine":"sqlite", "schema_version":1, "migrations":"migrations", "compatible_versions":{"min":1,"max":1}}
     storage = ModuleStorage(StorageLayout(root)).for_module("alpha")
     inspected = storage.inspect("alpha",contract,package)
@@ -220,6 +224,27 @@ def test_apply_existing_current_schema_performs_layout_cutover(tmp_path):
     assert result["applied_versions"] == []
     assert storage.query("alpha",'SELECT child FROM "alpha::joined"')["rows"] == [{"child":"HELLO"}]
     assert source.exists() and target(root,"alpha").exists() and target(root,"beta").exists()
+
+
+def test_inspection_rejects_changed_migration_line_endings_without_mutation(tmp_path):
+    root, source = shared(tmp_path)
+    package = tmp_path / 'package'
+    (package / 'migrations').mkdir(parents=True)
+    migration = package / 'migrations/001-schema.sql'
+    migration.write_bytes(ALPHA_SQL.replace('\n', '\r\n').encode('utf-8'))
+    contract = {'engine': 'sqlite', 'schema_version': 1, 'migrations': 'migrations',
+                'compatible_versions': {'min': 1, 'max': 1}}
+    storage = ModuleStorage(StorageLayout(root)).for_module('alpha')
+    original = source.read_bytes()
+    inspected = storage.inspect('alpha', contract, package)
+    assert inspected['status'] == 'error' and inspected['current_version'] is None
+    assert inspected['errors'] == ['Applied migration changed: 001-schema.sql']
+    assert source.read_bytes() == original
+    assert not target(root, 'alpha').exists()
+    # Restore the applied bytes; the read-only inspection can now expose v1.
+    migration.write_bytes(ALPHA_SQL.encode('utf-8'))
+    assert storage.inspect('alpha', contract, package)['current_version'] == 1
+    assert source.read_bytes() == original
 
 
 def test_empty_legacy_catalog_cannot_be_reused_by_old_runtime(tmp_path):

@@ -346,20 +346,28 @@ def save(args, core):
     assert app.app.module_storage.query('sample','SELECT * FROM "{{module}}::sessions"')['rows'] == []
 
 
-@pytest.mark.parametrize('startup_delay', [0, 1.25], ids=['immediate', 'delayed'])
-def test_child_descendants_terminated_after_final_result(tmp_path, startup_delay):
+@pytest.mark.parametrize('startup_delay,relay', [(0, False), (1.25, False), (0, True)],
+                         ids=['immediate', 'delayed', 'interpreter-behind-launcher'])
+def test_child_descendants_terminated_after_final_result(tmp_path, startup_delay, relay):
     path = tmp_path / 'modules/sample'
     manifest = release(path)
     (path / 'package/adapter.py').write_text('''import subprocess,sys,time
 from pathlib import Path
 def read(args, core):
-    child = subprocess.Popen([sys.executable,'-c',"import os,sys,time; from pathlib import Path; time.sleep(float(sys.argv[2])); Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(100)",args['pidfile'],str(args['startup_delay'])])
+    code = "import os,sys,time; from pathlib import Path; time.sleep(float(sys.argv[2])); ready = Path(sys.argv[1] + '.ready'); ready.write_text(str(os.getpid())); ready.replace(sys.argv[1]); time.sleep(100)"
+    command = [sys.executable, '-c', code, args['pidfile'], str(args['startup_delay'])]
+    if args['relay']:
+        command = [sys.executable, '-c', 'import subprocess,sys; sys.exit(subprocess.call(sys.argv[1:]))', *command]
+    child = subprocess.Popen(command)
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        # Read a completed PID acknowledgement rather than assuming cold
-        # Windows child startup takes less than one second.
+        # Windows venv launchers start a separate interpreter, so Popen.pid
+        # need not match os.getpid(). Atomic rename completes its acknowledgement.
         pidfile = Path(args['pidfile'])
-        if pidfile.exists() and pidfile.read_text() == str(child.pid): return {'ok':True}
+        if pidfile.exists():
+            pid = pidfile.read_text()
+            if pid.isdecimal() and int(pid) > 0:
+                return {'pid':int(pid), 'launcher_pid':child.pid}
         if child.poll() is not None: raise RuntimeError('descendant exited before acknowledging startup')
         time.sleep(.01)
     raise RuntimeError('descendant did not start')
@@ -369,11 +377,16 @@ def read(args, core):
     (path / 'module.json').write_text(json.dumps(manifest))
     app = manager(tmp_path)
     app.install('sample')
-    assert app.app.registry.dispatch('query','sample.read',{'pidfile':str(tmp_path/'pid'), 'startup_delay':startup_delay}) == {'ok':True}
+    result = app.app.registry.dispatch('query','sample.read',{
+        'pidfile':str(tmp_path/'pid'), 'startup_delay':startup_delay, 'relay':relay})
+    assert result['pid'] == int((tmp_path / 'pid').read_text())
+    if relay:
+        assert result['pid'] != result['launcher_pid']
     deadline = time.monotonic() + 2
     while True:
         try:
-            assert_terminated(int((tmp_path/'pid').read_text()))
+            for pid in {result['pid'], result['launcher_pid']}:
+                assert_terminated(pid)
             break
         except AssertionError:
             if time.monotonic() > deadline:
