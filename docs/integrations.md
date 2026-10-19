@@ -4,7 +4,7 @@ Contextopus runs one loopback MCP owner at `http://127.0.0.1:8765/mcp`. Install 
 
 ## Install the runtime and shared service
 
-Install the verified Contextopus wheel with uv using the [quick start](../README.md#quick-start).
+Install the verified Contextopus wheel with uv using the [quick start](../README.md#start-from-source).
 Client ZIPs carry skills and installation instructions; they do not install the
 Python runtime or a private database for that client. Use the same persistent
 root for CLI, TUI and coding clients:
@@ -86,8 +86,11 @@ Existing unrelated values survive. A differing `contextopus` server or short ski
 
 ### Invoke the installed skills
 
-The seven canonical names are `w`, `w-search`, `w-create`, `w-settings`,
-`w-context`, `w-analyze` and `m`. Use the client's native mechanism:
+Core supplies `m`. An installed and enabled Workspace adds `w`, `w-search`,
+`w-create`, `w-settings`, `w-context` and `w-analyze`; preview/apply integration
+again to deliver newly contributed skills. Core client ZIPs and the Core plugin
+contain only `m`. The following Workspace examples require that module and its
+skills to be installed. Use the client's native mechanism:
 
 | Client | Example |
 |---|---|

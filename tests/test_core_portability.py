@@ -99,42 +99,8 @@ def test_public_lock_accepts_stream_and_descriptor(tmp_path):
         locking.flock(stream, locking.LOCK_UN)
 
 
-def record_simultaneously(root, barrier, worker):
-    from contextopus.modules.workspace.analytics import EventStore
-    import time
-
-    barrier.wait(timeout=20)
-    store = EventStore(root)
-    for number in range(3):
-        started = time.monotonic()
-        event = store.begin("p", "read", {"worker": worker, "number": number})
-        store.end(event, "p", started, {}, {}, result={"number": number})
 
 
-def test_simultaneous_processes_bootstrap_wal_without_lost_events(tmp_path):
-    from contextopus.modules.workspace.analytics import EventStore
-
-    context = multiprocessing.get_context("spawn")
-    barrier = context.Barrier(4)
-    processes = [
-        context.Process(target=record_simultaneously, args=(tmp_path, barrier, worker))
-        for worker in range(4)
-    ]
-    try:
-        for process in processes:
-            process.start()
-        for process in processes:
-            process.join(timeout=40)
-            assert process.exitcode == 0
-    finally:
-        for process in processes:
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=5)
-    report = EventStore(tmp_path).query()
-    assert report["totals"]["calls"] == 12
-    assert report["totals"]["unknown_outcomes"] == 0
-    assert report["totals"]["errors"] == 0
 
 
 def native_windows_contender(path, connection):

@@ -120,10 +120,87 @@ def test_semantic_catalog_requires_explicit_refresh_for_missing_or_stale_cards()
     from contextopus.core.filtering import AlgorithmCatalog
     class Index:
         def __init__(self, revisions): self.revisions=revisions
-        def vector_revisions(self,module,collection): return self.revisions
+        def vector_revisions_page(self,module,collection,**kwargs):
+            return dict(revisions=self.revisions,conflicts=[],next_cursor=None)
         def search_detailed(self,*args,**kwargs): raise AssertionError('must not search stale cards')
     for revisions,state in [({},'missing'),({'disabled_algorithm':'r1'},'stale')]:
         result=AlgorithmCatalog(AlgorithmRegistry(),Index(revisions)).search('threshold',semantic=True)
         assert result['results']==[]
         assert result['catalog_state']==state
         assert result['next_action']=='core.algorithms_refresh'
+
+
+def test_algorithm_catalog_walks_inventory_pages_and_repairs_conflicts_explicitly():
+    import hashlib
+    from contextopus.core.filtering import AlgorithmCatalog
+    registry = AlgorithmRegistry()
+    descriptions = registry.catalog()
+    good = descriptions[0]
+    good_revision = hashlib.sha256(json.dumps(good,sort_keys=True).encode()).hexdigest()
+    conflicting = descriptions[1]['id']
+    class Index:
+        def __init__(self): self.cursors=[];self.indexed=[];self.deleted=[]
+        def vector_revisions_page(self,module,collection,*,cursor=None):
+            assert (module,collection)==('core','search_algorithm')
+            self.cursors.append(cursor)
+            if cursor is None:
+                return dict(revisions={good['id']:good_revision},conflicts=[conflicting],next_cursor='next')
+            assert cursor=='next'
+            return dict(revisions={'obsolete':'old'},conflicts=['corrupt-obsolete'],next_cursor=None)
+        def index(self,document): self.indexed.append(document.key.id)
+        def delete_document(self,key): self.deleted.append(key.id)
+    index=Index()
+    result=AlgorithmCatalog(registry,index).refresh()
+    assert index.cursors==[None,'next']
+    assert good['id'] not in index.indexed
+    assert conflicting in index.indexed
+    assert result['removed']==['corrupt-obsolete','obsolete']
+    assert set(index.deleted)=={'corrupt-obsolete','obsolete'}
+
+
+def test_semantic_algorithm_catalog_treats_conflicting_revisions_as_stale():
+    from contextopus.core.filtering import AlgorithmCatalog
+    class Index:
+        def vector_revisions_page(self,module,collection,**kwargs):
+            return dict(revisions={},conflicts=['nearest_n'],next_cursor=None)
+        def search_detailed(self,*args,**kwargs): raise AssertionError('must not use conflicting cards')
+    result=AlgorithmCatalog(AlgorithmRegistry(),Index()).search('threshold',semantic=True)
+    assert result['catalog_state']=='stale'
+    assert result['next_action']=='core.algorithms_refresh'
+
+
+def test_semantic_catalog_checks_pages_after_all_expected_ids_for_unexpected_cards():
+    import hashlib
+    from contextopus.core.filtering import AlgorithmCatalog
+    registry=AlgorithmRegistry()
+    expected={description['id']:hashlib.sha256(json.dumps(description,sort_keys=True).encode()).hexdigest()
+              for description in registry.catalog()}
+    class Index:
+        def __init__(self): self.cursors=[]
+        def vector_revisions_page(self,module,collection,*,cursor=None):
+            self.cursors.append(cursor)
+            if cursor is None:
+                return dict(revisions=expected,conflicts=[],next_cursor='extra-page')
+            return dict(revisions={'unexpected':'r1'},conflicts=[],next_cursor=None)
+        def search_detailed(self,*args,**kwargs): raise AssertionError('extra cards must be detected')
+    index=Index()
+    result=AlgorithmCatalog(registry,index).search('threshold',semantic=True)
+    assert result['catalog_state']=='stale'
+    assert index.cursors==[None,'extra-page']
+
+
+def test_catalog_refresh_propagates_expired_snapshot_without_silent_restart():
+    from contextopus.core.filtering import AlgorithmCatalog
+    class Index:
+        def __init__(self): self.deleted=[];self.calls=0
+        def vector_revisions_page(self,module,collection,*,cursor=None):
+            self.calls+=1
+            if cursor is None:
+                return dict(revisions={'obsolete':'r1'},conflicts=[],next_cursor='expired')
+            raise ValueError('RAG revisions cursor snapshot is unavailable or expired; restart inventory')
+        def delete_document(self,key): self.deleted.append(key.id)
+        def index(self,*args): raise AssertionError('must not report a complete refresh')
+    index=Index()
+    with pytest.raises(ValueError,match='expired'):
+        AlgorithmCatalog(AlgorithmRegistry(),index).refresh()
+    assert index.calls==2 and index.deleted==['obsolete']

@@ -15,9 +15,7 @@ from unittest.mock import Mock, patch
 from urllib import error, request
 
 
-PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "persistent-context-workspace"
-sys.path.insert(0, str(PLUGIN))
-from pcw_runtime import embeddings as e
+from contextopus.core import embeddings as e
 
 
 def small_config(kind="sentence-transformers"):

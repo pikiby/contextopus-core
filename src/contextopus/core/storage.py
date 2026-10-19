@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from contextopus.core import locking as fcntl
 import json
+import errno
 import threading
+import time
 
 _LOCKS = {}
 _LOCKS_GUARD = threading.Lock()
@@ -14,6 +16,13 @@ _LOCKS_GUARD = threading.Lock()
 def _root_lock(root):
     with _LOCKS_GUARD:
         return _LOCKS.setdefault(str(root), (threading.RLock(), threading.local()))
+
+
+def _remaining(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Root guard deadline exceeded")
+    return min(.01, remaining)
 
 
 @dataclass(frozen=True)
@@ -35,13 +44,13 @@ class StorageLayout:
     def configuration(self):
         return self.root / "core/configuration"
 
-    def workspace(self, name):
-        self._name(name)
-        return self.root / "modules/workspace/workspace_contexts" / name
+    def module_data(self, module):
+        self._name(module)
+        return self.root / 'modules' / module / 'data'
 
-    def control(self, name):
-        self._name(name)
-        return self.root / "modules/workspace/control" / name
+    def module_config(self, module):
+        self._name(module)
+        return self.root / 'modules' / module / 'config'
 
     @staticmethod
     def _name(name):
@@ -54,29 +63,16 @@ class StorageLayout:
         ):
             raise ValueError("Invalid context name")
 
-    @property
-    def legacy(self):
-        return (
-            not (self.root / "modules/workspace").is_dir()
-            and not (self.configuration / "layout.json").is_file()
-        )
-
-    @property
-    def workspace_base(self):
-        return (
-            self.root / ".pcw"
-            if self.legacy
-            else self.root / "modules/workspace/workspace_contexts"
-        )
-
-    @property
-    def workspace_rag(self):
-        return self.root / ".pcw/.rag" if self.legacy else self.rag
-
     @contextmanager
-    def guard(self, frozen_revision=None):
+    def guard(self, frozen_revision=None, deadline=None):
+        """Hold root admission, optionally bounded by a monotonic deadline."""
         mutex, local = _root_lock(self.root)
-        with mutex:
+        if deadline is None:
+            mutex.acquire()
+        else:
+            while not mutex.acquire(timeout=_remaining(deadline)):
+                pass
+        try:
             if getattr(local, "depth", 0):
                 local.depth += 1
                 try:
@@ -86,7 +82,18 @@ class StorageLayout:
                 return
             self.root.mkdir(parents=True, exist_ok=True)
             with (self.root / ".contextopus.lock").open("a+b") as stream:
-                fcntl.flock(stream, fcntl.LOCK_EX)
+                if deadline is None:
+                    fcntl.flock(stream, fcntl.LOCK_EX)
+                else:
+                    while True:
+                        _remaining(deadline)
+                        try:
+                            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except OSError as exc:
+                            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                                raise
+                            time.sleep(_remaining(deadline))
                 local.depth = 1
                 try:
                     if (self.root / ".contextopus-freeze.json").exists():
@@ -102,6 +109,8 @@ class StorageLayout:
                 finally:
                     local.depth = 0
                     fcntl.flock(stream, fcntl.LOCK_UN)
+        finally:
+            mutex.release()
 
     @classmethod
     def resolve(cls, root):

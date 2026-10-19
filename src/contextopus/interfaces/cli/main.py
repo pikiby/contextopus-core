@@ -29,6 +29,9 @@ def parser():
         command.add_argument("module")
         if action == "update":
             command.add_argument("--source", required=True, type=Path)
+        elif action == "install":
+            command.add_argument("--source", type=Path, help="Trusted built module folder or ZIP")
+            command.add_argument("--plan", action="store_true", help="Validate source only; do not install")
     root_binding = commands.add_parser(
         "root", help="Inspect or explicitly bind the persistent default data root"
     )
@@ -302,7 +305,22 @@ def main(argv=None):
                     arguments = {"module": args.module}
                     if args.module_action == "update":
                         arguments["source"] = str(args.source.expanduser().resolve())
-                    emit(app.execute("core.module_" + args.module_action, arguments))
+                    if args.module_action == "install":
+                        if args.plan and args.source is None:
+                            raise ValueError('--plan requires --source')
+                        if args.source is not None:
+                            # Preserve symlink spelling: validation must reject it.
+                            arguments['source'] = str(args.source.expanduser().absolute())
+                            preview = app.query('core.module_source_plan', arguments)
+                            emit(preview)
+                            if args.plan:
+                                return 0
+                            arguments['source_revision'] = preview['revision']
+                    result = app.execute("core.module_" + args.module_action, arguments)
+                    emit(result)
+                    if (args.module_action == 'install' and args.source is not None
+                            and (not isinstance(result, dict) or result.get('state') != 'enabled')):
+                        raise RuntimeError('Module installation did not return enabled')
                 else:
                     emit(app.query("core.modules"))
             elif args.command in ("init", "doctor"):

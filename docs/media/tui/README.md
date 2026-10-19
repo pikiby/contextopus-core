@@ -21,10 +21,12 @@ preview/application, returning, narrow/wide line limits, unknown values, and
 resize without adding chart measurements. Inline live launch uses
 `contextopus tui` and the central application's query/execute API.
 
-Session-search integration delegates status/search over its existing Unix
+The historical Session Search compatibility adapter delegates status/search over its existing Unix
 socket. Opening its TUI returns a launch descriptor to the terminal client.
 The external actor still owns its index, queue, deduplication, occurrences,
-and tail cursor; migration into shared Core RAG is a subsequent stage.
+and tail cursor; these screenshots predate the separate Session Search Core module. See the
+[module repository](https://github.com/pikiby/contextopus-session-search) for its
+current indexing and ownership model.
 
 PNG/GIF rendering uses existing system librsvg and Cairo plus Pillow. SVG whitespace is explicitly preserved during rasterization so aligned columns remain aligned. The capture process honors NO_COLOR at runtime; it is unset only for these color demonstrations.
 

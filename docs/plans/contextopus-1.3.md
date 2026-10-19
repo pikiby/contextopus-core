@@ -1,508 +1,531 @@
-# Contextopus 1.3: цель и план обновления
+# Contextopus 1.3: goal and delivery plan
 
-Статус: выпуск 1.3.1 опубликован и установлен с сохранением прежнего root,
-локального CPU-профиля и управляемых клиентских файлов; полный CI завершён,
-семь проверок успешны. Выбранный контекст преобразован из формата 3 в 4,
-сохранность данных, базовые документы и каталог алгоритмов проверены.
-Технический поиск/чтение через четыре native-клиента подтверждены в описанных
-условиях. После исправления методики штатная активация OpenCode показала пропуск
-INSTRUCTIONS, а Crush — ноль MCP-вызовов. Пользователь выбрал продолжение
-исправлений. Финальный runtime 1.3.2 `f0578ce` прошёл технические проверки и
-независимую поведенческую проверку OpenCode/Crush с DeepSeek на контролируемых
-синтетических данных: настройки → полные правила → поиск с унаследованным N=2 →
-чтение нужных материалов. Это не гарантия для всех моделей и сценариев.
-Локальная установка остаётся 1.3.1 на этом этапе доставки; обновление и итоговый
-аудит данных сохраняются отдельными условиями завершения цели.
+> Historical document: release and verification conditions below apply only to
+> the named version or dated check. For the current repository layout, see
+> [development instructions](../development.md).
 
-Пользователь поручил выполнить цель. Точные контракты исполнения закреплены в
-[отдельном документе](contextopus-1.3-contracts.md). Изменения принимаются по
-проверкам; публикация и установка выполняются в пределах поручения.
+Delivery status: 1.3.3 was published and installed with the previous root, local
+CPU profile and one service owner. Managed base documentation and the algorithm
+catalog were updated through normal MCP operations. All 29 registered contexts
+use format 4; all 425 registered Workspace records have descriptions, all 425
+objects are indexed, and no structural errors were found. This does not establish
+PROJECT completeness: five documents remain missing and six are placeholders.
+Historical data, user rules and other unfinished work were preserved. Two old
+cycles were cancelled separately with explicit user authorization. Platform and
+model verification limits remain documented below; universal procedural compliance
+by every model is not claimed.
 
-## 1. Цель
+The user authorized execution of this goal. Exact execution contracts are in the
+[separate contract document](contextopus-1.3-contracts.md). Changes are accepted
+through checks; publication and installation stay within the authorized scope.
 
-Подготовить Contextopus 1.3, в котором агент получает достаточно сведений для
-осмысленного поиска, чтения и обновления памяти без повторной загрузки больших
-инструкций и дублирующихся данных. Вернуть читаемые связи Obsidian, обеспечить
-содержательные описания карточек, исправить отбор разных документов и закрепить
-понятный обязательный порядок работы. Доставить это изменение прямым обновлением
-с установленной 1.1 до 1.3 с сохранением пользовательских данных и проверкой
-действительно работающего MCP и клиентских скиллов.
+## 1. Goal
 
-Автор модуля следует документации и кладёт пакет в `modules/`. Одним коротким
-скиллом пользователь поручает подключение; Core готовит зависимости, применяет
-поставленные модулем миграции и подключает операции после проверки схемы.
+Prepare Contextopus 1.3 so an agent receives enough information to choose search,
+reading and memory updates without repeatedly loading large procedures or
+duplicate data. Restore readable Obsidian links, meaningful card descriptions,
+selection of distinct documents and a clear mandatory workflow. Deliver a direct
+upgrade from installed 1.1 to 1.3, preserving user data and verifying the actual
+running MCP and client skills.
 
-Цель достигнута, когда выполнены все критерии раздела 8, а подтверждения относятся
-к одному выпуску: исходникам, опубликованным артефактам, установленному пакету,
-запущенному процессу и подключённому клиенту.
+A module author follows the documentation and places a package in `modules/`.
+The user requests installation through one short skill. Core prepares dependencies,
+applies module-supplied migrations and publishes operations after schema checks.
 
-## 2. Проверенное исходное состояние
+The goal is achieved only when every criterion in section 8 is met, with evidence
+for one consistent release across source, published artifacts, installed package,
+running process and connected client.
 
-- Исходники обозначены как 1.2.0. Рабочий пакет, проверенный при подготовке плана,
-  имеет версию 1.1.0; реализации `archivist` в этой установленной копии нет.
-- В исходниках 1.2 есть общий реестр пяти алгоритмов и диагностика поиска.
-  Старые алгоритмы сохраняют ограничение числа фрагментов до объединения
-  документов. Наличие `archivist` не исправляет остальные алгоритмы автоматически.
-- В обычной выдаче поиска возвращается `excerpt`. `read` и некоторые квитанции
-  возвращают одновременно ID в `links` и описания тех же целей в `link_targets`.
-  В исследованных новых карточках `description` отсутствует, а ответы содержат
-  пустую строку. Это пробел создания и проверки данных, а не только отображения.
-- `links` хранит ID; `sources` содержит отдельные обязательные ссылки с инструкцией
-  получения сведений. Восстановление Obsidian-представления не должно смешать их.
-- `$w` требует получить большую процедуру Workspace. Рабочий цикл требует startup,
-  а отдельный поиск также требует инструкции и проект. Повторный вызов скилла
-  легко превращается в повторение всей подготовки.
-- Машинные настройки находятся во frontmatter INSTRUCTIONS. Проверка одного
-  разрешения возвращает весь текст. Произвольные пользовательские правила при
-  этом действительно должны оставаться доступными агенту целиком.
-- MCP объявляет `contextopus_query`, `contextopus_execute` и старые aliases.
-  Полный каталог операций не обязателен: адресный `describe` уже поддерживается.
-- Найденный в журнале «пропавший ответ поиска» присутствовал в общем результате
-  параллельного вызова. Это не доказательство потери результата сервером.
+## 2. Verified starting state
 
-Основные точки проверки:
+- Source was marked 1.2.0. The working package checked during planning was 1.1.0;
+  that installed copy had no `archivist` implementation.
+- Source 1.2 had a common registry of five algorithms and search diagnostics.
+  Older algorithms limited fragments before grouping documents. Having
+  `archivist` did not automatically repair the other algorithms.
+- Ordinary search returned `excerpt`. `read` and some receipts returned both
+  IDs in `links` and descriptions of the same targets in `link_targets`.
+  Inspected new cards lacked `description`, producing empty response strings.
+  This was a creation/validation gap, not merely a presentation issue.
+- `links` stored IDs; `sources` held separate mandatory references with retrieval
+  instructions. Restoring Obsidian presentation must preserve that distinction.
+- `$w` required a large Workspace procedure. A work cycle required startup;
+  independent search also required instructions and project. Repeated skill
+  invocation could easily repeat all preparation.
+- Machine settings lived in INSTRUCTIONS frontmatter. Reading one permission
+  returned the whole text. Arbitrary user rules still genuinely needed to be
+  available to the agent in full.
+- MCP exposed `contextopus_query`, `contextopus_execute` and older aliases.
+  A full operation catalog was already optional: targeted `describe` existed.
+- A reportedly missing search response was present in the combined output of a
+  parallel call. This did not prove that the server had lost a result.
 
-- [MCP transport](../../src/contextopus/interfaces/mcp/server.py),
-  [registry](../../src/contextopus/core/operations.py).
-- [Workspace procedure](../../src/contextopus/resources/procedures/workspace.md),
-  [search](../../src/contextopus/resources/procedures/search.md),
-  [memory operations](../../src/contextopus/resources/procedures/reference/memory-operations.md).
-- [Default instructions](../../src/contextopus/modules/workspace/default_instructions.md),
-  [policies](../../src/contextopus/modules/workspace/policies.py),
-  [cycles](../../src/contextopus/modules/workspace/cycles.py),
-  [shared records](../../src/contextopus/modules/workspace/shared.py).
+Primary verification locations:
+
+- [MCP transport](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/interfaces/mcp/server.py),
+  [registry](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/core/operations.py).
+- [Workspace procedure](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/resources/procedures/workspace.md),
+  [search](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/resources/procedures/search.md),
+  [memory operations](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/resources/procedures/reference/memory-operations.md).
+- [Default instructions](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/modules/workspace/default_instructions.md),
+  [policies](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/modules/workspace/policies.py),
+  [cycles](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/modules/workspace/cycles.py),
+  [shared records](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/modules/workspace/shared.py).
 - [Selection](../search-selection.md), [search analysis](../search-analysis.md),
-  [migration](../../src/contextopus/modules/workspace/migration.py),
+  [migration](https://github.com/pikiby/contextopus-core/blob/v1.3.0/src/contextopus/modules/workspace/migration.py),
   [integration](../integrations.md).
 
-## 3. Зафиксированные решения и границы
+## 3. Accepted decisions and boundaries
 
-### Принято
+### Accepted
 
-1. Обычный поиск возвращает метаданные и содержательное описание; текстовые
-   фрагменты не входят в стандартный ответ. Явное получение фрагментов сохраняется.
-2. Описания нужно создавать и поддерживать, а отсутствующие — восстановить по
-   содержимому карточек. Заголовок или обрезанное начало не заменяют описание.
-3. Лимит материалов применяется к разным документам. Повторные фрагменты одного
-   документа не должны занимать места других. Исправляется и старый алгоритм.
-4. Из обычных ответов убираются дубли связей, пустые необязательные поля и штатные
-   технические квитанции. Путь и принадлежность контексту сохраняются.
-5. Компактная диагностика поиска остаётся обязательной частью ответа и используется
-   агентом для оценки достаточности выдачи. Расстояние не является уверенностью.
-6. Связи должны снова быть пригодны для Obsidian. YAML ID остаётся стабильной
-   идентичностью карточки. Описание карточки отличается от объяснения отношения.
-7. Машинные настройки выносятся из свободного текста INSTRUCTIONS в общую систему
-   конфигурации. Пользовательские правила остаются одним свободным текстом.
-8. Постоянное перечитывание по умолчанию выключено; его можно явно включить для
-   нужного агента или модели. Это не отменяет обязательное перечитывание sources.
-9. Повторный `$w` не означает новую задачу или новый цикл. Самостоятельное чтение
-   не требует tmp, подготовки изменений или завершения цикла.
-10. Одна короткая общая процедура содержит весь обычный порядок работы. Создание,
-    миграция, аудит, переработка и настройка имеют отдельные процедуры с явными
-    указателями. Каждый обычный этап не требует нового обращения к справке.
-11. Агенту запрещено выполнять действие без ранее полученной и прочитанной
-    применимой процедуры. Обязательные этапы нельзя заменять догадками.
-12. Техническое правило не заставляет каждого обычного исполнителя самостоятельно
-    вести Workspace. Делегирование сохраняет применимые пользовательские правила.
-13. Установка модуля включает подготовку его хранилища. Схемы и версионированные
-    миграции поставляются модулем; подключения, выполнение и учёт версий — Core.
-    Пользователь не запускает SQL вручную и не собирает установку из нескольких
-    технических команд. Обновление сохраняет данные и проверяет совместимость
-    схемы перед активацией и возможным возвратом старого кода.
+1. Ordinary search returns metadata and a meaningful description. Text excerpts
+   are excluded from the default response; explicit fragment retrieval remains.
+2. Descriptions must be created and maintained. Missing descriptions are repaired
+   from card bodies; a title or truncated opening is not a substitute.
+3. The material limit applies to distinct documents. Repeated fragments of one
+   document must not displace others. Older algorithms are repaired too.
+4. Remove duplicate link representations, empty optional fields and routine
+   technical receipts from ordinary responses. Preserve path and context ownership.
+5. Compact search diagnostics remain mandatory and inform sufficiency assessment.
+   Distance is not confidence.
+6. Links must work in Obsidian again. The YAML ID remains the stable card identity.
+   A card description differs from an explanation of a relationship.
+7. Move machine settings out of free-form INSTRUCTIONS into common configuration.
+   Keep user rules as one free-form text.
+8. Continuous rereading defaults to off and may be enabled explicitly for an
+   agent/model. This does not relax mandatory fresh reading of sources.
+9. Repeated `$w` does not mean a new task or cycle. Independent retrieval requires
+   no tmp, change proposal or cycle finish.
+10. One short common procedure contains the complete ordinary workflow. Creation,
+    migration, audit, rework and settings have separate procedures with explicit
+    pointers. Ordinary phases do not each require another help call.
+11. An agent must obtain and read an applicable procedure before acting. It must
+    not replace mandatory steps with guesses.
+12. The technical workflow does not force every ordinary worker to manage
+    Workspace independently. Delegation retains applicable user rules.
+13. Module installation includes storage preparation. Modules supply schemas and
+    versioned migrations; Core owns connections, execution and version tracking.
+    Users do not run SQL or assemble installation from multiple technical commands.
+    Updates preserve data and check schema compatibility before activation or
+    returning to previous code.
 
-### Закреплённые контракты исполнения
+### Execution contracts
 
-- По умолчанию MCP объявляет `guide`, `read`, `write`. `guide` выдаёт указанную
-  процедуру или сигнатуру операции напрямую; каталог запрашивается явно.
-  Старые имена доступны только в отдельно включаемом режиме совместимости.
-- YAML сохраняет стабильный `id` и настоящие Obsidian wikilinks с путями внутри
-  vault. Внутренний граф использует ID. Подпись ссылки не заменяет описание
-  целевого материала и не выдаётся за объяснение отношения.
-- Настройки находятся в Core JSON; `reread_instructions=false` по умолчанию.
-  Явный профиль агента/модели может изменить только перечитывание. Полный режим
-  ответов сохраняется через `detail=full`; обычный ответ компактен.
-- Версия формата Workspace — 4, основного пакета — 1.3.0 (исправление 1.3.1),
-  изменённых встроенных алгоритмов —
-  2.0.0. История настроек сохраняется в Git отдельно от свободного текста правил.
+- MCP exposes `guide`, `read`, `write` by default. `guide` directly returns a named
+  procedure or operation signature; a catalog is explicitly requested. Old names
+  are available only in a separately enabled compatibility mode.
+- YAML retains stable `id` and real Obsidian wikilinks with vault-relative paths.
+  The internal graph uses IDs. Link labels do not replace target descriptions and
+  are not presented as relationship explanations.
+- Settings use Core JSON; `reread_instructions=false` by default. An explicit
+  agent/model profile may change only rereading. `detail=full` preserves complete
+  responses; ordinary responses are compact.
+- Workspace format is 4; the main package is 1.3.0, with correction 1.3.1; changed
+  built-in algorithms are 2.0.0. Git retains settings history separately from the
+  free-form rules text.
 
-Подробности и границы закреплены в [контрактах](contextopus-1.3-contracts.md).
-Наличие реализации отдельно подтверждается тестами, а доставка — установленной
-версией и настоящим клиентским обращением.
+Details and limits are in the [contracts](contextopus-1.3-contracts.md).
+Tests establish implementation; installed version and a genuine client call
+separately establish delivery.
 
-### Не включать
+### Excluded
 
-- Автоматическое дробление свободных инструкций по этапам или их векторный отбор.
-- Передачу известных ревизий агентом ради проверки каждого чтения правил.
-- Серверный общий флаг «инструкцию уже читали»: у разных агентов разные беседы.
-- Обязательный `guide` между поиском, чтением, записью и завершением.
-- Выдачу full catalog перед каждым вызовом или возврат десятков динамических MCP-tools.
-- Изменение алгоритма пользователя на Archivist без его выбора.
-- Отмену чужих незавершённых циклов ради миграции.
-- Новый сравнительный benchmark-проект, изменение общей модели конкурентности,
-  переделку TUI или новых модулей вне необходимых контрактов этого обновления.
+- Automatically splitting free-form instructions by phase or selecting them with vectors.
+- Having agents send known revisions to validate every rules read.
+- A server-wide "instructions already read" flag shared by agents with different conversations.
+- Mandatory `guide` between search, reading, writing and finish.
+- A full catalog before every call or dozens of dynamic MCP tools.
+- Switching a user's algorithm to Archivist without their choice.
+- Cancelling other unfinished cycles to facilitate migration.
+- A new comparative benchmark project, changes to the general concurrency model,
+  a TUI redesign or new modules beyond the contracts needed for this update.
 
-## 4. План реализации
+## 4. Implementation plan
 
-### Этап 0. Зафиксировать исходное состояние
+### Stage 0. Capture the baseline
 
-1. Проверить source version, Git revision, установленный package path/version,
-   запущенный сервис, выбранный root, список tools и скиллов каждого целевого клиента.
-2. Инвентаризировать контексты, форматы, ID, links/sources, descriptions, настройки,
-   Git, аналитику, незавершённые циклы и предложения, модель и каталог алгоритмов.
-3. Сохранить ограниченные контрольные ответы: поиск, read, startup, proposal/apply,
-   проверка разрешения, повторное использование `$w`. Публичные fixtures обезличить.
-4. Различить проблему Contextopus, ошибку агента и особенности показа tool output
-   оболочкой. Ошибку `tmp_write` с устаревшей ревизией исследовать по конкретному
-   материалу и журналу; не отменять проверку конкурентного изменения.
+1. Check source version, Git revision, installed package path/version, running
+   service, selected root, tool inventory and skills of every target client.
+2. Inventory contexts, formats, IDs, links/sources, descriptions, settings, Git,
+   analytics, unfinished cycles/proposals, model and algorithm catalog.
+3. Save bounded control responses for search, read, startup, proposal/apply,
+   permission reads and repeated `$w`. Anonymize public fixtures.
+4. Distinguish Contextopus defects, agent errors and shell presentation of tool
+   output. Investigate a stale-revision `tmp_write` error against the particular
+   material and log; retain concurrent-change protection.
 
-Результат: проверяемая исходная матрица и fixtures для регрессии.
+Outcome: a verifiable baseline matrix and regression fixtures.
 
-### Этап 1. Зафиксировать контракты 1.3
+### Stage 1. Define 1.3 contracts
 
-1. Описать единый формат компактных ответов, description, связи и диагностик.
-2. Зафиксировать три коротких инструмента и адреса операций внутри них; Core и
-   модули используют один registry, а CLI/TUI сохраняют те же предметные операции.
-3. Определить совместимость прежних clients и сохранённых предложений. Не добавлять
-   все старые имена в обычный каталог без срока и понятного режима перехода.
-4. Разделить версию пакета, версию формата Workspace, версию алгоритма и формат
-   аналитического свидетельства. Номер 1.3 не означает автоматически format 1.3.
-5. Описать проверяемую структуру общего порядка и адресные указатели на процедуры.
+1. Specify one compact format for responses, description, links and diagnostics.
+2. Define three short tools and operation addresses. Core/modules share a registry;
+   CLI/TUI retain the same domain operations.
+3. Define compatibility for previous clients and stored proposals. Do not add all
+   older names to the ordinary catalog without a clear, bounded transition mode.
+4. Separate package version, Workspace format, algorithm version and analytical
+   evidence format. Package 1.3 does not automatically imply data format 1.3.
+5. Define a testable common workflow and explicit procedure pointers.
 
-Результат: контракт позволяет писать реализацию и тесты без догадок о формате.
+Outcome: implementation and tests need no guessed format.
 
-### Этап 2. Настройки и пользовательские инструкции
+### Stage 2. Settings and user instructions
 
-1. Использовать существующую конфигурацию Core и её области, без второй параллельной
-   базы настроек. Перенести allow_implicit_updates, knowledge_approval_required,
-   instructions_approval_required, git_history_enabled, material_max_tokens и
-   create_required_sources с сохранением эффективных значений старых контекстов.
-2. Предоставить чтение только нужных эффективных настроек и их происхождения.
-   Проверка разрешения не загружает правила и проект.
-3. Добавить настройку постоянного перечитывания со стандартным значением false.
-   Явное переопределение для агента/модели не меняет режим остальных и не даёт
-   дополнительных прав записи. Не угадывать модель по ненадёжным данным среды.
-4. INSTRUCTIONS сохраняет полный пользовательский текст, включая требования,
-   действующие на нескольких этапах: делегирование, сообщения, ограничения поиска.
-   Не разделять и не пересказывать его автоматически.
-5. Сохранить согласование изменения правил и настроек по текущей политике;
-   перенос флагов не должен создавать обход через generic settings_apply.
+1. Reuse Core configuration and its scopes, without a second settings database.
+   Migrate `allow_implicit_updates`, `knowledge_approval_required`,
+   `instructions_approval_required`, `git_history_enabled`, `material_max_tokens`
+   and `create_required_sources`, retaining old contexts' effective values.
+2. Read only requested effective settings and origins. Permission checks must not
+   load rules or project bodies.
+3. Add continuous rereading with default false. An explicit agent/model override
+   changes neither other profiles nor writing permissions. Do not infer model
+   identity from unreliable environment information.
+4. INSTRUCTIONS retains the complete user text, including requirements spanning
+   phases such as delegation, messaging and search limits. Do not automatically
+   split or summarize it.
+5. Preserve approval of rules/settings changes under current policy. Moving flags
+   must not create a bypass through generic `settings_apply`.
 
-Результат: один источник настроек, пользовательские правила сохранены, права не
-ослаблены. Создание контекста предлагает обновлённые defaults и индивидуальный выбор.
+Outcome: one settings source, preserved user rules and unchanged authorization.
+Context creation offers updated defaults and individual choices.
 
-### Этап 3. Короткие процедуры, скиллы и MCP
+### Stage 3. Short procedures, skills and MCP
 
-1. Сжать основную процедуру до полного обычного порядка: выбрать контекст и режим,
-   получить правила, искать/читать, выполнить поручение, сравнить результат с памятью,
-   при необходимости показать/применить изменения, завершить работу.
-2. Для самостоятельного поиска общий порядок явно заканчивается ответом: само
-   чтение не порождает обязанность записывать. Незавершённое разрешённое поручение
-   продолжается; вопрос пользователя не завершает его.
-3. Вписать прямой запрет действий без применимой процедуры. Общая процедура
-   покрывает обычные операции, для остальных содержит точные имена процедур.
-   Полученная процедура применяется дальше без повторного поиска указателя.
-4. Закрепить перечитывание при новой самостоятельной задаче, явной смене контекста,
-   изменении правил, потере полного текста и обновлении используемых процедур
-   после обновления плагина. В режиме true — также при каждом обращении через `$w`.
-5. Исключить пример с произвольным N=3 и аналогичные подсказки, меняющие поведение
-   без основания. Параметры наследуются; изменение объясняется задачей/диагностикой.
-6. Справку по неизвестной операции получать адресно. Нужные сигнатуры строить из
-   registry, не поддерживать вручную противоречащие друг другу описания.
-7. Обновить w и остальные существующие входы, ресурсы wheel, native integrations,
-   managed manifests и справку. Стандартная работа не требует загрузки инструмента
-   фоновым поиском клиента или guide на каждом обычном этапе.
-8. Делегирование переносит необходимые правила в поручение исполнителю. Агент,
-   ведущий весь цикл, читает его контекст сам; обычный исполнитель возвращает результат.
+1. Condense the main procedure to the full ordinary workflow: select context/mode,
+   obtain rules, search/read, perform the task, compare results with memory,
+   review/apply changes when needed, and finish.
+2. Independent retrieval explicitly ends with an answer; reading creates no duty
+   to write. An unfinished authorized task continues; a user question does not end it.
+3. Explicitly forbid action without an applicable procedure. The common procedure
+   covers ordinary operations and names the exact specialized procedures. Once
+   obtained, reuse the procedure without rediscovering its pointer.
+4. Require rereading for a new independent task, explicit context change, changed
+   rules, lost complete text, and used procedures after a plugin update. In true
+   mode, also reread at every `$w` invocation.
+5. Remove arbitrary examples such as N=3 that change behavior without a reason.
+   Inherit parameters; justify changes through the task or diagnostics.
+6. Retrieve help only for an unknown operation. Generate required signatures from
+   the registry rather than maintaining contradictory manual copies.
+7. Update w, other existing entry points, wheel resources, native integrations,
+   managed manifests and help. Ordinary work requires neither background client
+   tool search nor `guide` at each ordinary phase.
+8. Delegate with the necessary rules in the assignment. A cycle lead reads the
+   context personally; an ordinary worker returns their result.
 
-Результат: новый агент проходит цикл по короткой инструкции; повторный `$w` не
-создаёт второй цикл и не загружает неизменившиеся правила без основания.
-Запрет в инструкции не выдаётся за техническое доказательство понимания моделью.
+Outcome: a new agent follows a short instruction. Repeated `$w` creates no second
+cycle and reloads no unchanged rules without a reason. A written prohibition is
+not technical proof that a model understands it.
 
-### Этап 4. Описания и связи
+### Stage 4. Descriptions and links
 
-1. Явно включить description в инструкции автора, создание proposal и схемы API.
-   Оно объясняет содержание и применимость карточки; не копирует заголовок.
-2. Для новых записей проверять непустое описание. При содержательном изменении
-   автор проверяет актуальность описания. Legacy-пробелы выявлять отдельным списком;
-   чтение старой памяти не блокировать из-за отсутствующего description.
-3. Восстановление descriptions выполнять агентом после чтения целого материала,
-   с обычным показом и применением изменений по политике. Техническая миграция
-   не сочиняет новые факты и не использует обрезку первых символов как описание.
-4. Вернуть работающие Obsidian wikilinks, в том числе в YAML. Сохранить YAML ID и
-   графовую идентичность. Обработать одинаковые имена, пробелы, Unicode, пути внутри
-   vault, ссылки между контекстами, переименование и удаление.
-5. При переименовании показать затрагиваемые ссылки. Не изменять чужие контексты
-   скрыто; транзакция должна соблюдать разрешённый набор записей.
-6. Различать описание целевого материала и причину конкретной связи. Если нужна
-   подпись отношения, определить отдельный контракт; не выдавать description за неё.
-7. Сохранить sources с reference/instruction и их обязательное свежее чтение при
-   каждом получении. Обычные навигационные ссылки сами не становятся обязательными.
+1. Include description explicitly in author instructions, proposal preparation and
+   API schemas. It explains content/applicability rather than repeating the title.
+2. Require nonempty descriptions for new records. Authors review descriptions on
+   substantive body changes. List legacy gaps separately; do not block old-memory
+   reading because a description is missing.
+3. An agent repairs descriptions after reading the complete material, with ordinary
+   review/application under policy. Technical migration invents no facts and does
+   not substitute a truncated opening.
+4. Restore Obsidian wikilinks, including YAML. Preserve IDs and graph identity.
+   Cover duplicate names, spaces, Unicode, vault-relative paths, cross-context links,
+   renames and deletion.
+5. Show links affected by a rename. Never silently change another context; the
+   transaction respects its authorized write set.
+6. Separate target descriptions from relationship reasons. If a relationship label
+   is needed, define its own contract rather than repurposing description.
+7. Preserve `sources` with reference/instruction and mandatory fresh reading on
+   every receipt. Ordinary navigation links do not become mandatory sources.
 
-Результат: новый материал описан, связан и пригоден для навигации в MCP и Obsidian;
-старые материалы получают проверяемый план исправления.
+Outcome: new materials are described, linked and navigable in MCP/Obsidian; old
+materials receive a verifiable repair plan.
 
-### Этап 5. Компактные ответы
+### Stage 5. Compact responses
 
-1. Обычный search возвращает ID, название, description, тип/заполненный статус,
-   контекст, путь, сведения о ранжировании и краткую диагностику. Excerpt отсутствует.
-2. Явный режим фрагментов сохраняет полезное ограниченное чтение по необходимости.
-   Полное read возвращает тело и необходимые условия его применения.
-3. В read/startup/apply оставить один список связанных целей, без второй копии ID.
-   Сохранить путь, владельца контекста и непустые sources.
-4. Убирать пустые необязательные description/status/sources и пустые списки проблем.
-   Не применять универсальное удаление false/0: такие значения важны в настройках
-   и диагностике. Заполненный status, включая completed, сохраняется.
-5. Успешные analytics receipts и штатный indexed перенести в подробный режим.
-   Ошибки индекса, неполная запись, проблемы Git/аналитики и другие условия,
-   меняющие следующий шаг, должны оставаться видимыми.
-6. SQLite сохраняет наблюдаемые операции и связь с Git независимо от компактности
-   ответа. Доступ к истории и bounded analysis остаётся адресным.
+1. Ordinary search returns ID, title, description, type/nonempty status, context,
+   path, ranking information and compact diagnostics. It excludes excerpt.
+2. Explicit fragment mode retains useful bounded reading; full read returns the
+   body and the conditions needed to use it.
+3. Read/startup/apply retain one list of related targets without duplicated IDs.
+   Preserve path, context owner and nonempty sources.
+4. Remove empty optional description/status/sources and empty problem lists. Do
+   not universally remove false/0: settings/diagnostics need them. Preserve a
+   populated status, including completed.
+5. Move successful analytics receipts and routine indexed status to full detail.
+   Keep index errors, incomplete writes, Git/analytics problems and other
+   next-step-changing conditions visible.
+6. SQLite retains observed operations and their Git relationships independently
+   of response compactness. History and bounded analysis remain targeted operations.
 
-Результат: измеримое сокращение обычного ответа без потери информации для решения
-о следующем действии и без потери доказательств в журнале.
+Outcome: measurably smaller ordinary responses without losing decision inputs
+or journal evidence.
 
-### Этап 6. Отбор и оценка поиска
+### Stage 6. Selection and search assessment
 
-1. Для output=materials объединять фрагменты по ключу документа до ограничения
-   числа материалов и до расчёта границы между документами. Представитель — ближайший
-   фрагмент. Рассмотреть distance_jump, distance_threshold, nearest_n и none,
-   а не только Archivist. У fragment mode остаются явные единицы и правила.
-2. Разделить технический candidate_limit, релевантностное отсечение и размер ответа.
-   При техническом ограничении сообщать о неполном наборе; не обещать восстановить
-   пропущенные документы из невыбранных кандидатов.
-3. Для distance_jump исправить ситуацию, где N ограничивает выборку раньше оценки
-   скачка. Явно различать лимит, отсутствие скачка и недостаток данных для его оценки.
-   Версию изменённого алгоритма обновить, сохранив интерпретацию старых событий.
-4. Краткая диагностика сообщает область, алгоритм, эффективные ограничения,
-   рассмотренные фрагменты/разные документы, возвращённые материалы, причины
-   отсечения/неполноты. Полный снимок кандидатов предоставлять отдельно.
-5. В обычной процедуре сделать оценку выдачи обязательным шагом. Агент отличает
-   неверную область, технический лимит, повторы, отсечение и отсутствие знаний.
-   Не расширяет поиск только потому, что возвращено мало результатов.
-6. Выбор чтения опирается на задачу, description, тип/статус и условия сведений.
-   Историческая задача может быть полезной; низкое расстояние не доказывает
-   актуальность. Содержимое карточки проверяется чтением перед использованием.
-7. Обновить registry descriptions, derived RAG cards, руководства, диагностику
-   и replay. Указать ограничения воспроизведения по неполному старому снимку.
+1. With output=materials, group fragments by document key before the material
+   limit and before inter-document boundary calculation. The representative is
+   the nearest fragment. Cover distance_jump, distance_threshold, nearest_n and
+   none, not only Archivist. Fragment mode retains explicit units/rules.
+2. Distinguish technical candidate_limit, relevance cutoff and response size.
+   Report technical incompleteness; do not promise to recover documents omitted
+   from the candidate set.
+3. Fix distance_jump applying N before jump assessment. Distinguish a result
+   limit, no jump and insufficient data. Bump the changed algorithm version while
+   preserving interpretation of old events.
+4. Compact diagnostics include scope, algorithm, effective limits, considered
+   fragments/distinct documents, returned materials, cutoff/incompleteness reasons.
+   The full candidate snapshot is separate.
+5. Make result assessment mandatory in the ordinary procedure. Distinguish wrong
+   scope, technical limits, duplicates, cutoff and missing knowledge. Few results
+   alone do not justify broadening search.
+6. Choose reading by the task, description, type/status and applicability. A
+   historical task may help; low distance proves neither freshness nor correctness.
+   Read the card body before relying on it.
+7. Update registry descriptions, derived RAG cards, guides, diagnostics and replay.
+   State replay limits when older snapshots are incomplete.
 
-Результат: повторные фрагменты не вытесняют документы; агент видит, что ограничило
-выдачу, и имеет основание для выбора чтения либо следующего запроса.
+Outcome: repeated fragments do not displace documents. The agent understands
+what constrained selection and can justify reading or another query.
 
-### Этап 7. Миграция и восстановление
+### Stage 7. Migration and recovery
 
-Реализовать и проверить последовательность раздела 5 на копии данных. В составе
-1.3 должны поставляться все необходимые преобразования, включая пропущенные
-шаги 1.2. Пользователь не обязан отдельно устанавливать и запускать 1.2.
+Implement and verify section 5 on a data copy. Version 1.3 includes all required
+transformations, including skipped 1.2 steps. Users need not install/run 1.2 first.
 
-### Этап 8. Проверки, документация и доставка
+### Stage 8. Checks, documentation and delivery
 
-1. Выполнить проверки раздела 6 и завершить связанные обновления документации,
-   встроенного базового контекста, шаблонов, манифестов и клиентских bundles.
-2. После разрешения публикации собрать выпуск 1.3, выполнить CI, проверить wheel,
-   sdist, client bundles и SHA256SUMS, опубликовать точный проверенный commit.
-3. После разрешения установки обновить реальный runtime, выполнить миграцию,
-   обновить managed skills, перезапустить один общий MCP и проверить клиентов.
-4. Отчёт разделяет: сохранено, проиндексировано, зафиксировано в Git, опубликовано,
-   установлено, запущено, подключено. Непроверенный пункт не отмечать завершённым.
+1. Run section 6 checks; finish documentation, built-in base context, templates,
+   manifests and client bundles.
+2. Once publication is authorized, build 1.3, run CI, check wheel, sdist, client
+   bundles and SHA256SUMS, and publish the exact verified commit.
+3. Once installation is authorized, update the actual runtime, migrate, refresh
+   managed skills, restart one shared MCP and verify clients.
+4. Report saved, indexed, committed to Git, published, installed, running and
+   connected separately. Never mark an unverified item complete.
 
-### Дополнение перед доставкой: установка модулей и их хранилища
+### Pre-delivery addition: module installation and storage
 
-1. Расширить `module.json` необязательным контрактом хранилища: SQLite, целевая
-   версия схемы, каталог обычных последовательных SQL-миграций, версии схемы,
-   совместимые с кодом. Модули без таблиц продолжают работать как прежде.
-2. Добавить общий сервис Core для предметных таблиц в `core/storage/modules.sqlite3`.
-   Пространства имён модулей разделены; журнал аналитики не становится каталогом
-   предметных данных. Векторы остаются в общем RAG с module/collection.
-3. Проверять миграции без выполнения при обнаружении. При установке применять
-   недостающие шаги транзакционно с журналом версий и контрольных сумм. Неизменённый
-   повтор не повторяет работу; исправление ранее выполненного SQL обнаруживается.
-4. Предоставить обработчикам общий API хранения, включая папочные модули в отдельном
-   процессе. Они не должны создавать собственные подключения ради использования
-   таблиц Core. Query не получает права записи; произвольный доступ к таблицам
-   другого модуля через этот API запрещён. Это контракт API, не ОС-песочница.
-5. `core.module_install` выполняет подготовку зависимостей, схемы и активацию как
-   одно поручение. Обновление учитывает состояние базы; отказ не активирует старый
-   код на несовместимой схеме. Отключение сохраняет таблицы, данные и настройки.
-6. Короткий `$m` загружает процедуру установки/обновления. MCP, CLI и кнопка Install
-   в существующем разделе Modules вызывают одну реализацию. Не создавать отдельный
-   установщик для каждого интерфейса или специальные условия для session-search.
-7. Поставить понятную инструкцию автора, шаблон и запускаемый пример каталога сессий.
-   Проверить установку из папки, запись/чтение через API, повтор, обновление с
-   сохранением строк, конфликт контрольных сумм, сбой миграции и несовместимый откат.
-   Существующие внешние базы session-search не мигрируются этим примером автоматически.
+1. Extend `module.json` with optional SQLite storage: target schema version,
+   ordinary sequential SQL migrations and code-compatible schema versions.
+   Modules without tables keep working.
+2. Add a common Core service for domain tables in `core/storage/modules.sqlite3`.
+   Module namespaces are separate; the analytics journal is not a domain catalog.
+   Vectors stay in shared RAG under module/collection.
+3. Validate migrations without execution during discovery. Installation applies
+   missing steps transactionally with a version/checksum ledger. Identical retries
+   do not repeat work; changed previously applied SQL is detected.
+4. Provide the common storage API to handlers, including separate-process folder
+   modules. They do not create their own connections to use Core tables. Queries
+   cannot write or arbitrarily access another module's tables through this API.
+   This is an API contract, not an OS sandbox.
+5. `core.module_install` prepares dependencies/schema and activates as one task.
+   Updates account for database state; failure never enables previous code against
+   an incompatible schema. Disable retains tables, data and settings.
+6. A short `$m` loads installation/update guidance. MCP, CLI and the existing
+   Modules Install button call one implementation; no interface-specific installer
+   or session-search special case is introduced.
+7. Ship author guidance, a template and a runnable session-catalog example. Verify
+   folder installation, API reads/writes, retry, updates retaining rows, checksum
+   conflict, migration failure and incompatible rollback. The example does not
+   automatically import existing external session-search databases.
 
-Исполнители Sol 6.1 разделяют Core storage, lifecycle/протокол и интерфейсы/документацию;
-координатор проверяет общий сценарий и отражает его в текущем цикле `$w`. Финальные
-артефакты собираются после интеграции дополнения, прежняя сборка не считается итоговой.
+Sol 6.1 workers split Core storage, lifecycle/protocol and interfaces/documentation.
+The coordinator checks the integrated flow and records it in the active `$w`
+cycle. Final artifacts are built after this addition is integrated; an earlier
+build is not considered final.
 
-## 5. Прямое обновление 1.1 → 1.3
+## 5. Direct upgrade 1.1 -> 1.3
 
-1. **Инвентаризация и preview.** Определить точные executable/service/client paths,
-   root, extras, модель, форматы и пользовательские настройки. Найти старые
-   managed skills/aliases и конфликты. Не путать package version с форматом данных.
-2. **Восстановимый снимок.** На согласованном состоянии сохранить конфигурацию,
-   карточки, инструкции, Git, SQLite, общую RAG, cycles/tmp/proposals, client configs
-   и manifest установленной версии. Для открытых баз использовать согласованный
-   backup, а не произвольное копирование изменяемых файлов.
-3. **Проверка на копии.** Прогнать тот же переход на изолированном root, проверить
-   ID, разрешения, связи, поиск, незавершённые записи, повторный запуск и откат.
-4. **Установка 1.3.** Сохранить root, профиль и extras. На время переключения
-   согласованно остановить/приостановить запись, заменить пакет и перезапустить
-   единый сервис; не создавать второго владельца общей базы.
-5. **Преобразование данных.** Перенести настройки, преобразовать ссылки,
-   синхронизировать метаданные RAG, версию формата и служебные контракты.
-   Пользовательский текст, ID, типы, статусы и sources сохраняются. Не переэмбеддить
-   неизменённые тела без причины; если description входит в embedding input,
-   явно версионировать это решение и необходимую переиндексацию.
-6. **Descriptions.** Выдать список материалов без описаний. Восстанавливать их
-   отдельной содержательной работой через proposals; чтение доступно во время
-   этого этапа. Отдельно показывать готовность формата и полноту описаний.
-7. **Незавершённая работа.** Сохранить cycle IDs, tmp, proposals и привязку к
-   согласованной редакции. Не переносить одобрение на изменённый смысл. Совместимая
-   работа продолжается; конфликт блокирует конкретное действие и получает путь
-   исправления. Отмена возможна только по отдельному решению пользователя.
-8. **Материалы продукта.** Доставить новый базовый контекст, описания алгоритмов,
-   процедуры и templates с сохранением пользовательских правок и явными конфликтами.
-9. **Клиенты.** Обновить только распознанные управляемые скиллы/манифесты для
-   Codex, Claude Code, OpenCode и Crush. Чужие и изменённые пользователем файлы
-   сохранить. Обновить соединение способом, поддерживаемым конкретной оболочкой.
-10. **Сквозная проверка.** Из свежего клиента вызвать новые инструменты, получить
-    процедуру, выполнить поиск и чтение выбранного контекста. Полный цикл записи
-    проверить в отдельном тестовом контексте с явной авторизацией теста.
-11. **Откат и повтор.** Проверить восстановление пакета, данных и клиентской
-    конфигурации как согласованного набора. Нельзя просто запустить 1.1 на уже
-    несовместимых данных 1.3. Повтор миграции не дублирует записи и изменения.
+1. **Inventory/preview.** Identify exact executable/service/client paths, root,
+   extras, model, formats and user settings. Find old managed skills/aliases and
+   conflicts. Package version and data format are distinct.
+2. **Recoverable snapshot.** Preserve configuration, cards, instructions, Git,
+   SQLite, shared RAG, cycles/tmp/proposals, client configs and installed-version
+   manifest from a consistent state. Use a coordinated backup for open databases,
+   not arbitrary copies of changing files.
+3. **Test a copy.** Exercise the same transition on an isolated root, checking IDs,
+   permissions, links, search, pending records, repeat and rollback.
+4. **Install 1.3.** Preserve root, profile and extras. Coordinate stopped/paused
+   writes during cutover, replace the package and restart the single service;
+   create no second owner of the shared database.
+5. **Transform data.** Migrate settings/links and synchronize RAG metadata, format
+   version and service contracts. Preserve user text, IDs, types, statuses and
+   sources. Do not re-embed unchanged bodies without cause. If descriptions enter
+   embedding input, explicitly version that decision and required reindexing.
+6. **Descriptions.** List records without descriptions. Repair through separate
+   substantive proposal work while reading remains available. Report format
+   readiness and description completeness separately.
+7. **Pending work.** Preserve cycle IDs, tmp, proposals and approved revisions.
+   Approval never transfers to changed meaning. Compatible work continues;
+   conflicts block only the relevant action and provide a repair path. Cancellation
+   requires a separate user decision.
+8. **Product materials.** Deliver new base context, algorithm descriptions,
+   procedures and templates, preserving user edits and exposing conflicts.
+9. **Clients.** Update only recognized managed skills/manifests for Codex, Claude
+   Code, OpenCode and Crush. Preserve unrelated/user-edited files. Refresh each
+   connection using the mechanism supported by that shell.
+10. **End-to-end check.** From a fresh client, invoke new tools, obtain the
+    procedure, search/read the selected context. Test a complete write cycle in a
+    separate test context with explicit authorization.
+11. **Rollback/retry.** Restore package, data and client configuration as an agreed
+    set. Do not simply run 1.1 on already-incompatible 1.3 data. Repeated migration
+    must not duplicate records or changes.
 
-Отдельные маршруты тестирования: 1.1 → 1.3, 1.2 → 1.3, повторный запуск 1.3,
-прерванная миграция, пользовательский конфликт и восстановление из снимка.
+Separate test routes: 1.1 -> 1.3, 1.2 -> 1.3, repeat 1.3, interrupted migration,
+user conflict and recovery from a snapshot.
 
-## 6. Проверки
+## 6. Verification
 
-| Область | Что доказывает проверка |
+| Area | What the check establishes |
 | --- | --- |
-| Отбор | Несколько ближайших фрагментов одного файла плюс другие файлы дают разные документы до лимита; граница и техническая неполнота названы правильно. |
-| Режимы | Materials и fragments имеют явные единицы, пагинация не теряет/не дублирует документы из-за скрытого смешения единиц. |
-| Ответы | Нет обычного excerpt и повторного списка ID; есть description, путь, контекст, значимый статус, источники и необходимые ошибки. |
-| Описания | Новая карточка без description выявляется; изменённое содержание требует проверки описания; legacy repair не выдумывает факты. |
-| Связи | Wikilinks работают в реальном Obsidian vault; переименование, межконтекстная связь, одинаковые имена и миграция сохраняют граф по ID. |
-| Настройки | Перенос сохраняет явные и отсутствующие старые значения; нет обхода согласования; false/0 не теряются при сериализации. |
-| Процедуры | Новый агент получает применимую процедуру до действия; обычный цикл не требует guide на каждом этапе; поиск не запускает запись. |
-| Перечитывание | Оба режима, новая задача, смена контекста, изменение правил, потеря текста, обновление плагина; отдельные агенты не разделяют флаг прочтения. |
-| Делегирование | Общее пользовательское требование, например отчёт исполнителя после завершения, доходит до него независимо от этапа процедуры. |
-| Модули | Папка по документации и один вызов Install создают таблицы и подключают работоспособные операции; повтор, сбой и обновление сохраняют согласованность схемы, кода и данных. |
-| Sources | Повторное получение требует новой проверки; недоступность/циклическая зависимость не выдаются за подтверждение. |
-| Миграция | Сохранены ID, правила, эффективные настройки, pending work и аналитика; повтор/прерывание/откат проверены. |
-| Доставка | Проверенная версия совпадает в артефакте, пакете, процессе и реальном клиентском вызове; обновлены managed skills. |
+| Selection | Repeated nearest fragments from one file plus other files yield distinct documents up to the limit; boundary and technical incompleteness are labelled correctly. |
+| Modes | Materials/fragments have explicit units; pagination neither loses nor duplicates documents through mixed hidden units. |
+| Responses | No default excerpt or duplicate ID list; description, path, context, meaningful status, sources and necessary errors remain. |
+| Descriptions | Missing new descriptions are detected; changed content triggers review; legacy repair invents no facts. |
+| Links | Wikilinks work in a real Obsidian vault; renames, cross-context links, duplicate names and migration retain the ID graph. |
+| Settings | Migration retains explicit and absent old values; approval cannot be bypassed; false/0 survive serialization. |
+| Procedures | A new agent obtains applicable guidance before acting; ordinary cycles need no guide at each phase; retrieval starts no writing. |
+| Rereading | Both modes cover new task, context change, changed/lost rules and plugin update; agents share no already-read flag. |
+| Delegation | A general user requirement, such as a worker's completion report, reaches that worker regardless of procedure phase. |
+| Modules | One documented folder and Install call create tables and working operations; retry/failure/update preserve schema/code/data consistency. |
+| Sources | Every repeated receipt requires a fresh check; unavailable/circular dependencies are not reported as verified. |
+| Migration | IDs, rules, effective settings, pending work and analytics survive; retry/interruption/rollback are checked. |
+| Delivery | Version matches across artifact, package, process and genuine client call; managed skills are updated. |
 
-Автотесты подтверждают контракты и состояние. Поведение модели проверяется
-отдельными сценариями с журналом вызовов; наличие текста запрета не доказывает
-соблюдение. Для Telegram использовать тестовый получатель/заглушку, без отправки
-сообщений в пользовательские каналы в рамках программных тестов.
+Automated tests establish contracts/state. Separate model scenarios and call logs
+check behavior; a written prohibition does not prove compliance. Telegram tests
+use a test recipient/stub, never send to user channels as part of software tests.
 
-На одних и тех же обезличенных fixtures сравнить число MCP-вызовов, повторных
-получений правил, объём JSON и доступные измерения токенов. Не выдавать размер
-ответа за доказанную экономию общего бюджета или качества решения. Набор проверок
-ограничен этим обновлением и не заменяет отдельный проект benchmark.
+Compare MCP call counts, repeated rules retrieval, JSON size and available token
+measurements on the same anonymized fixtures. Response size alone proves neither
+overall token savings nor answer quality. This bounded update check is not a
+separate benchmark project.
 
-Платформенная матрица: Linux/macOS/Windows и поддержанные Python. CI не заменяет
-проверку конкретного установленного клиента, OS startup или модельного обращения.
+Platform matrix: Linux/macOS/Windows and supported Python versions. CI does not
+replace verification of a particular installed client, OS startup or model call.
 
-## 7. Порядок выполнения и приёмки
+## 7. Execution and acceptance order
 
-Зависимости: исходная проверка → контракты → настройки/карточки/поиск → единая
-процедура и MCP → миграция → проверки на копии → документация и сборка → разрешённая
-публикация и установка → проверка настоящего клиента.
+Dependencies: baseline -> contracts -> settings/cards/search -> common procedure
+and MCP -> migration -> copy-based checks -> docs/build -> authorized publication
+and installation -> real client verification.
 
-После контрактов независимые части можно поручать исполнителям по непересекающимся
-областям. Координатор сохраняет выбранный контекст, область поручения, применимые
-правила, критерии приёмки и проверяет результат. Если используются ранее выбранные
-пользователем Sol 6.1, это явный выбор исполнения, а не функция Core.
+After contracts, independent work may be delegated across disjoint ownership.
+The coordinator retains the selected context, assignment scope, applicable rules
+and acceptance criteria, and verifies returns. Previously user-selected Sol 6.1
+is an explicit execution choice, not a Core capability.
 
-Работа идёт через действующий `$w`, пока новый контракт не установлен. После
-значимого этапа сохранять tmp, сравнивать результат с памятью и актуализировать
-состояние плана. На этапе планирования не помечать новые требования реализованными
-и не заменять существующие фактические карточки описанием будущего.
+Use the existing `$w` until the new contract is installed. After a significant
+stage, save tmp, compare with memory and update the plan's state. During planning,
+do not mark requirements implemented or replace factual records with future plans.
 
-## 8. Условия завершения цели
+## 8. Goal completion conditions
 
-- Принятые требования раздела 3 реализованы; рабочие варианты получили точный контракт.
-- Все релевантные проверки раздела 6 прошли; ограничения явно перечислены.
-- Прямой переход с 1.1 проверен без промежуточной установки 1.2 и без потери памяти.
-- Пользователь видит компактную выдачу и работающие Obsidian-связи; агент получает
-  descriptions и диагностику, а не текстовый шум вместо выбора.
-- Старые алгоритмы исправлены; обычные повторные `$w` не повторяют подготовку.
-- Политики согласования, обязательные источники и сохранение результатов не ослаблены.
-- Модуль по опубликованной инструкции устанавливается из папки одним скиллом;
-  Core готовит зависимости и схему, операции действительно читают и записывают
-  данные через общий API. Проверены повтор, обновление и несовместимый откат.
-- Согласованный выпуск установлен и действительно используется целевыми клиентами;
-  публикация сама по себе не закрывает цель.
-- Контекст и документация отражают проверенное состояние. Есть восстановимый снимок
-  и понятный путь отката. Оставшиеся конфликты не скрыты под статусом «готово».
+- Accepted section 3 requirements are implemented; working options have exact contracts.
+- All relevant section 6 checks pass, with explicit limits.
+- Direct transition from 1.1 is verified without intermediate 1.2 or memory loss.
+- Users see compact results and working Obsidian links; agents receive descriptions
+  and diagnostics rather than noise in place of selection.
+- Older algorithms are repaired; ordinary repeated `$w` does not repeat preparation.
+- Approval policies, mandatory sources and result preservation are not weakened.
+- A module installs from its documented folder through one skill; Core prepares
+  dependencies/schema and operations genuinely read/write through the shared API.
+  Retry, update and incompatible rollback are verified.
+- The agreed release is installed and actually used by target clients. Publication
+  alone does not complete the goal.
+- Context/docs reflect verified state. A recoverable snapshot and rollback path
+  exist; unresolved conflicts are not hidden under "complete".
 
-Предыдущая локальная приёмка: набор из 59 файлов покрыт прогонами и необходимыми
-повторами — 751 уникальный тест пройден, 8 пропущены, 64 subtests пройдены.
-Это историческая совокупность Linux-проверок соответствующего кандидата.
-Прямые переходы с настоящих writer 1.1 и 1.2 прошли на изолированных данных;
-Obsidian проверялся в отдельном vault, пример модуля — одним модельным вызовом `$m`.
-Эти свидетельства не переносятся автоматически на байты последующих сборок.
+Previous local acceptance covered 59 files through required runs/repeats:
+751 unique tests passed, 8 skipped, 64 subtests passed. This is historical aggregate
+Linux evidence for that candidate. Direct upgrades from genuine writers 1.1/1.2
+passed on isolated data; Obsidian was checked in a separate vault and the module
+example through one model `$m` call. This evidence does not automatically apply
+to later artifact bytes.
 
-Доставка: исходники отправлены, выпуск 1.3.0 прошёл полный CI, опубликован и
-установлен с восстановимым согласованным снимком. До изменения формата обнаружен
-случай вложенных vault; исправление 1.3.1 сохраняет оба `.obsidian`, выбирая
-собственную границу явно заданного root. После второго проверенного снимка
-установлен точный выпуск 1.3.1, запущен единственный владелец прежнего root.
+Delivery: source was pushed; 1.3.0 passed full CI, was published and installed with
+a recoverable consistent snapshot. Before the format change, nested vaults were
+detected. Correction 1.3.1 preserves both `.obsidian` directories and selects the
+explicit root's own boundary. After a second verified snapshot, exact 1.3.1 was
+installed with one owner of the previous root.
 
-Реальная миграция выбранного контекста 3→4 завершена; повтор совместим.
-Сохранены 77 карточек, 377 связей по YAML ID, полный свободный текст правил,
-эффективные настройки и незавершённая работа. До доставки базовых документов
-проверена неизменность 27 остальных контекстов. Явные `core.base_plan` /
-`core.base_install` и `core.algorithms_refresh` доставили восемь базовых карточек
-и каталог пяти алгоритмов 2.0.0 без смены активных правил или модели.
+The selected context's real 3->4 migration completed and retry was compatible.
+It preserved 77 cards, 377 YAML-ID links, complete free-form rules, effective
+settings and pending work. Before base-document delivery, 27 other contexts were
+verified unchanged. Explicit `core.base_plan` / `core.base_install` and
+`core.algorithms_refresh` delivered eight base cards and a catalog of five
+algorithms 2.0.0 without changing active rules or model.
 
-Полный CI 1.3.1 завершён: семь проверок Linux/macOS/Windows и перехода с настоящего
-writer 1.1 успешны. [Выпуск 1.3.1](https://github.com/pikiby/contextopus-core/releases/tag/v1.3.1)
-опубликован как latest stable; все семь скачанных файлов совпали с проверенными
-артефактами и GitHub digests. Codex выполнил `$w` с guide, правилами, проектом,
-поиском и чтением. Claude runner передал штатную команду `/w`; поиск/чтение
-выполнены, guide вызван повторно. `project_read` применяется по необходимости:
-само отсутствие вызова не доказывает нарушение.
+Full 1.3.1 CI completed: seven Linux/macOS/Windows and genuine-writer-1.1 upgrade
+checks succeeded. [Release 1.3.1](https://github.com/pikiby/contextopus-core/releases/tag/v1.3.1)
+was published as latest stable. All seven downloaded files matched verified
+artifacts and GitHub digests. Codex ran `$w` with guide, rules, project, search and
+reading. Claude runner used native `/w`; search/reading completed and guide was
+called again. `project_read` is conditional: its absence alone proves no violation.
 
-Ранние OpenCode/Crush-пробы передавали `$w` обычным текстом. Их ошибочно назвали
-проверкой штатной активации; наблюдения сохранены, но этот вывод отозван.
-Корректный `opencode run --command w` выполнил guide/settings/search и полное
-чтение, без ошибок аргументов, с обычным compact; INSTRUCTIONS не прочитаны.
-В Crush 0.87 штатный ReadSkill передал точный выпущенный скилл через вложение
-text/markdown в AgentMessage. Байты проверены в native user-message attachment;
-включение в prompt установлено по штатному коду клиента, исходящий provider request
-не захватывался. Подключение MCP-инструментов подтверждено. Модель использовала
-grep/glob/view и сделала ноль
-MCP-вызовов. Это валидное поведенческое падение данного сценария; причина не
-установлена. Отдельный сценарий только с read-only MCP-инструментами ранее
-подтвердил технический guide/schema, поиск и чтение, но не обычное поведение.
-Один временный A/B-кандидат с явным указанием Contextopus MCP тоже дал ноль
-MCP-вызовов; кандидат не принят и не установлен, выпущенный скилл не менялся.
-GUI/GPU и все модельные сценарии на каждой ОС не заявляются.
-Подробные свидетельства и ограничения: [проверка реализации](../implementation/contextopus-1.3.md).
-Продолжение исправлений уже выбрано пользователем. Финальный runtime
-1.3.2 — `f0578ce1734af2b516cbfe8175b8f991d9fd8acf`, wheel SHA-256
+Early OpenCode/Crush probes passed `$w` as ordinary text and were incorrectly
+called native activation checks. The observations remain, but that conclusion
+was withdrawn. Correct `opencode run --command w` obtained guide/settings/search
+and full reading without argument errors, using normal compact responses;
+INSTRUCTIONS was not read.
+
+In Crush 0.87, native ReadSkill supplied the exact released skill as a text/markdown
+attachment in AgentMessage. Bytes were checked in the native user-message
+attachment. Client source established inclusion in the prompt; the outgoing
+provider request was not captured. MCP tools were connected. The model used
+grep/glob/view and made zero MCP calls. This is a valid behavioral failure for
+that scenario; its cause is unresolved. An earlier read-only-MCP-only scenario
+established technical guide/schema/search/reading, not ordinary behavior.
+One temporary A/B candidate explicitly naming Contextopus MCP also produced zero
+MCP calls; it was neither accepted nor installed, and the released skill stayed
+unchanged. GUI/GPU and every model scenario on every OS were not verified.
+Detailed evidence/limits: [implementation verification](../implementation/contextopus-1.3.md).
+
+Historical runtime 1.3.2 check:
+`f0578ce1734af2b516cbfe8175b8f991d9fd8acf`, wheel SHA-256
 `f8d47a8ea562532138c04b869cc1b8e8f008993e0cb683eae6183c7b2b076b1a`.
-Полная матрица CI из семи успешных jobs относится к `2add7fa`; последующий
-metadata-only `8b00620` прошёл 30 целевых тестов и проверки точного установленного
-wheel, MCP и хранилища модуля. Переход с настоящего writer 1.2 на wheel `8b00620`
-прошёл отдельно: один тест за 25.81 s. Последующее уточнение порядка чтения
-`f0578ce` прошло три целевых теста и exact-wheel MCP/guide/module-storage smoke;
-повторная полная ОС-матрица этому SHA не приписывается.
+The seven-job successful CI matrix belongs to `2add7fa`. Subsequent metadata-only
+`8b00620` passed 30 targeted tests plus exact installed-wheel, MCP and module-storage
+checks. Genuine-writer-1.2 upgrade to wheel `8b00620` was checked separately:
+one test in 25.81 s. Later reading-order refinement `f0578ce` passed three targeted
+tests and exact-wheel MCP/guide/module-storage smoke. No repeated complete OS
+matrix is attributed to that SHA.
 
-Независимые controlled-corpus model проверки финального wheel подтвердили в
-OpenCode 1.18.32 с DeepSeek Flash и Crush 0.87 с DeepSeek Pro чтение политики,
-полных INSTRUCTIONS, поиск с унаследованным N=2 и полное чтение нужного факта;
-OpenCode дополнительно полностью прочитал связанный план.
-Обхода через файлы и записей не было. Crush восстановился после одной ошибки
-предположенного аргумента ID, запросив сигнатуру и повторив корректный read.
-Это два ограниченных сценария, не доказательство production ranking или
-универсального соблюдения процедуры. Делегирование, смена контекста, утрата
-текста правил и обновление плагина остаются без отдельного наблюдаемого
-доказательства; парное причинное измерение экономии вызовов/токенов не выполнено.
-Рабочая установка на этом этапе остаётся 1.3.1. Публикация и технический доступ
-не заменяют сохранность при обновлении и итоговый аудит пользовательских данных.
+Independent controlled-corpus model checks of the final wheel established
+policy/full-INSTRUCTIONS reading, search inheriting N=2 and full retrieval of the
+required fact in OpenCode 1.18.32 with DeepSeek Flash and Crush 0.87 with DeepSeek
+Pro. OpenCode also read the linked plan completely. There were no filesystem
+bypasses or writes. Crush recovered from one guessed ID-argument error by
+requesting the signature and repeating a correct read.
+
+These are two bounded scenarios, not proof of production ranking or universal
+procedural compliance. Delegation, context changes, lost rules text and plugin
+updates still lack separate observed evidence; no paired causal measurement of
+call/token savings was performed. These results belong to the specified 1.3.2
+runtime. Publication and technical access do not replace upgrade preservation or
+a final data audit.
+
+## Final 1.3.3 delivery
+
+Immutable [release 1.3.3](https://github.com/pikiby/contextopus-core/releases/tag/v1.3.3)
+corresponds to `9873157dde6f5f6c4c3fbda263c6b7e0bef12114`; wheel SHA-256:
+`81c7aba6560129658d5f6201154bdffb6816730ae7c557afc6efe6ff812879c9`.
+All seven published artifacts were downloaded and verified. Exactly 120 application
+files were installed; local CPU dependencies, rules, settings and root were
+preserved. Fresh MCP returned the current procedure. Managed base version is
+1.3.3, its repeat plan is empty, and the algorithm catalog was refreshed/read.
+Four existing client integrations produced unchanged previews: 14 managed
+Codex/Claude files matched seven supplied skills; OpenCode/Crush retained their
+previous HTTP configuration. Open sessions may need reconnecting or rereading.
+
+The patch fixes migration planning when initial INSTRUCTIONS is absent and
+proposals are retained, without treating missing old rules as approval of new
+ones. Checks covered 30 affected cases, 40 version/release contracts with two
+subtests, 28 MCP contracts and two cases on an isolated installed wheel.
+The full OS matrix remains tied to `2add7fa`; model scenarios to 1.3.2 `f0578ce`.
+Skills and procedure in 1.3.3 are byte-identical to those checks. This patch is
+not credited with repeated model checks or measured token savings.
+
+The final 29-context audit covers the complete registered set, descriptions,
+link structure and index synchronization. It establishes neither freshness of
+every historical external statement nor PROJECT completeness.

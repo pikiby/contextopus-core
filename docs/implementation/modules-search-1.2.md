@@ -1,5 +1,9 @@
 # Modules and search update: implementation evidence
 
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
 ## Implemented scope
 
 The 1.2.0 checkout implements folder-module lifecycle and native skill contributions; independent instruction approval; `w-context` discovery; five shared selection algorithms with scoped settings; derived algorithm discovery; bounded search evidence/replay; and bundled Workspace documentation with recovery-aware setup and updates.

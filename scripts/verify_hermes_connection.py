@@ -30,7 +30,7 @@ from urllib.parse import urlsplit
 
 
 AUDITED_COMMIT = "d923a5eb487a17c0a68801bba9ef0f56c81040a8"
-SKILLS = ("w", "w-search", "w-create", "w-settings", "w-context", "w-analyze", "m")
+SKILLS = ("m",)
 TOOLS = ("guide", "read", "write", "finish")
 UTILITIES = ("list_resources", "read_resource", "list_prompts", "get_prompt")
 LIMITS = [
@@ -86,11 +86,11 @@ def decode_tool_result(result):
     return value
 
 
-def require_workspace_guide(value):
+def require_modules_guide(value):
     content = value.get("content")
-    if (value.get("name") != "workspace" or not isinstance(content, str)
-            or "workspace.startup" not in content or "workspace.search" not in content):
-        raise ProbeFailure("guide() did not return the ordinary Workspace procedure", {"guide_result": value})
+    if (value.get("name") != "modules" or not isinstance(content, str)
+            or "core.modules" not in content or "core.module_install" not in content):
+        raise ProbeFailure("guide() did not return the Core module-management procedure", {"guide_result": value})
     return hashlib.sha256(content.encode()).hexdigest()
 
 
@@ -194,11 +194,11 @@ def _native_probe(args):
             if len(connections) != 1 or (previous is not None and connections[0] is previous):
                 raise ValueError("Native MCP reload did not create one fresh Contextopus connection")
             previous = connections[0]
-            value = decode_tool_result(registry.dispatch(selected["guide"], {}))
-            digest = require_workspace_guide(value)
+            value = decode_tool_result(registry.dispatch(selected["guide"], {"procedure": "modules"}))
+            digest = require_modules_guide(value)
             passes.append({"phase": phase, "tools": sorted(names), "canonical_tools": selected,
-                           "generated_utility_tools": sorted(set(names) - set(selected.values())), "guide_arguments": {},
-                           "guide_result": value, "workspace_procedure_sha256": digest})
+                           "generated_utility_tools": sorted(set(names) - set(selected.values())), "guide_arguments": {"procedure": "modules"},
+                           "guide_result": value, "modules_procedure_sha256": digest})
     finally:
         shutdown_mcp_servers()
     return {"verified": True, "client": "Hermes", "hermes_version": __version__,

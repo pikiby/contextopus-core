@@ -1,6 +1,6 @@
 {
   "name": "contextopus",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Persistent context through one local Contextopus application",
   "extensions": {
     "com.openai": {

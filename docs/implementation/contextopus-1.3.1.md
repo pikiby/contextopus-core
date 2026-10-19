@@ -1,5 +1,9 @@
 # Contextopus 1.3.1 patch evidence
 
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
 ## Scope and reproduced layout
 
 The actual migration after the 1.3.0 cutover was blocked by vault discovery:
@@ -35,7 +39,7 @@ platform counts remain separate; the focused counts above are historical.
 
 The [delivery record](contextopus-1.3.md#final-delivery-released-and-installed-131)
 records preservation and native-client outcomes, including the remaining model
-behavior limits. Live still runs 1.3.1 at this delivery checkpoint. The later
-1.3.2 runtime has separate technical verification and independently reviewed
-controlled-corpus OpenCode/Crush model checks. Those bounded results are recorded
-in the delivery record; they do not replace or relabel the 1.3.1 evidence.
+behavior limits. Live was 1.3.1 at that historical checkpoint. The
+[current 1.3.3 delivery status](contextopus-1.3.md#final-delivery-133) and the
+separate controlled-corpus 1.3.2 OpenCode/Crush checks retain their own scope;
+they do not replace or relabel the 1.3.1 evidence.

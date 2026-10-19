@@ -167,11 +167,13 @@ def plan(
     hashes = dict(managed.get("skills", {}))
     source = files("contextopus").joinpath("resources", "skills")
     known = json.loads(files("contextopus").joinpath("resources", "legacy_skill_hashes.json").read_text())
+    canonical_names = set()
     for skill in (
         sorted(source.iterdir(), key=lambda item: item.name) if install_skills else []
     ):
         if not skill.is_dir():
             continue
+        canonical_names.add(skill.name)
         target = skills_root / skill.name / "SKILL.md"
         skill_content = skill.joinpath("SKILL.md").read_bytes()
         prior = target.read_bytes() if target.exists() else None
@@ -205,6 +207,7 @@ def plan(
                 if skill.name.casefold() in occupied_names:
                     raise IntegrationConflict('Module skill name collision: ' + skill.name)
                 occupied_names.add(skill.name.casefold())
+                canonical_names.add(skill.name)
                 for asset in sorted(skill.rglob('*')):
                     if not asset.is_file():
                         continue
@@ -212,12 +215,13 @@ def plan(
                     content = asset.read_bytes()
                     prior = target.read_bytes() if target.exists() else None
                     relative = target.relative_to(project).as_posix() if target.is_relative_to(project) else str(target)
-                    if prior is not None and prior != content and managed.get('skills', {}).get(relative) != _digest(prior):
+                    known_entrypoint = (asset == skill / 'SKILL.md' and prior is not None
+                        and _digest(prior.replace(b'\r\n', b'\n')) in known.get(skill.name, []))
+                    if prior is not None and prior != content and managed.get('skills', {}).get(relative) != _digest(prior) and not known_entrypoint:
                         raise IntegrationConflict('Module skill file collision: ' + str(target))
                     hashes[relative] = module_hashes[relative] = _digest(content)
                     writes.append((target, prior, content))
     retired, preserved = [], []
-    canonical_names = {item.name for item in source.iterdir() if item.is_dir()}
     legacy_roots = {skills_root} if install_skills or native_plugin else set()
     if legacy_skills is not None:
         legacy_roots.add(Path(legacy_skills).expanduser().resolve())
@@ -232,7 +236,7 @@ def plan(
             .read_text()
         )
         for name, accepted in known.items():
-            if install_skills and legacy_root == skills_root and name in canonical_names:
+            if legacy_root == skills_root and name in canonical_names:
                 continue
             target = legacy_root / name / "SKILL.md"
             if not target.exists():
@@ -267,6 +271,9 @@ def plan(
                 hashes.pop(relative, None)
     else:
         module_hashes = dict(managed.get('module_skills', {}))
+    # A former built-in skill can also appear in the module ownership receipt.
+    # Its removal must be applied once after the module is disabled.
+    retired = list({item['path']: item for item in retired}.values())
     managed_content = (
         json.dumps({"skills": hashes, "module_skills": module_hashes}, sort_keys=True, indent=2) + "\n"
     ).encode()

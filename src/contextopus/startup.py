@@ -31,21 +31,8 @@ class Application:
         self.index = RagIndex(self.layout, self.resources)
         from .core.module_storage import ModuleStorage
         self.module_storage = ModuleStorage(self.layout)
-        from .modules.workspace.source import WorkspaceEligibility
-
-        self.index.register_source(
-            "workspace", WorkspaceEligibility(self.layout, self.resources.acquire)
-        )
         self.services = RootServices(self.layout, self.resources, self.registry)
         self._register_core()
-        from .modules.workspace.operations import register_operations
-
-        register_operations(self.registry, provider_factory=self.resources.acquire)
-        from .modules.workspace.discovery import register as register_discovery
-        register_discovery(self)
-        self.registry.register_module(
-            "workspace", available=True, state="available", open_tui=None
-        )
         if discover:
             for entry in metadata.entry_points(group="contextopus.modules"):
                 before = dict(self.registry._operations), dict(self.registry.modules)
@@ -55,31 +42,18 @@ class Application:
                     self.registry._operations, self.registry.modules = before
                     self.registry.register_module(entry.name, available=False,
                                                   state="error", error=str(exc))
-        try:
-            from .modules.session_search import SessionSearch
-
-            module = SessionSearch()
-            if "session_search" not in self.registry.modules and module.available():
-                module.register(self.registry)
-                self.registry.register_module(
-                    "session_search",
-                    available=True,
-                    state="available",
-                    open_tui="session_search.open_tui",
-                )
-        except ImportError:
-            pass
-
         from .core.module_management import ModuleManager
         self.module_manager = ModuleManager(self)
         self._operation("core.modules", "query", self.module_manager.discover)
-        for action in ("install", "prepare", "enable", "disable"):
+        for action in ("prepare", "enable", "disable"):
             self._operation("core.module_" + action, "execute", getattr(self.module_manager, action), {"module": (str, ...)})
+        self._operation("core.module_source_plan", "query", self.module_manager.source_plan,
+                        {"module": (str, ...), "source": (str, ...)})
+        self._operation("core.module_install", "execute", self.module_manager.install,
+                        {"module": (str, ...), "source": (str | None, None), "source_revision": (str | None, None)})
         self._operation("core.module_update", "execute", self.module_manager.update, {"module": (str, ...), "source": (str, ...)})
         self._refresh_algorithms()
         self._register_search_tools()
-        from .modules.workspace.base_context import register as register_base
-        register_base(self)
 
     def _operation(self, name, kind, fn, fields=None):
         model = create_model(
@@ -94,7 +68,7 @@ class Application:
                 model,
                 lambda request_context, **kw: fn(**kw),
                 description=fn.__doc__ or name.replace("_", " ").replace(".", " "),
-                guard_root=not name.startswith("core.relocation_"),
+                guard_root=not (name.startswith("core.relocation_") or name.startswith("core.module_")),
             )
         )
 
@@ -248,7 +222,7 @@ class Application:
     def active_profile(self):
         import json
 
-        path = self.layout.workspace_rag / "active.json"
+        path = self.layout.rag / "active.json"
         return json.loads(path.read_text()) if path.is_file() else None
 
     def model_hardware(self):
@@ -270,40 +244,20 @@ class Application:
             plan, apply_profile=self.apply_profile, read_active=self.active_profile
         )
         if result.get("status") == "ok":
-            from .modules.workspace.base_context import prepare_setup
-            result["setup"] = prepare_setup(self)
+            result["setup"] = self.module_manager.run_hooks('setup')
         return result
 
     def apply_profile(self, config, chunking):
-        from .modules.workspace.server import runtime
-
-        contexts = self.layout.workspace_base
-        names = (
-            [
-                p.name
-                for p in sorted(contexts.iterdir())
-                if not p.name.startswith(".")
-                and p.is_dir()
-                and (p / "knowledge").is_dir()
-            ]
-            if contexts.is_dir()
-            else []
-        )
-        if names:
-            selected = (
-                self.context.workspace if self.context.workspace in names else names[0]
-            )
-            engine = runtime(
-                str(self.layout.root), selected, provider_factory=self.resources.acquire
-            ).engine
-            from .modules.workspace.runtime import SearchConfig
-
-            search = (
-                self.active_profile()["search"]
-                if self.active_profile()
-                else vars(SearchConfig())
-            )
-            return engine.switch_embeddings(config, search, chunking)
+        owners = sum(len(host.hooks.get('apply_profile', []))
+                     for host in self.module_manager.contributions.values())
+        if owners > 1:
+            raise ValueError('Multiple modules contribute profile rebuilding; select one owner before changing the profile')
+        results = self.module_manager.run_hooks('apply_profile', config, chunking)
+        applied = [result for values in results.values() for result in values if result is not None]
+        if len(applied) > 1:
+            raise ValueError('Multiple modules attempted to own profile rebuilding')
+        if applied:
+            return applied[0]
         active = self.active_profile()
         if active:
             from .core.rag import rebuild_profile
@@ -358,7 +312,7 @@ class Application:
         import json, os
         from .core.storage import sync_directory
 
-        path = self.layout.workspace_rag / "active.json"
+        path = self.layout.rag / "active.json"
         temporary = path.with_suffix(".tmp")
         with temporary.open("w") as stream:
             json.dump(active, stream)
@@ -373,7 +327,8 @@ class Application:
         selected_module = (
             options.get("module")
             or root_values.get("module")
-            or ("workspace" if self.context.workspace else None)
+            or (next(iter(self.index.source_adapters))
+                if self.context.workspace and len(self.index.source_adapters) == 1 else None)
         )
         selected_collection = (
             options.get("collection")
@@ -399,22 +354,17 @@ class Application:
         return {**result, "effective": effective}
 
     def procedure(self, name):
-        if name == "default-instructions":
-            from .core.settings import WORKSPACE_CREATION_DEFAULTS, WORKSPACE_SETTINGS
-            return {
-                "name": name,
-                "creation_defaults": {**WORKSPACE_CREATION_DEFAULTS,
-                                      "reread_instructions": WORKSPACE_SETTINGS['reread_instructions']},
-                "content": package_resources.files("contextopus.modules.workspace")
-                .joinpath("default_instructions.md")
-                .read_text(encoding="utf-8"),
-            }
+        self.module_manager.refresh()
+        if name in self.module_manager.procedures:
+            return self.module_manager.procedures[name][1]()
         if "/" in name and hasattr(self, "module_manager"):
             module, relative = name.split("/", 1)
             if module in self.module_manager.loaded:
                 base = self.module_manager.sources(module, "procedures")
                 path = self.module_manager._inside(base, relative + ".md")
                 return {"name": name, "content": path.read_text(encoding="utf-8")}
+        if name == 'default':
+            name = 'modules'
         parts = name.split("/")
         if any(not p or p in {".", ".."} or "\\" in p for p in parts):
             raise ValueError("Invalid procedure name")
@@ -446,13 +396,11 @@ class Application:
                 self.layout.rag,
                 self.layout.analytics,
                 self.layout.configuration,
-                self.layout.root / "modules/workspace/workspace_contexts",
-                self.layout.root / "modules/workspace/control",
             ):
                 path.mkdir(parents=True, exist_ok=True)
-        from .modules.workspace.base_context import prepare_setup
+        self.module_manager.run_hooks('initialize')
         return {"status": "initialized", "root": str(self.layout.root),
-                "setup": prepare_setup(self)}
+                "setup": self.module_manager.run_hooks('setup')}
 
     def doctor(self):
         return {
@@ -471,18 +419,20 @@ class Application:
         return RelocationPlans(self.layout.root).review(destination, include_manifest)
 
     def relocation_apply(self, plan=None, plan_revision=None):
-        from .core.relocation import apply, RelocationPlans
+        from .core.module_management.lifecycle import module_lifecycle
+        # Lifecycle -> runtime -> root: children finish their Core RPC before
+        # relocation takes the filesystem guard and publishes the freeze.
+        with module_lifecycle(self.layout.root), self.module_manager.runtime.lock:
+            from .core.relocation import apply, RelocationPlans
 
-        plan = RelocationPlans(self.layout.root).resolve(plan, plan_revision)
-        from .modules.workspace.server import _runtimes, _cache_lock
-
-        with _cache_lock:
-            for key in [k for k in _runtimes if k[0] == str(self.layout.root)]:
-                _runtimes.pop(key).close()
-        self.index.table = self.index.db = None
-        result = apply(plan)
-        self.journal.rebind(StorageLayout(result["destination"]))
-        return result
+            plan = RelocationPlans(self.layout.root).resolve(plan, plan_revision)
+            self.module_manager.runtime.close()
+            with self.module_manager.quiesce_contributions():
+                self.module_manager.run_hooks('before_relocation')
+                self.index.table = self.index.db = None
+                result = apply(plan)
+                self.journal.rebind(StorageLayout(result["destination"]))
+                return result
 
     def relocation_rollback(self, plan=None, plan_revision=None):
         from .core.relocation import rollback, RelocationPlans
@@ -492,27 +442,32 @@ class Application:
         return result
 
     def query(self, operation, arguments=None):
+        operation = self.normalize_operation(operation)
         if operation == "describe":
-            return self.registry.describe((arguments or {}).get("operation"))
+            selected = (arguments or {}).get("operation")
+            return self.registry.describe(self.normalize_operation(selected) if selected is not None else None)
         return self.registry.dispatch("query", operation, arguments, self.context)
 
     def execute(self, operation, arguments=None):
-        return self.registry.dispatch("execute", operation, arguments, self.context)
+        return self.registry.dispatch("execute", self.normalize_operation(operation), arguments, self.context)
+
+    def normalize_operation(self, operation):
+        self.module_manager.refresh()
+        return self.module_manager.aliases.get(operation, (None, operation))[1]
 
     def close(self):
+        failures = []
+        try:
+            self.module_manager.close_contributions()
+        except Exception as exc:
+            failures.append(exc)
         if self._owns_resources:
-            from .modules.workspace.server import _runtimes, _cache_lock
-
-            with _cache_lock:
-                selected = [
-                    k
-                    for k, runtime in _runtimes.items()
-                    if k[0] == str(self.context.root)
-                    and runtime.engine._factory == self.resources.acquire
-                ]
-                for key in selected:
-                    _runtimes.pop(key).close()
-            self.resources.close()
+            try:
+                self.resources.close()
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise ExceptionGroup('Application failed to close', failures)
 
     def __enter__(self):
         return self

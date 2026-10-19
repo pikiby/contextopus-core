@@ -38,13 +38,14 @@ class RagIndex:
         self.db = self.table = self._provider = None
         self.source_adapters = {}
         self.algorithm_registry = None
+        self.module_states = None
 
     def register_source(self, module, adapter):
         self.source_adapters[module] = adapter
 
     @staticmethod
     def stored_status(layout):
-        state = layout.workspace_rag
+        state = layout.rag
         pointer = state / "active.json"
         if not pointer.is_file() or not (state / "lancedb").is_dir():
             return {"state": "not_initialized", "chunks": None, "documents": None}
@@ -173,12 +174,7 @@ class RagIndex:
         from .chunking import default_chunking
         import os, uuid
 
-        if create and not (self.layout.root / ".pcw").exists() and self.layout.legacy:
-            self.layout.configuration.mkdir(parents=True, exist_ok=True)
-            (self.layout.configuration / "layout.json").write_text(
-                json.dumps({"format": "contextopus", "version": 1})
-            )
-        state = self.layout.workspace_rag
+        state = self.layout.rag
         if not create and not (state / "active.json").is_file():
             return None
         if create:
@@ -256,19 +252,20 @@ class RagIndex:
 
     def profile(self):
         """Read the active root profile without creating storage or loading a model."""
-        pointer = self.layout.workspace_rag / "active.json"
+        pointer = self.layout.rag / "active.json"
         if not pointer.is_file():
             raise ValueError("Initialize the Core embedding profile before indexing")
         return json.loads(pointer.read_text())["config"]
 
-    def vector_revisions(self, module, collection):
-        with self.layout.guard():
-            table = self._generic_table()
-            if table is None:
-                return {}
-            rows = self.read_rows(table, ["object_id", "revision"],
-                "module=" + self._quote(module) + " AND collection=" + self._quote(collection))
-            return {r["object_id"]: r["revision"] for r in rows}
+    def vector_revisions(self, module, collection, *, object_ids=None, max_bytes=262144):
+        """Read explicit IDs in bounded batches; report missing and conflicting rows."""
+        from .rag_revisions import lookup
+        return lookup(self, module, collection, object_ids=object_ids, max_bytes=max_bytes)
+
+    def vector_revisions_page(self, module, collection, *, cursor=None, limit=100, max_bytes=262144):
+        """Read one byte-bounded inventory page from a native immutable snapshot."""
+        from .rag_revisions import inventory
+        return inventory(self, module, collection, cursor=cursor, limit=limit, max_bytes=max_bytes)
 
     def put_vector(self, document, vector, *, profile):
         """Store one module-prepared block using the root's existing profile."""
@@ -357,6 +354,33 @@ class RagIndex:
         """Compatibility result list; use search_detailed for selection evidence."""
         return self.search_detailed(query, **options)['results']
 
+    def inactive_modules(self):
+        """Fail closed for lifecycle-owned data while leaving app-owned data generic."""
+        path = self.layout.configuration / 'modules.json'
+        state = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+        inactive = {}
+        reader = None
+        for module, record in state.items():
+            if not record.get('enabled'):
+                inactive[module] = 'disabled'
+            elif self.module_states is not None:
+                if self.module_states.get(module) != 'enabled':
+                    inactive[module] = 'unavailable'
+            else:
+                # Standalone index callers have no Application registry. Inspect
+                # the persisted release contract without importing module code.
+                try:
+                    if reader is None:
+                        from .module_management.manifest import ModuleManifestReader
+                        reader = ModuleManifestReader(self.layout)
+                    manifest = reader._manifest(module)
+                    if reader._digest(module) != record.get('prepared'):
+                        raise ValueError('Module release changed')
+                    reader._require_storage(module, manifest)
+                except Exception:
+                    inactive[module] = 'unavailable'
+        return inactive
+
     def search_detailed(
         self,
         query,
@@ -379,6 +403,10 @@ class RagIndex:
             raise ValueError("Invalid result limit")
         if candidate_limit is not None and (type(candidate_limit) is not int or not 1 <= candidate_limit <= 100000):
             raise ValueError('candidate_limit must be between 1 and 100000')
+        inactive_modules = self.inactive_modules()
+        if module in inactive_modules:
+            raise ValueError('Module ' + module + ' is ' + inactive_modules[module] +
+                             '; use core.modules and enable or repair it before searching its data')
         from .filtering import select, registry_for_layout, annotate_candidate_limit
         registry = self.algorithm_registry or registry_for_layout(self.layout)
         from .settings import Settings, matches_location
@@ -409,12 +437,16 @@ class RagIndex:
                        'status':status, 'include_archived':include_archived,
                        'include':snapshot['values']['include'], 'exclude':snapshot['values']['exclude']},
                 candidate_pool_truncated=False)
+            if inactive_modules:
+                result['diagnostics']['excluded_modules'] = inactive_modules
             annotate_candidate_limit(result['diagnostics'], candidate_limit)
             return result
         table = self._generic_table()
         if table is None:
             return finish([])
         clauses = []
+        if inactive_modules:
+            clauses.append('module NOT IN (' + ','.join(self._quote(name) for name in sorted(inactive_modules)) + ')')
         for name, value in (("module", module), ("collection", collection)):
             if value is not None:
                 clauses.append(name + "=" + self._quote(value))

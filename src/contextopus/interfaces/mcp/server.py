@@ -27,11 +27,15 @@ class ServerOwner:
 
         key = (str(StorageLayout.resolve(root or self.root).root), context)
         with self._lock:
+            created = key not in self.applications
             if key not in self.applications:
                 self.applications[key] = Application(
                     key[0], key[1], resources=self.resources
                 )
-            return self.applications[key]
+            app = self.applications[key]
+        if created and self.resources.services_started:
+            self.resources.start_services()
+        return app
 
     def current_root(self):
         import json
@@ -52,10 +56,19 @@ class ServerOwner:
         return str(current)
 
     def close(self):
-        from contextopus.modules.workspace.server import close_runtimes
-
-        close_runtimes()
-        self.resources.close()
+        failures = []
+        for app in list(self.applications.values()):
+            try:
+                app.close()
+            except Exception as exc:
+                failures.append(exc)
+        self.applications.clear()
+        try:
+            self.resources.close()
+        except Exception as exc:
+            failures.append(exc)
+        if failures:
+            raise ExceptionGroup('MCP owner failed to close', failures)
 
 
 def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
@@ -76,12 +89,11 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             "Native skill loading and obtaining declared external sources still use the readers required by "
             "the client and procedure. If Contextopus MCP is unavailable, report the connection failure "
             "instead of bypassing it. Use this server's read tool for queries and write tool only for "
-            "authorized changes under the existing approval rules. Use finish to close one completed cycle under "
-            "its cleanup policy. guide() returns the ordinary Workspace "
-            "workflow; guide(operation=...) returns only an operation signature and does not replace a "
-            "procedure. Request signatures only when unknown. Reuse procedures already obtained for the same "
-            "task; reload only when unknown, lost, changed or after a plugin update. Workspace operations "
-            "require explicit context."
+            "authorized changes under the existing approval rules. Enabled modules contribute their own "
+            "operations and procedures. guide() returns the active default procedure, or the module "
+            "installation procedure for Core alone. guide(operation=...) returns only an operation "
+            "signature and does not replace a procedure. Request signatures only when unknown. "
+            "Reuse procedures already obtained for the same task; reload when changed or lost."
         ),
     )
     atexit.register(owner.close)
@@ -97,15 +109,10 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         # Reaching transport dispatch proves this owner is serving requests.
         # It provides no evidence about a particular native client's identity.
         app.services.runtime_mcp["server"] = "running"
-        from contextopus.modules.workspace.operations import _DESCRIPTIONS
+        return getattr(app, kind)(app.normalize_operation(operation), arguments)
 
-        if operation in _DESCRIPTIONS:
-            operation = "workspace." + operation
-        return getattr(app, kind)(operation, arguments)
-
-    def normalize(operation):
-        from contextopus.modules.workspace.operations import _DESCRIPTIONS
-        return 'workspace.' + operation if operation in _DESCRIPTIONS else operation
+    def normalize(operation, work_root=None, context=None, workspace=None):
+        return owner.application(work_root, context or workspace).normalize_operation(operation)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def guide(
@@ -116,14 +123,14 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         context: str | None = None,
         workspace: str | None = None,
     ) -> dict:
-        """guide() reads the Workspace procedure; operation=... gives only a signature, not a replacement for a procedure. Catalog is opt-in."""
+        """guide() reads the active default procedure; operation=... gives only a signature, not a replacement for a procedure. Catalog is opt-in."""
         if sum((procedure is not None, operation is not None, catalog)) > 1:
             raise ValueError('Choose procedure, operation or catalog')
         if operation is not None or catalog:
             return await anyio.to_thread.run_sync(partial(route, 'query', 'describe',
-                {'operation': normalize(operation)} if operation is not None else {}, work_root, context, workspace))
+                {'operation': normalize(operation, work_root, context, workspace)} if operation is not None else {}, work_root, context, workspace))
         return await anyio.to_thread.run_sync(partial(route, 'query', 'procedure',
-            {'name': procedure or 'workspace'}, work_root, context, workspace))
+            {'name': procedure or 'default'}, work_root, context, workspace))
 
     async def dispatch(kind, operation, arguments, work_root, context, workspace, detail):
         # Validate before executing a mutation. Presentation runs only after the
@@ -132,7 +139,7 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             raise ValueError('detail must be compact or full')
         result = await anyio.to_thread.run_sync(partial(route, kind, operation, arguments, work_root, context, workspace))
         from .presentation import present
-        result = present(result, operation=normalize(operation), arguments=arguments, detail=detail)
+        result = present(result, operation=normalize(operation, work_root, context, workspace), arguments=arguments, detail=detail)
         if isinstance(result, dict):
             return result
         # FastMCP otherwise expands a list into separate content blocks, losing
@@ -177,7 +184,7 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         Cancellation needs the user's actual cancellation. Native clients can
         authorize this bounded tool separately from general write operations.
         """
-        return await dispatch('execute', 'workspace.finish', {
+        return await dispatch('execute', 'finish', {
             'cycle_id': cycle_id, 'expected_revision': expected_revision,
             'confirmation': confirmation, 'cancel': cancel,
         }, work_root, context, workspace, 'compact')

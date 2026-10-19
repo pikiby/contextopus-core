@@ -1,8 +1,9 @@
 # Hermes native integration
 
 Contextopus connects Hermes to the same loopback HTTP MCP owner used by the
-other clients. It installs the canonical seven routing skills in Hermes' native
-skill directory. Procedures, Workspace settings, storage, approvals and work
+other clients. Core installs its `m` routing skill in Hermes' native skill
+directory. Enabled modules contribute their own skills; an installed Workspace
+adds its six `w` skills through the same integration preview/apply. Procedures, Workspace settings, storage, approvals and work
 cycles remain in Contextopus. Hermes' own memories and sessions remain managed
 by Hermes; this integration needs no additional memory provider.
 
@@ -31,7 +32,7 @@ Primary source references:
 ## Install and select the native home
 
 Install Contextopus from the verified wheel using the normal
-[installation and upgrade sequence](../../README.md#quick-start). Preserve an
+[installation and upgrade sequence](../../README.md#start-from-source). Preserve an
 existing data root and selected inference extras. Install Hermes separately
 from its reviewed official stable source. Its installer prepares a managed
 runtime and dependencies; installing the checkout with an ordinary editable
@@ -163,7 +164,7 @@ Verify all four tools from the actual Hermes session: `guide`, `read`, `write`
 and `finish`. Hermes may qualify their names with the server name. Then make a
 real bounded read such as `read(operation="core.status")` and check that the
 returned root is the intended Contextopus root. For behavioral verification,
-invoke `/w-search` with an explicit request to find and read a known record in
+after installing Workspace and applying its skill integration, invoke `/w-search` with an explicit request to find and read a known record in
 a named disposable context; inspect the actual `guide` and subsequent read
 calls. Successful tool discovery does not establish that a model followed the
 Workspace procedure. Workspace writes and cleanup continue to follow the
@@ -174,8 +175,10 @@ path and service endpoint, then reload. If configuration is correct but a
 connection remains stale, restart the same native client and repeat a real
 read. Contextopus does not provide a `reconnect hermes` command in this release.
 
-The release verifier checks the fifth client ZIP, the complete canonical skill
-set, this guide and `SHA256SUMS`. Python tests and bundle checks do not establish
+The Core release verifier checks the Hermes client ZIP, the Core `m` skill,
+this guide and `SHA256SUMS`. The native verifier explicitly reads the Core
+`modules` procedure and resolves `m`; module-specific acceptance is owned by
+the corresponding module repository. Python tests and bundle checks do not establish
 native OS startup or model behavior. Record local Linux installation and client
 test evidence separately; native macOS and Windows Hermes integration have no
 live verification recorded by this guide.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0 — 2026-10-18
+
+- Separate Core from optional Workspace and Session Search modules; Core ships shared infrastructure and the `m` skill.
+- Add fresh Core-only and full starter installers using the same verified bundle machinery, with explicit module subsets, CPU model setup and selected native clients.
+- Install trusted built module folders or ZIPs through `modules install ID --source PATH`; preview checked paths, identity and compatibility with `--plan`, preserve source revisions and refuse existing targets.
+- Document independent module services, storage and migration lifecycles, retained failure state and platform acceptance limits. See [release notes](docs/releases/1.5.0.md).
+
 ## 1.3.3 — 2026-10-17
 
 - Handle upgrade previews for legacy contexts that have no initial INSTRUCTIONS and retain pending proposals. An absent previous instruction body is not hashed as text; revision overlays for existing rules retain their checks.
@@ -60,7 +67,7 @@
 
 ### Upgrade
 
-Refresh the configured marketplace, reinstall PCW and start a new Codex session. Existing workspaces are preserved; use `pcw-upgrade` explicitly for their format transition before opening work cycles. Installation does not migrate memories or reset their instructions. Missing legacy settings retain restricted defaults. See [contracts and compatibility](docs/context-workspace-v3-contracts.md) and [verification](docs/context-workspace-v3-verification.md).
+Refresh the configured marketplace, reinstall PCW and start a new Codex session. Existing workspaces are preserved; use `pcw-upgrade` explicitly for their format transition before opening work cycles. Installation does not migrate memories or reset their instructions. Missing legacy settings retain restricted defaults. See [contracts and compatibility](https://github.com/pikiby/contextopus-workspace/blob/v1.5.0/docs/archive/context-workspace-v3-contracts.md) and [verification](https://github.com/pikiby/contextopus-workspace/blob/v1.5.0/docs/archive/context-workspace-v3-verification.md).
 
 ## 0.10.0 — 2026-09-23
 
@@ -129,7 +136,7 @@ Refresh the configured marketplace, reinstall PCW and start a new Codex session.
 - Require native launch/metadata evidence at MCP binding; retain conflicts and support explicit resumable correction of assignments and result provenance.
 - Omit completed assignment history from startup, compact map publication receipts, verify Current writes internally and return current recovery operation names.
 - Require full requested deliverables in worker returns; document topic consolidation, native notification waits and the text-only launcher's transfer limitation.
-- Add whole-cycle trace measurement and regression coverage. See [verification and limitations](docs/return-cycle-assessment.md).
+- Add whole-cycle trace measurement and regression coverage. See [verification and limitations](https://github.com/pikiby/contextopus-workspace/blob/v1.5.0/docs/archive/return-cycle-assessment.md).
 
 Upgrade the marketplace, reinstall and start a new thread. `pcw_assignment_bind` now requires `evidence` with source, reference and matching executor_session_id. Existing knowledge and history are not migrated or cleaned on upgrade. The published 0.7.1 release remains unchanged.
 
@@ -146,7 +153,7 @@ Upgrade the marketplace, reinstall and start a new thread. `pcw_assignment_bind`
 
 Refresh the marketplace, reinstall and start a new thread. The MCP surface replaces `pcw_action_requirements` with separate rules/assignment/assessment/transition/finish tools, and `pcw_save_subagent_result` with `pcw_save_result_blocks`. Existing user knowledge is not automatically split, migrated or deleted.
 
-The suite passed 171 tests and 73 subtests with six opt-in skips. A native-agent cycle saved two linked topic files, corrected an observed wording error and completed indexing without technical knowledge files. Four equivalent workflow response bodies decreased from 12,072 to 1,770 bytes; this is not an end-to-end speed measurement. See the [0.7.1 assessment](docs/compact-memory-assessment.md) for evidence and limits.
+The suite passed 171 tests and 73 subtests with six opt-in skips. A native-agent cycle saved two linked topic files, corrected an observed wording error and completed indexing without technical knowledge files. Four equivalent workflow response bodies decreased from 12,072 to 1,770 bytes; this is not an end-to-end speed measurement. See the [0.7.1 assessment](https://github.com/pikiby/contextopus-workspace/blob/v1.5.0/docs/archive/compact-memory-assessment.md) for evidence and limits.
 
 ## 0.7.0
 
@@ -163,7 +170,7 @@ Refresh the Git marketplace and reinstall using [the update commands](README.md#
 
 ### Verification records
 
-The complete test suite passed 147 tests and 73 subtests, with six opt-in skips. A bounded native-agent cycle using the real MCP server and test vectors produced one indexed substantive material and no technical knowledge files. The semantic helper returned only `[3,7]` without tool calls. The author made an extra progress-only tool call; this limitation and the distinction from technical isolation are recorded in the [primary-memory assessment](docs/primary-memory-assessment.md).
+The complete test suite passed 147 tests and 73 subtests, with six opt-in skips. A bounded native-agent cycle using the real MCP server and test vectors produced one indexed substantive material and no technical knowledge files. The semantic helper returned only `[3,7]` without tool calls. The author made an extra progress-only tool call; this limitation and the distinction from technical isolation are recorded in the [primary-memory assessment](https://github.com/pikiby/contextopus-workspace/blob/v1.5.0/docs/archive/primary-memory-assessment.md).
 
 ## 0.6.0
 
@@ -182,7 +189,7 @@ The MCP API changes: `pcw_create` accepts content and optional links without a f
 
 ### Verification records
 
-The complete test suite passed 131 tests and 73 subtests, with six opt-in skips and seven warnings. The tests include actual MCP stdio calls, LanceDB, temporary Git checkpoints, recovery, and finite service closeout with injected test vectors. These results do not constitute a new real-model or native-agent workflow check. See the [implementation assessment](docs/implementation-assessment.md).
+The complete test suite passed 131 tests and 73 subtests, with six opt-in skips and seven warnings. The tests include actual MCP stdio calls, LanceDB, temporary Git checkpoints, recovery, and finite service closeout with injected test vectors. These results do not constitute a new real-model or native-agent workflow check. See the [implementation assessment](https://github.com/pikiby/contextopus-workspace/blob/v1.5.0/docs/archive/implementation-assessment.md).
 
 ## 0.5.0
 

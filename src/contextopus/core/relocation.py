@@ -11,10 +11,14 @@ import shutil
 import sqlite3
 import tempfile
 from contextlib import ExitStack, closing
+from functools import wraps
+from .module_management.lifecycle import module_lifecycle
 from pathlib import Path, PurePosixPath
 
 from . import locking
 from .storage import StorageLayout
+from .module_storage.coordination import quiesce_module_writes
+from .relocation_snapshots import archive_path, snapshot_target, validate_snapshot_id
 
 _INTERNAL = {
     ".contextopus.lock",
@@ -47,11 +51,25 @@ def _runtime_lock(relative):
 
 
 def _transient(relative):
-    return str(relative) in {
+    parts = PurePosixPath(relative).parts
+    module_runtime = (
+        len(parts) == 4
+        and parts[:3] == ("core", "storage", "modules")
+        and (parts[-1].endswith(".sqlite3.lock") or parts[-1].startswith(".partition-"))
+    ) or parts == ("core", "storage", "modules.sqlite3.lock") or (
+        len(parts) == 3
+        and parts[:2] == ("core", "storage")
+        and parts[-1].startswith(".module-partitions-")
+        and parts[-1].endswith(".tmp")
+    )
+    module_leases = (len(parts) == 5 and parts[:3] == ('core', 'storage', 'module-leases')
+                     and parts[-1].endswith('.lease.lock'))
+    return module_runtime or module_leases or str(relative) in {
         "runtime",
         "runtime/service.json",
         "runtime/service.log",
         "runtime/mcp-owner.lock",
+        "runtime/module-lifecycle.lock",
     } or (_WINDOWS and _runtime_lock(relative))
 
 
@@ -169,10 +187,12 @@ def _revision(value):
     ).hexdigest()
 
 
-def _entries(files):
+def _entries(files, snapshot_id=None):
     entries = []
     sqlite_paths = set()
     for relative, path in files:
+        if archive_path(relative):
+            continue
         with path.open("rb") as stream:
             header = stream.read(16)
         if header == b"SQLite format 3\x00":
@@ -200,7 +220,7 @@ def _entries(files):
             for base in sqlite_paths
             for suffix in ("-wal", "-shm")
         ):
-            entry["target"] = "core/relocation/raw/" + relative
+            entry["target"] = snapshot_target(relative, snapshot_id)
         entries.append(entry)
     return entries
 
@@ -215,9 +235,16 @@ def plan(source, destination):
         raise ValueError("Source and destination must be disjoint")
     if not source.is_dir():
         raise ValueError("Source root is absent")
-    entries = _entries(
-        [(path.relative_to(source).as_posix(), path) for path in _files(source)]
-    )
+    for attempt in range(3):
+        files = [(path.relative_to(source).as_posix(), path) for path in _files(source)]
+        entries = _entries(files)
+        # SQLite's read-only backup can create WAL/SHM sidecars while opening a
+        # WAL database. Bind the review to the inventory after that observation.
+        after = {path.relative_to(source).as_posix() for path in _files(source)}
+        if after == {relative for relative, _ in files}:
+            break
+    else:
+        raise ValueError('Source file inventory changed during relocation preview; retry')
     directories = [
         {
             "path": p.relative_to(source).as_posix(),
@@ -233,11 +260,18 @@ def plan(source, destination):
         "destination": str(destination),
         "files": entries,
         "directories": directories,
-        "version": 1,
+        "version": 2,
         "observer_snapshot": "Known analytics directories are refreshed under the apply freeze; authoring and index bytes remain revision-bound.",
     }
     if os.name != "nt":
         value["source_mode"] = source.stat().st_mode & 0o7777
+    # Seed from the reviewed content before adding snapshot coordinates. This
+    # avoids a circular revision hash, and observer-only changes keep the same
+    # identity on repeat previews. Persisted plans retain this identity on retry.
+    value["snapshot_id"] = _revision(value)
+    for entry in entries:
+        if entry["target"] == snapshot_target(entry["path"]):
+            entry["target"] = snapshot_target(entry["path"], value["snapshot_id"])
     value["revision"] = _revision(value)
     return value
 
@@ -259,12 +293,13 @@ def _refresh_observers(source, proposal):
         "files": [
             entry for entry in proposal["files"] if not _observer_path(entry["path"])
         ]
-        + _entries(files),
+        + _entries(files, proposal.get("snapshot_id")),
     }
 
 
 def _validate(proposal):
-    if proposal.get("version") != 1 or proposal.get("revision") != _revision(proposal):
+    validate_snapshot_id(proposal)
+    if proposal.get("version") not in {1, 2} or proposal.get("revision") != _revision(proposal):
         raise ValueError("Relocation plan revision mismatch")
     if "source_mode" in proposal and (
         type(proposal["source_mode"]) is not int
@@ -292,12 +327,19 @@ def _validate(proposal):
         expected = _target(entry["path"])
         if (
             entry["target"] != expected
-            and entry["target"] != "core/relocation/raw/" + entry["path"]
+            and entry["target"] != snapshot_target(entry["path"], proposal.get("snapshot_id"))
         ):
             raise ValueError("Invalid relocation mapping")
         if entry["target"] in targets:
             raise ValueError("Duplicate relocation target")
         targets.add(entry["target"])
+    if "snapshot_id" in proposal:
+        for entry in proposal["files"]:
+            if entry["kind"] == "sqlite":
+                raw = snapshot_target(entry["path"], proposal["snapshot_id"])
+                if raw in targets:
+                    raise ValueError("Duplicate relocation snapshot target")
+                targets.add(raw)
     for entry in proposal["directories"]:
         _relative(entry["path"])
         _relative(entry["target"])
@@ -368,7 +410,7 @@ def _verify_target(destination, proposal):
         ):
             raise ValueError("Destination verification failed: " + entry["target"])
         if entry["kind"] == "sqlite":
-            raw = _safe(destination, "core/relocation/raw/" + entry["path"])
+            raw = _safe(destination, snapshot_target(entry["path"], proposal.get("snapshot_id")))
             if not raw.is_file() or _digest(raw) != entry["sha256"]:
                 raise ValueError("SQLite binary snapshot missing")
             if mutable_observer:
@@ -379,6 +421,16 @@ def _verify_target(destination, proposal):
                         raise ValueError("Active observer database is corrupt")
 
 
+def _module_lifecycle(method):
+    @wraps(method)
+    def invoke(proposal):
+        source, _ = _validate(proposal)
+        with module_lifecycle(source):
+            return method(proposal)
+    return invoke
+
+
+@_module_lifecycle
 def apply(proposal):
     source, destination = _validate(proposal)
     revision = proposal["revision"]
@@ -404,7 +456,9 @@ def apply(proposal):
     ):
         raise ValueError("Another relocation is pending")
     with ExitStack() as locks:
-        locks.enter_context(StorageLayout(source).guard(frozen_revision=revision))
+        layout = StorageLayout(source)
+        locks.enter_context(layout.guard(frozen_revision=revision))
+        locks.enter_context(quiesce_module_writes(layout))
         if not freeze.exists():
             _verify_source(source, proposal)
             if destination.exists() and any(destination.iterdir()):
@@ -482,7 +536,7 @@ def apply(proposal):
                     hashes.append(expected)
                 if entry["kind"] == "sqlite":
                     raw_hashes = accepted.setdefault(
-                        "core/relocation/raw/" + entry["path"], []
+                        snapshot_target(entry["path"], proposal.get("snapshot_id")), []
                     )
                     if entry["sha256"] not in raw_hashes:
                         raw_hashes.append(entry["sha256"])
@@ -519,11 +573,11 @@ def apply(proposal):
                 os.chmod(part, entry["mode"])
                 os.replace(part, dst)
             if entry["kind"] == "sqlite":
-                raw = _safe(destination, "core/relocation/raw/" + entry["path"])
+                raw = _safe(destination, snapshot_target(entry["path"], proposal.get("snapshot_id")))
                 raw.parent.mkdir(parents=True, exist_ok=True)
                 needs_raw = not raw.exists()
                 if raw.exists() and _digest(raw) != entry["sha256"]:
-                    relative = "core/relocation/raw/" + entry["path"]
+                    relative = snapshot_target(entry["path"], proposal.get("snapshot_id"))
                     if _observer_path(entry["path"]) and _digest(raw) in accepted.get(
                         relative, []
                     ):
@@ -531,7 +585,14 @@ def apply(proposal):
                     else:
                         raise ValueError("SQLite raw snapshot conflict")
                 if needs_raw:
-                    shutil.copy2(src, raw)
+                    part = raw.with_name(raw.name + ".relocating")
+                    if part.exists() or part.is_symlink():
+                        part.unlink()
+                    shutil.copy2(src, part)
+                    if _digest(part) != entry["sha256"]:
+                        raise IOError("SQLite raw snapshot checksum mismatch")
+                    os.chmod(part, entry["mode"])
+                    os.replace(part, raw)
         _verify_target(destination, proposal)
         record = {**proposal, "state": "complete"}
         _write(receipt, record)
@@ -547,6 +608,7 @@ def apply(proposal):
     }
 
 
+@_module_lifecycle
 def rollback(proposal):
     source, destination = _validate(proposal)
     if (source / ".contextopus-redirect.json").exists() or (

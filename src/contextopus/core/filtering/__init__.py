@@ -187,25 +187,45 @@ class AlgorithmCatalog:
     def __init__(self, registry, index):
         self.registry, self.index = registry, index
 
+    def _pages(self):
+        cursor = None
+        while True:
+            page = self.index.vector_revisions_page(self.module, self.collection, cursor=cursor)
+            yield page
+            cursor = page['next_cursor']
+            if cursor is None:
+                return
+
     def refresh(self):
         import hashlib
         from ..rag import IndexDocument, DocumentKey
-        existing = self.index.vector_revisions(self.module, self.collection)
         descriptions = self.registry.catalog()
-        wanted = set()
-        changed = []
+        wanted = {description['id'] for description in descriptions}
+        existing, removed, changed = {}, [], []
+        # Retain revisions only for registered algorithms. Obsolete cards can
+        # be removed page by page while the native snapshot remains pinned.
+        for page in self._pages():
+            for ident, revision in page['revisions'].items():
+                if ident in wanted:
+                    existing[ident] = revision
+                else:
+                    self.index.delete_document(DocumentKey(self.module,self.collection,ident))
+                    removed.append(ident)
+            for ident in page['conflicts']:
+                if ident in wanted:
+                    existing.pop(ident, None)
+                else:
+                    self.index.delete_document(DocumentKey(self.module,self.collection,ident))
+                    removed.append(ident)
         for description in descriptions:
             ident = description['id']
-            wanted.add(ident)
             text = json.dumps(description, sort_keys=True)
             revision = hashlib.sha256(text.encode()).hexdigest()
             if existing.get(ident) != revision:
                 self.index.index(IndexDocument(DocumentKey(self.module,self.collection,ident), revision, text,
                     'core/filtering/algorithms/' + ident, {'object_type':'search_algorithm', 'algorithm':ident, 'version':description['version']}))
                 changed.append(ident)
-        for ident in set(existing) - wanted:
-            self.index.delete_document(DocumentKey(self.module,self.collection,ident))
-        return {'changed':changed,'removed':sorted(set(existing)-wanted),'count':len(wanted)}
+        return {'changed':changed,'removed':sorted(removed),'count':len(wanted)}
 
     def search(self, query=None, limit=20, semantic=False):
         if not semantic:
@@ -216,12 +236,18 @@ class AlgorithmCatalog:
         import hashlib
         expected = {d['id']:hashlib.sha256(json.dumps(d,sort_keys=True).encode()).hexdigest()
                     for d in self.registry.catalog()}
-        recorded = self.index.vector_revisions(self.module,self.collection)
+        seen, populated, stale = set(), False, False
+        for page in self._pages():
+            populated = populated or bool(page['revisions'] or page['conflicts'])
+            if page['conflicts'] or any(expected.get(ident) != revision for ident, revision in page['revisions'].items()):
+                stale = True
+                break
+            seen.update(page['revisions'])
         fixed = {'algorithm':'nearest_n','parameters':{'N':limit}}
         self.registry.resolve(fixed)
-        if recorded != expected:
+        if stale or seen != set(expected):
             answer = select([],fixed,registry=self.registry)
-            answer.update(catalog_state='missing' if not recorded else 'stale',
+            answer.update(catalog_state='stale' if populated else 'missing',
                           next_action='core.algorithms_refresh')
             return answer
         # This fixed algorithm prevents catalog search from recursively choosing one.

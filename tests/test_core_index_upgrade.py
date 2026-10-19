@@ -14,7 +14,7 @@ def test_legacy_index_namespace_upgrade_preserves_vectors_and_is_idempotent(tmp_
     import pyarrow as pa
 
     layout = StorageLayout(tmp_path)
-    state = layout.workspace_rag
+    state = layout.rag
     state.mkdir(parents=True)
     config = default_config()
     config["profile"]["dimensions"] = 2

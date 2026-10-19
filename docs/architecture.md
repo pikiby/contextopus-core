@@ -12,27 +12,44 @@ flowchart LR
     Service[Local MCP HTTP owner] --> Application
     Application --> Core[Core: storage, RAG, settings, resources]
     Application --> Registry[Typed operation registry]
-    Registry --> Workspace
-    Registry --> SessionSearch[Session search adapter]
+    Registry --> Lifecycle[Generic module lifecycle]
+    Lifecycle --> Workspace[Optional Workspace native contribution]
+    Lifecycle --> SessionSearch[Optional Session Search child service]
+    Workspace --> Core
+    SessionSearch --> SDK[Core child SDK]
+    SDK --> Core
 ```
 
-One installed Python runtime owns model/provider pools and database resources. CLI, TUI and coding clients use the same Application operations through the local owner. Import, status and procedure reads do not download or load an embedding model. Local embeddings are an explicit installation extra; existing Qwen3-Embedding-0.6B profiles remain Workspace configuration.
+One installed Core Python runtime owns model/provider pools, shared RAG and database services. CLI, TUI and coding clients use the same Application operations through the local owner. Import, status and procedure reads do not download or load an embedding model. Local embeddings are an explicit installation extra; provider/profile selection belongs to Core and is shared by enabled modules.
 
-Persistent data belongs in an explicit root or the platform's user-data directory, outside plugin caches. Root configuration, RAG and analytics have separate paths. Workspace is a module with selected project rules, task state, temporary work and reviewed permanent knowledge. Core is independent of Workspace rules. Legacy operations are compatibility aliases; namespaced module operations are preferred.
+Persistent data belongs in an explicit root or the platform's user-data directory, outside plugin caches. Root configuration, RAG and analytics have separate paths. Workspace is an optional module with selected project rules, task state, temporary work and reviewed permanent knowledge. Its code, reference documents, domain rules and skills live in the separate module package. The Core wheel supplies infrastructure and the `m` module-management skill; it does not register or migrate Workspace on startup. Legacy operations are compatibility aliases; namespaced module operations are preferred.
 
 | Component | Scope |
 |---|---|
 | Core | Storage, typed operations, shared lifetime, settings and relocation |
-| Workspace | Persistent project knowledge and explicit work cycles |
+| Workspace | Optional native contribution for project knowledge and explicit work cycles |
 | MCP | Query/execute transport and canonical procedure retrieval |
 | CLI/TUI | Thin views and controls over shared operations |
-| Session search | Optional adapter to an independently installed session indexer |
+| Session search | Optional child service using Core SQL, embeddings and RAG; a compatibility adapter can expose an existing standalone installation |
 | GraphFrontier | Future integration; no readiness claim |
 | Skills registry | Proposed idea; not an implemented module |
 
 Relocation copies files, checks a manifest, validates SQLite where applicable and leaves a receipt/redirect. Source deletion requires separate authorization. Settings previews identify consequences; saving does not silently reindex existing data.
 
-Folder modules live under `modules/<id>/`: replaceable package code is separate from persistent data and configuration. Discovery reads manifests; explicit prepare/enable actions activate contributions to the common registry. Module operations, procedures, skills and filtering algorithms use the same Core contracts. See [module lifecycle](modules.md).
+Each new relocation keeps its original SQLite bytes and sidecars in
+`.backups/relocations/<snapshot-id>/`, with the identity retained across retries.
+Existing snapshot trees, including legacy `core/relocation/raw/`, are copied
+byte-for-byte as archives, not opened or snapshotted again as live databases.
+Previously saved relocation plans and receipts retain their original paths.
+
+Folder modules live under `modules/<id>/`: replaceable package code is separate from persistent data and configuration. Discovery reads manifests. Explicit installation prepares dependencies and module-owned migrations, checks readiness and publishes contributions to the common registry. Workspace and Session Search use these same lifecycle operations. Native contributions run in the Core interpreter; persistent child services use its bounded SQL/embedding/RAG SDK. Enablement and release fingerprints persist across owner restarts, and other Applications reconcile changes before dispatch. Disable removes owned operations, settings, procedures, skills and source adapters while retaining data. Native cleanup drains admitted calls; errors do not skip the remaining Core resource cleanup. See [module lifecycle](modules.md).
+
+Structured module data uses one Core-owned SQLite file per module under
+`core/storage/modules/`. Core coordinates writers and transactions; modules own
+their schemas and domain migrations. A model/provider and the vector index are
+shared at the root. SQL and RAG commits are independent, so background modules
+use durable jobs and deletion outboxes for replay rather than assuming one
+transaction covers both stores.
 
 Search selection is a shared Core service. Algorithm descriptions and JSON schemas sit beside implementations; effective settings are resolved for the selected scope and may be overridden for one query. [Selection diagnostics](search-selection.md) explain cuts and limits. [Bounded search evidence](search-analysis.md) supports historical analysis without duplicating source bodies.
 
@@ -53,43 +70,14 @@ The Windows protocol holds the root advisory guard continuously, acquires legacy
 
 Windows directory-renaming restrictions are documented in Microsoft's [FILE_RENAME_INFORMATION remarks](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information).
 
-## Workspace records (format 5)
+## Module-owned formats and workflows
 
-`modules/workspace/workspace_contexts/<context>/INSTRUCTIONS.md` owns that context's complete free-text rules. Machine policies use the existing Core configuration hierarchy, with migrated context values in `core/configuration/contexts/workspace/<context>.json`. `knowledge/*.md` contains all permanent record types. YAML `id` is the stable identity used by the API; on-disk YAML links are quoted Obsidian wikilinks to real vault paths. Descriptive filenames can change. `type` is open vocabulary (`knowledge`, `task`, `goal`, `project`, `decision` are examples); `status` is optional. Plans and goals remain intentions until evidence establishes completion.
+Workspace owns linked Markdown records, complete project instructions, approval
+policies, work cycles and format migration. See the
+[Workspace architecture](https://github.com/pikiby/contextopus-workspace/blob/main/docs/architecture.md)
+for record formats, Git provenance, settings history and domain analytics.
+Session Search owns transcript ingestion, deduplication and its durable indexing
+queue; see its [module documentation](https://github.com/pikiby/contextopus-session-search).
 
-The project description is one indexed `type: project` record. Tasks use the same read/search/proposal/link/history operations. There is no separate Current or mutable duplicate PROJECT file. `.tmp/<cycle>/` optionally holds shared assignments, inputs and intermediate results, with readable card names, YAML IDs and the normal links and required sources. Exact pending proposals also live there. Temporary cards can refer to permanent or temporary materials; permanent cards cannot depend on temporary data. Cleanup uses its own approval policy and exact revision, independently of knowledge approval; an empty or unchanged task needs no fabricated report or proposal. Custom instructions are not silently replaced by new defaults.
-
-RAG belongs to Core. Context, type and status predicates narrow eligible records before vector top-N. Cross-context retrieval supplies evidence, not another context's rules. `workspace.contexts` lists actual directories, `workspace.project_read` reads one selected project, `workspace.projects_search` searches indexed project records and returns bounded excerpts. Discovery starts no work cycle and creates nothing.
-
-Migration snapshots sources/control, moves legacy Current fields and PROJECT into records, extracts only known machine policy keys from instruction frontmatter into Core configuration, converts native navigation links, reconciles the shared index, then marks each completed format transition. Format 5 preserves immutable proposals through execution overlays, moves `tmp` to `.tmp`, normalizes temporary card names and adds derived `context/<owner>` tags to permanent records. Context names are unique under Unicode NFKC and case folding. The remaining instruction text and user frontmatter retain their original bytes. Original pending proposal text/digests remain immutable; technical execution overlays adapt paths and metadata without granting approval. A legacy instruction proposal that changes machine settings requires a separate settings review and renewed instruction preparation. Interrupted transitions reuse their receipt. Git tracks permanent records, rules and historical settings; tmp, indexes and service state stay outside memory history.
-
-### Record provenance in Git
-
-Workspace proposes Git history in the standard creation settings. Reviewed transformations describe merge/split/replacement edges between stable record IDs. Their before/after paths and fingerprints, summary and cycle/operation are captured with the permanent snapshot and stored in ordinary Git commit trailers. Git parents provide version ordering; declared transformations provide material ancestry. Native Git query operations filter by ID/path/date/message, search removed text, describe commits and read bounded diffs or old records. Old commits without declarations remain navigable by path/text and are explicitly marked as lacking provenance.
-
-
-### Workspace settings history
-
-Machine policies live in Core configuration at
-`core/configuration/contexts/workspace/<context>.json`; `INSTRUCTIONS.md` keeps the
-complete free-form user rules. The Git-only path `.contextopus-settings.json`
-records effective settings and their origins. It has no live worktree copy, and
-the Git index marks it `skip-worktree`. History read, diff and search accept that
-path. Durable previews and apply receipts live in the Workspace control directory
-under `settings/`; retries retain the exact approved revision. Settings writes and
-pending Git commits have separate outcomes. Disabling history still records the
-final change under the prior policy.
-
-New analytics events retain a separate settings basis in
-`instructions_ref.settings_revision` and `instructions_ref.settings_ref`, plus a
-Git reference with `role: workspace_settings`. The free-text instruction revision
-retains its own meaning. Analysis distinguishes settings eras even when that
-instruction revision is unchanged. Missing historical settings remain unknown;
-today's configuration never supplies a replacement. Settings-only observations
-do not read the instructions and mark that part of their basis unknown.
-
-### Operation evidence and analysis
-
-SQLite journals record calls, parameters, result/error metadata, durations and references. Git remains the authority for permanent content versions; exact commit/blob references require matching captured content. Dirty or unversioned observations expose their replay limits. Historical retained blobs and unmatched evidence are preserved rather than discarded on an assumption that Git covers them. Drafts and imported host messages remain distinct evidence.
-
-A derived SQLite history index supports bounded commit/version indexing and context-qualified lineage graphs from declared Git transformation trailers. It is rebuildable, and declarations do not prove semantic correctness. The `w-analyze` skill loads the canonical MCP analysis procedure: finite context/question/time/filter scope, progressive metadata selection, exact events, then Git versions/diffs. Reports state coverage and contemporaneous instruction/runtime evidence; unknown historical rules cannot support retrospective judgments. Reads do not prove actual model use, and performance or token savings require host usage and comparable control runs. Explicitly retained assessments are separate from objective events and knowledge.
+Core coordinates the shared model, vector store, operation journal and per-module
+SQL services. The domain implementations are not bundled into Core artifacts.

@@ -7,6 +7,7 @@ import argparse
 import atexit
 import asyncio
 from importlib import metadata
+from importlib.util import find_spec
 from importlib.resources import files
 import inspect
 import json
@@ -16,6 +17,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+
+def planned_skills(root):
+    """Inspect a native integration preview without writing client configuration."""
+    from contextopus.integrations import plan
+    preview = plan('codex', root / 'client-preview', root=root)
+    return {Path(item['path']).parent.name for item in preview['writes']
+            if Path(item['path']).name == 'SKILL.md'}
 
 
 def module_smoke(root, example):
@@ -94,44 +102,51 @@ def verify(expected_version, prefix=None, module_example=None):
     subprocess.run([str(executable), '--help'], check=True, stdout=subprocess.DEVNULL)
     resources = files('contextopus').joinpath('resources')
     skills = sorted(path.name for path in resources.joinpath('skills').iterdir() if path.is_dir())
-    if skills != sorted(['w', 'w-search', 'w-create', 'w-settings', 'w-context', 'w-analyze', 'm']):
-        raise ValueError('Installed skill inventory is incomplete')
-    manifest = json.loads(resources.joinpath('base_context/manifest.json').read_text())
-    if manifest['version'] != expected_version:
-        raise ValueError('Installed base-context version is stale')
+    if skills != ['m']:
+        raise ValueError('Core-only wheel must supply only the module-management skill')
+    try:
+        workspace_in_core = find_spec('contextopus.modules.workspace') is not None
+    except ModuleNotFoundError:
+        workspace_in_core = False
+    if workspace_in_core or resources.joinpath('base_context').is_dir():
+        raise ValueError('Core-only wheel contains optional Workspace code or documentation')
     algorithms = AlgorithmRegistry().catalog()
     if len(algorithms) != 5 or any(row['version'] != '2.0.0' for row in algorithms):
         raise ValueError('Installed search algorithm inventory is stale')
     with tempfile.TemporaryDirectory(prefix='contextopus-installed-check-') as temporary:
-        root = Path(temporary)
+        temporary = Path(temporary)
+        root = temporary / 'core-only'
         with Application(root, discover=False) as app:
-            for name in ('workspace', 'search', 'instructions', 'upgrade', 'modules', 'reference/required-sources'):
-                if not app.query('procedure', {'name': name})['content'].strip():
-                    raise ValueError('An installed procedure is empty')
-            defaults = app.query('procedure', {'name': 'default-instructions'})
-            if defaults['content'].startswith('---') or defaults['creation_defaults']['reread_instructions'] is not False:
-                raise ValueError('Installed creation rules/defaults contract is stale')
-            if defaults['creation_defaults']['cleanup_approval_required'] is not False:
-                raise ValueError('Installed new-context cleanup default is stale')
-            for operation, kind in [('workspace.settings_read', 'query'),
-                                    ('workspace.settings_preview', 'execute'),
-                                    ('workspace.settings_apply', 'execute'),
-                                    ('core.module_install', 'execute')]:
-                if app.query('describe', {'operation': operation})['kind'] != kind:
-                    raise ValueError('Installed settings operation registry is stale')
+            if app.query('procedure', {'name': 'default'})['name'] != 'modules':
+                raise ValueError('Bare Core requires a module-independent default procedure')
+            if 'workspace' in app.registry.modules or any(name.startswith('workspace.') for name in app.registry._operations):
+                raise ValueError('Bare Core automatically registered Workspace')
+            if app.query('describe', {'operation': 'core.module_install'})['kind'] != 'execute':
+                raise ValueError('Installed module operation registry is stale')
             if app.query('core.modules') != [] or app.module_storage.path.exists():
                 raise ValueError('Discovery unexpectedly created module storage')
+            if planned_skills(root) != {'m'}:
+                raise ValueError('Bare Core integration preview contains module-owned skills')
             if app.resources.providers._entries:
                 raise ValueError('Resource inspection unexpectedly loaded an embedding model')
         example = module_example or Path(__file__).resolve().parents[1] / 'examples/modules/catalog-demo'
-        smoke = module_smoke(root, example)
-        mcp = create_server(root)
-        tools = sorted(tool.name for tool in asyncio.run(mcp.list_tools()))
-        if tools != ['finish', 'guide', 'read', 'write']:
-            raise ValueError('Installed default MCP surface is not guide/read/write/finish')
+        smoke = module_smoke(temporary / 'catalog-installed', example)
+        from contextopus.interfaces.mcp import server
+        from unittest.mock import patch
+        owner = server.ServerOwner(root)
+        try:
+            with patch.object(server, 'ServerOwner', return_value=owner):
+                mcp = create_server(root)
+            tools = sorted(tool.name for tool in asyncio.run(mcp.list_tools()))
+            if tools != ['finish', 'guide', 'read', 'write']:
+                raise ValueError('Installed default MCP surface is not guide/read/write/finish')
+        finally:
+            atexit.unregister(owner.close)
+            owner.close()
     return {'version': installed, 'source': str(source), 'cli': cli, 'tools': tools,
-            'skills': skills, 'algorithms': len(algorithms), 'base_context_version': manifest['version'],
-            'module_smoke': smoke, 'model_loaded': False, 'scope': 'temporary_data_only', 'model_behavior_verified': False}
+            'core_skills': skills, 'core_only_verified': True, 'algorithms': len(algorithms),
+            'module_smoke': smoke, 'model_loaded': False,
+            'scope': 'temporary_data_only', 'model_behavior_verified': False}
 
 
 if __name__ == '__main__':

@@ -13,38 +13,9 @@ from contextopus.core.chunking import default_chunking
 from contextopus.core.operations import OperationRegistry, OperationSpec
 from contextopus.core import relocation
 from contextopus.startup import Application
-from test_runtime import Factory
-from test_shared_v4 import context, save
+from fake_embeddings import Factory
 
 
-def test_generic_and_workspace_share_table_and_embeddings(tmp_path):
-    factory = Factory()
-    workspace = context(tmp_path, "alpha", factory)
-    one = save(workspace, "# Workspace\nsearchable text")
-    layout = StorageLayout(tmp_path)
-    with ProcessResources(factory) as resources:
-        index = RagIndex(layout, resources, default_config(), default_chunking())
-        document = IndexDocument(
-            DocumentKey("second", "notes", "plain-1"),
-            "rev1",
-            "searchable plain text",
-            "second://1",
-            {"object_type": "note"},
-        )
-        index.index(document)
-        assert index.table.name == workspace.engine.active["table"]
-        assert index.db.uri == workspace.engine.db.uri
-        found = index.search("searchable", module="second", distance=2)
-        assert found[0]["key"] == ["second", "notes", "plain-1"]
-        assert (
-            workspace.read(material_id=one["id"])["content"]
-            == "# Workspace\nsearchable text"
-        )
-        assert {
-            r["workspace"]
-            for r in workspace.search(query="searchable", N=20, d_max=2)["results"]
-        } == {"alpha"}
-    workspace.close()
 
 
 def test_application_registry_external_operation_and_no_model_status(tmp_path):
@@ -165,71 +136,9 @@ def test_relocation_sqlite_wal_consistent_backup(tmp_path):
     relocation.apply(proposal)
     with sqlite3.connect(destination / "core/analytics/events.sqlite") as target:
         assert target.execute("SELECT x FROM t").fetchone() == (42,)
-    assert (destination / "core/relocation/raw/.pcw/.analytics/events.sqlite").is_file()
+    assert (destination / ".backups/relocations" / proposal["snapshot_id"] / ".pcw/.analytics/events.sqlite").is_file()
 
 
-def test_generic_namespace_collision_prefilter_atomic_failure_and_profile_refusal(
-    tmp_path,
-):
-    factory = Factory()
-    workspace = context(tmp_path, "alpha", factory)
-    one = save(workspace, "# Workspace\nshared answer")
-    with ProcessResources(factory) as resources:
-        index = RagIndex(
-            StorageLayout(tmp_path), resources, default_config(), default_chunking()
-        )
-        key = DocumentKey("second", "alpha", one["id"])
-        index.index(
-            IndexDocument(
-                key,
-                "r1",
-                "shared answer",
-                "other://1",
-                {"archived": True, "object_type": "memo"},
-            )
-        )
-        index.index(
-            IndexDocument(
-                DocumentKey("second", "alpha", "visible"),
-                "r2",
-                "shared answer",
-                "other://2",
-                {"object_type": "memo"},
-            )
-        )
-        assert (
-            index.search("shared", module="second", object_type="memo", limit=1)[0][
-                "key"
-            ][2]
-            == "visible"
-        )
-        workspace.engine.reconcile()
-        workspace.engine.delete(one["id"])
-        found = index.search(
-            "shared", module="second", include_archived=True, distance=2
-        )
-        assert {row["key"][2] for row in found} == {one["id"], "visible"}
-        with patch.object(index, "rows", side_effect=RuntimeError("failed embedding")):
-            with pytest.raises(RuntimeError):
-                index.index(IndexDocument(key, "r3", "new", "other://1"))
-        assert {
-            row["revision"]
-            for row in index.search(
-                "shared", module="second", include_archived=True, distance=2
-            )
-        } == {"r1", "r2"}
-        with pytest.raises(ValueError, match="source adapters"):
-            workspace.engine.switch_embeddings(
-                default_config(),
-                {
-                    "N": 20,
-                    "d_max": 1,
-                    "min_jump": 0.02,
-                    "multiplier": 3,
-                    "metric": "cosine",
-                },
-            )
-    workspace.close()
 
 
 def test_generic_read_missing_root_does_not_create_storage(tmp_path):
@@ -241,33 +150,6 @@ def test_generic_read_missing_root_does_not_create_storage(tmp_path):
         assert not resources.providers._entries
 
 
-def test_new_open_layout_preserves_real_pending_proposal_after_relocation(tmp_path):
-    source = tmp_path / "old"
-    source.mkdir()
-    destination = tmp_path / "new"
-    original = context(source, "alpha", Factory())
-    cycle = original.startup("work")["cycle_id"]
-    original.tmp_write(cycle, content="a result")
-    prepared = original.proposal_prepare(
-        cycle, [{"key": "new", "content": "# Pending\nanswer", "links": [],
-                 "description": "Records the pending answer whose approved revision must survive root relocation."}]
-    )
-    revision = prepared["revision"]
-    proposal_id = prepared["proposal_id"]
-    before = original.proposal_read(cycle, proposal_id)
-    original.close()
-    relocation.apply(relocation.plan(source, destination))
-    from contextopus.modules.workspace.cycles import CycleRuntime
-
-    moved = CycleRuntime(source, "alpha", provider_factory=Factory())
-    assert (
-        moved.engine.root == destination / "modules/workspace/workspace_contexts/alpha"
-    )
-    assert moved.proposal_read(cycle, proposal_id)["revision"] == revision
-    assert moved.proposal_apply(cycle, proposal_id, revision)["status"] == "applied"
-    assert moved.engine.state == destination / "core/rag"
-    assert moved.tmp_list(cycle)["materials"]
-    moved.close()
 
 
 def test_application_relocation_observer_polling_preserved_and_source_change_stale(

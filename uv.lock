@@ -307,7 +307,7 @@ wheels = [
 
 [[package]]
 name = "contextopus-core"
-version = "1.4.0"
+version = "1.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
@@ -340,7 +340,7 @@ tokenizers = [
 requires-dist = [
     { name = "build", marker = "extra == 'test'", specifier = ">=1.2" },
     { name = "jsonschema", specifier = ">=4,<5" },
-    { name = "lancedb", specifier = ">=0.20,<1" },
+    { name = "lancedb", specifier = ">=0.40,<1" },
     { name = "mcp", specifier = ">=1.10,<2" },
     { name = "packaging", specifier = ">=24" },
     { name = "platformdirs", specifier = ">=4,<5" },

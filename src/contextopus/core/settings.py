@@ -3,29 +3,6 @@
 import hashlib
 import json
 
-WORKSPACE_POLICY_DEFAULTS = {
-    "allow_implicit_updates": False,
-    "knowledge_approval_required": True,
-    "instructions_approval_required": True,
-    "cleanup_approval_required": True,
-    "git_history_enabled": False,
-    "material_max_tokens": None,
-    "create_required_sources": False,
-}
-WORKSPACE_SETTINGS = {
-    **WORKSPACE_POLICY_DEFAULTS,
-    "reread_instructions": False,
-    "instruction_profiles": [],
-}
-WORKSPACE_CREATION_DEFAULTS = {
-    **WORKSPACE_POLICY_DEFAULTS,
-    "cleanup_approval_required": False,
-    "knowledge_approval_required": False,
-    "git_history_enabled": True,
-    "material_max_tokens": 1024,
-}
-PROTECTED_FIELDS = frozenset(WORKSPACE_SETTINGS)
-
 DEFAULTS = {
     "include": ["**/*"],
     "exclude": [".git/**"],
@@ -39,16 +16,20 @@ DEFAULTS = {
     "searchN": 20,
     "distance": None,
     "selection": {"algorithm": "distance_jump", "parameters": {}},
-    **WORKSPACE_SETTINGS,
 }
 
 
 class Settings:
+    defaults = DEFAULTS
+    protected_fields = frozenset()
+
     def __init__(self, layout, registry=None):
         self.layout = layout
         self.registry = registry
         self.path = layout.configuration / "settings.json"
         self._previews = {}
+        self.providers = {}
+        self._providers = {}
 
     def _read(self):
         return json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
@@ -77,58 +58,41 @@ class Settings:
                 layers.append((origin, json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}))
         return layers
 
-    def workspace_snapshot(self, module="workspace", context=None, fields=None,
-                           agent=None, agent_model=None):
-        """Read policies without opening rules, the vector index or algorithm modules."""
-        selected = list(WORKSPACE_SETTINGS) if fields is None else fields
-        if (not isinstance(selected, list) or any(key not in WORKSPACE_SETTINGS for key in selected)):
-            raise ValueError("Unknown workspace settings fields")
-        for value in (agent, agent_model):
-            if value is not None and (not isinstance(value, str) or not value.strip()):
-                raise ValueError("Explicit agent/model selectors must be nonempty strings")
-        layers = self._layers(module, context)
-        effective = json.loads(json.dumps(WORKSPACE_SETTINGS))
-        sources = {key: "default" for key in effective}
-        for origin, layer in layers:
-            values = {key: value for key, value in layer.items() if key in WORKSPACE_SETTINGS}
-            self._validate_changes(values)
-            effective.update(values)
-            sources.update({key: origin + ".configuration" for key in values})
-        matches = []
-        for profile in effective["instruction_profiles"]:
-            if (("agent" not in profile or profile["agent"] == agent)
-                    and ("model" not in profile or profile["model"] == agent_model)):
-                matches.append((int("agent" in profile) + int("model" in profile), profile))
-        if matches:
-            specificity = max(score for score, _ in matches)
-            winners = [profile for score, profile in matches if score == specificity]
-            if len(winners) != 1:
-                raise ValueError("Ambiguous instruction profiles; select an explicit agent/model pair")
-            effective["reread_instructions"] = winners[0]["reread_instructions"]
-            sources["reread_instructions"] = sources["instruction_profiles"] + ".profile"
-        policy_layers = [(origin, {key: value for key, value in layer.items() if key in WORKSPACE_SETTINGS})
-                         for origin, layer in layers]
-        revision = hashlib.sha256(json.dumps([policy_layers, module, context], sort_keys=True).encode()).hexdigest()
-        return {"values": {key: effective[key] for key in selected},
-                "sources": {key: sources[key] for key in selected}, "revision": revision,
-                "selected_scope": {"module": module, "context": context},
-                "profile": {"agent": agent, "model": agent_model}}
+    def policy_snapshot(self, module=None, context=None, fields=None, agent=None, agent_model=None):
+        return {'values': {}, 'sources': {}}
+
+    def validate_policy(self, changes):
+        """Optional module-owned validation, supplied by a Settings subclass."""
+
+    def _provider(self, module):
+        factory = self.providers.get(module)
+        if factory is None:
+            return None
+        cached = self._providers.get(module)
+        if cached is None or cached[0] is not factory:
+            cached = (factory, factory(self.layout, registry=self.registry))
+            self._providers[module] = cached
+        cached[1].registry = self.registry
+        return cached[1]
 
     def snapshot(self, module=None, context=None, request=None, fields=None,
                  agent=None, agent_model=None):
-        if fields is not None and (not isinstance(fields, list) or any(key not in DEFAULTS for key in fields)):
+        provider = self._provider(module)
+        if provider is not None:
+            return provider.snapshot(module, context, request, fields, agent, agent_model)
+        if fields is not None and (not isinstance(fields, list) or any(key not in self.defaults for key in fields)):
             raise ValueError("Unknown configuration fields")
-        if fields is not None and set(fields) <= PROTECTED_FIELDS:
-            if request and set(request) & PROTECTED_FIELDS:
-                raise ValueError("Workspace policy request overrides are forbidden")
-            return self.workspace_snapshot(module, context, fields, agent, agent_model)
-        if request and set(request) & PROTECTED_FIELDS:
-            raise ValueError("Workspace policy request overrides are forbidden")
+        if fields is not None and set(fields) <= self.protected_fields:
+            if request and set(request) & self.protected_fields:
+                raise ValueError("Module policy request overrides are forbidden")
+            return self.policy_snapshot(module, context, fields, agent, agent_model)
+        if request and set(request) & self.protected_fields:
+            raise ValueError("Module policy request overrides are forbidden")
         self._scope_path(module, context)
         root = self._read()
-        active_path = self.layout.workspace_rag / "active.json"
+        active_path = self.layout.rag / "active.json"
         active = json.loads(active_path.read_text(encoding="utf-8")) if active_path.is_file() else None
-        effective = json.loads(json.dumps(DEFAULTS))
+        effective = json.loads(json.dumps(self.defaults))
         sources = {key: "default" for key in effective}
         if active:
             effective.update(
@@ -180,6 +144,9 @@ class Settings:
                     selection["parameters"][new] = layer[old]
                     selection_sources["parameters." + new] = origin + ".legacy"
         for scope, layer in layers:
+            # Disabled or uninstalled modules may retain their configuration.
+            # Only the active settings owner interprets those fields.
+            layer = {key: value for key, value in layer.items() if key in self.defaults}
             self._validate_changes(layer, allow_unavailable=True)
             merge_selection(layer, scope + ".configuration")
             effective.update(layer)
@@ -201,7 +168,7 @@ class Settings:
         for key in effective["selection"]["parameters"]:
             selection_sources.setdefault("parameters." + key, "algorithm.default")
         sources.update({"selection." + key: value for key, value in selection_sources.items()})
-        policy = self.workspace_snapshot(module, context, agent=agent, agent_model=agent_model)
+        policy = self.policy_snapshot(module, context, agent=agent, agent_model=agent_model)
         effective.update(policy["values"])
         sources.update(policy["sources"])
         if active:
@@ -243,31 +210,9 @@ class Settings:
         return result
 
     def _validate_changes(self, changes, allow_unavailable=False):
-        if not isinstance(changes, dict) or set(changes) - set(DEFAULTS):
+        if not isinstance(changes, dict) or set(changes) - set(self.defaults):
             raise ValueError("Unknown configuration fields")
-        for key in PROTECTED_FIELDS - {"material_max_tokens", "instruction_profiles"}:
-            if key in changes and type(changes[key]) is not bool:
-                raise ValueError(f"{key} must be boolean")
-        if "material_max_tokens" in changes:
-            value = changes["material_max_tokens"]
-            if value is not None and (type(value) is not int or value < 1):
-                raise ValueError("material_max_tokens must be a positive integer or null")
-        if "instruction_profiles" in changes:
-            profiles = changes["instruction_profiles"]
-            if not isinstance(profiles, list):
-                raise ValueError("instruction_profiles must be a list")
-            seen = set()
-            for profile in profiles:
-                if (not isinstance(profile, dict) or set(profile) - {"agent", "model", "reread_instructions"}
-                        or not (set(profile) & {"agent", "model"})
-                        or type(profile.get("reread_instructions")) is not bool
-                        or any(not isinstance(profile[key], str) or not profile[key].strip()
-                               for key in ("agent", "model") if key in profile)):
-                    raise ValueError("An instruction profile needs explicit agent/model and boolean reread_instructions")
-                identity = (profile.get("agent"), profile.get("model"))
-                if identity in seen:
-                    raise ValueError("Duplicate instruction profile")
-                seen.add(identity)
+        self.validate_policy(changes)
         if "selection" in changes:
             from .filtering import registry_for_layout
             value = changes['selection']
@@ -311,10 +256,13 @@ class Settings:
                 raise ValueError(f"{key} must be a string or null")
 
     def preview(self, changes, module=None, context=None, request_only=False):
+        provider = self._provider(module)
+        if provider is not None:
+            return provider.preview(changes, module, context, request_only)
         self._scope_path(module, context)
         self._validate_changes(changes)
-        if set(changes) & PROTECTED_FIELDS:
-            raise ValueError("Use workspace.settings_preview/settings_apply for workspace policies")
+        if set(changes) & self.protected_fields:
+            raise ValueError("Use the owning module settings operations for module policies")
         before = self.snapshot(module, context)
         revision = hashlib.sha256(
             json.dumps([before["revision"], changes, {"request_only":request_only}], sort_keys=True).encode()
@@ -336,11 +284,15 @@ class Settings:
         return preview
 
     def apply(self, revision):
+        for module in self.providers:
+            provider = self._provider(module)
+            if revision in provider._previews:
+                return provider.apply(revision)
         preview = self._previews.get(revision)
         if preview is None:
             raise ValueError("Preview is absent; preview changes before applying")
-        if set(preview["changes"]) & PROTECTED_FIELDS:
-            raise ValueError("Use workspace.settings_apply for workspace policies")
+        if set(preview["changes"]) & self.protected_fields:
+            raise ValueError("Use the owning module settings operation for module policies")
         scope = preview["selected_scope"]
         if preview["request_only"]:
             if self.snapshot(**scope)["revision"] != preview["base_revision"]:

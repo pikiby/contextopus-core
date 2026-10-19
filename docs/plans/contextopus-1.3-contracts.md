@@ -1,5 +1,9 @@
 # Contextopus 1.3 implementation contracts
 
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
 Historical contracts for version 1.3. The [temporary-memory update](workspace-temporary-memory.md)
 supersedes the cycle and temporary-storage rules in version 1.4.
 

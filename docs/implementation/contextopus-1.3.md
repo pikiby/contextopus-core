@@ -1,6 +1,10 @@
 # Contextopus 1.3 implementation and delivery evidence
 
-This document records implementation and delivery history. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define acceptance. The final delivery section records the released and installed 1.3.1 runtime, platform CI and separate client-behavior results. The later 1.3.2 section records exact-artifact verification and independently reviewed, bounded synthetic native-model acceptance. Earlier run counts and temporary-artifact evidence below retain their original scope; they do not certify later rebuilt bytes.
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
+This document records implementation and delivery history. The [accepted plan](../plans/contextopus-1.3.md) and [implementation contracts](../plans/contextopus-1.3-contracts.md) define acceptance. The historical 1.3.1 delivery section retains its platform and client-behavior results; the 1.3.2 section records bounded synthetic native-model acceptance. The final 1.3.3 section records the current released/installed runtime and registered-data audit. Earlier run counts and temporary-artifact evidence below retain their original scope; they do not certify later rebuilt bytes.
 
 ## Earlier candidate and cross-platform corrections
 
@@ -59,7 +63,7 @@ their original attribution rather than certifying new runtime bytes.
 
 | Domain | Target |
 | --- | --- |
-| Python package and client manifests | 1.3.1 released/installed; 1.3.2 final delivery artifacts verified |
+| Python package and client manifests | 1.3.3 released and installed |
 | Workspace storage format | 4 |
 | Builtin search algorithms | 2.0.0 |
 | Shared selection/evidence contracts | 2 |
@@ -535,8 +539,60 @@ not production ranking, every model/client combination or enforced compliance.
 Earlier partial/failing traces retain their original package and fixture scope.
 Observed proof is still missing for delegation, context switches, lost rule
 text and plugin refresh. GUI/GPU behavior and model scenarios on every OS remain
-outside the native platform CI claim. Live remains 1.3.1 at this delivery
-checkpoint; package installation and final data-preservation checks are separate
-steps. Final documentation changes affect only the sdist: accepted wheel/client
+outside the native platform CI claim. At that pre-1.3.2 checkpoint, live was
+1.3.1; later installation and final data-preservation checks are recorded below. Final documentation changes affect only the sdist: accepted wheel/client
 ZIP bytes retain their runtime-source attribution and are not rebuilt as though
 a documentation-only commit had rerun the platform or model checks.
+
+## Final delivery: 1.3.3
+
+[Release 1.3.3](https://github.com/pikiby/contextopus-core/releases/tag/v1.3.3)
+was published and installed from immutable source/tag commit
+`9873157dde6f5f6c4c3fbda263c6b7e0bef12114`, wheel SHA-256
+`81c7aba6560129658d5f6201154bdffb6816730ae7c557afc6efe6ff812879c9`.
+All seven published assets matched fresh downloads and GitHub digests. The
+installed 120 application members matched the wheel; the existing root, local
+CPU extras and 79 non-project dependency versions were retained. Coherent private
+whole-set backups were verified before cutovers using archive content, modes,
+links and logical SQLite integrity checks. No full extraction/restore drill is
+claimed. No private backup paths or context identities are published here.
+
+The narrow guard handles legacy pending work with no earlier INSTRUCTIONS body;
+it does not invent prior rules approval. The affected source set passed 30 tests,
+including two new cases; version/release checks passed 40 tests and two subtests,
+and the MCP-contract file passed 28 tests. Both changed-path cases then passed
+against the isolated installed wheel with all 52 loaded runtime modules outside
+the checkout. Compared with the accepted 1.3.2 wheel, only the migration guard
+and two packaged base-version fields changed among application members. All
+seven skills and the Workspace procedure were byte-identical. The complete OS
+matrix remains attributed to `2add7fa`; controlled-corpus native model results
+remain attributed to 1.3.2 `f0578ce`. No new model turn or full matrix is claimed
+for 1.3.3.
+
+One existing service owner serves the retained root. Fresh public MCP returned
+the expected procedure and packaged version. The reviewed managed-base update
+changed only its installed-version document; a full read and empty replan verified
+version 1.3.3, followed by algorithm-catalog refresh and semantic retrieval.
+Custom rules, settings and the selected base role were preserved. Existing
+Codex/Claude user integrations retained 14 managed files matching the seven
+shipped skills. Existing OpenCode/Crush HTTP integrations were retained; all four
+previews were no-ops. These checks do not claim automatic reload of every open
+session or replacement of its configured model.
+
+Full public-MCP pagination audited 29 registered Workspace contexts: all use format 4,
+all 425 records have descriptions, and all 425 are represented in the index,
+with no unregistered/unindexed records or structural issues. Established
+canonical identities, source bodies and graph semantics were preserved under
+the migration contract; legacy filename collisions used explicit scoped maps.
+User text and effective policies were retained, while previously uninitialized
+legacy rules were supplied through the reviewed initialization path. Existing
+pending work was preserved except for two separately authorized cancellations.
+Record-description coverage is separate from project-purpose completeness:
+five PROJECT documents remain absent and six remain placeholders. This structural
+audit is not a semantic truth check of every historical statement or a fresh
+verification of every external source. Fragment totals are not used as stable
+record counts.
+
+This later documentation-only status update does not rebuild or relabel the
+immutable 1.3.3 tag, wheel or other release assets. Earlier package/test/model
+receipts retain their original source and fixture scope.

@@ -15,7 +15,7 @@ def test_catalog_example_installs_and_keeps_linked_records_after_restart(tmp_pat
     app = Application(tmp_path, discover=False)
     try:
         assert app.query('core.modules')[0]['state'] == 'storage_pending'
-        assert not (tmp_path / 'core/storage/modules.sqlite3').exists()
+        assert not (tmp_path / 'core/storage/modules').exists()
         assert app.execute('core.module_install', {'module':'catalog-demo'})['state'] == 'enabled'
         app.execute('catalog-demo.session_put', {'id':'s1', 'title':'A session'})
         app.execute('catalog-demo.message_put', {'id':'m1', 'session_id':'s1', 'body':'Linked text'})

@@ -1,5 +1,9 @@
 # Hermes integration acceptance evidence
 
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
 The local acceptance check used official Hermes Agent **0.22.2**, pinned to
 `d923a5eb487a17c0a68801bba9ef0f56c81040a8`, and the native DeepSeek provider
 with model ID **`deepseek-flash`**. It exercised the Contextopus candidate against

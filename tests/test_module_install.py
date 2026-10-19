@@ -59,14 +59,18 @@ def test_folder_install_uses_parent_storage_and_application_guard(tmp_path, monk
         assert installed['state'] == 'enabled'
         assert installed['storage']['current_version'] == 1
         from contextopus.core.storage import _root_lock
+        from contextlib import contextmanager
         observed = []
-        execute = app.module_storage.execute
-        def checked(*args, **kwargs):
-            observed.append(getattr(_root_lock(tmp_path)[1], 'depth', 0))
-            return execute(*args, **kwargs)
-        monkeypatch.setattr(app.module_storage, 'execute', checked)
+        connection = type(app.module_storage)._connection
+        @contextmanager
+        def checked(storage, *args, **kwargs):
+            with connection(storage, *args, **kwargs) as conn:
+                if kwargs.get('write'):
+                    observed.append(getattr(_root_lock(tmp_path)[1], 'depth', 0))
+                yield conn
+        monkeypatch.setattr(type(app.module_storage), '_connection', checked)
         app.execute('sample.save', {'id': 'one', 'title': 'First session'})
-        assert observed and observed[0] > 0
+        assert observed and observed[0] == 0
         assert app.query('sample.read')['rows'] == [{'id': 'one', 'title': 'First session'}]
         with pytest.raises(RuntimeError, match='Query operations cannot write'):
             app.query('sample.forbidden')
@@ -417,7 +421,7 @@ def test_native_entrypoint_receives_shared_storage_before_registration(tmp_path,
     seen = []
     def register(app):
         seen.append(app.module_storage)
-        assert app.module_storage.path == tmp_path / 'core/storage/modules.sqlite3'
+        assert app.module_storage.path == tmp_path / 'core/storage/modules'
         assert not app.module_storage.path.exists()
         app.registry.register_module('native-catalog', state='available')
         app.registry.register(OperationSpec('native-catalog.status','query',{},
@@ -433,7 +437,12 @@ def test_native_entrypoint_receives_shared_storage_before_registration(tmp_path,
 def test_mcp_installs_folder_module_then_saves_and_reads_catalog(tmp_path, monkeypatch):
     import asyncio
     from contextopus.interfaces.mcp import server
-    from test_mcp_v13 import value
+    def value(result):
+        if isinstance(result, tuple):
+            return result[1]
+        if isinstance(result, dict):
+            return result
+        return json.loads(''.join(item.text for item in result if hasattr(item, 'text')))
     release(tmp_path / 'modules/sample')
     with Application(tmp_path, discover=False) as app:
         owner = SimpleNamespace(application=lambda *a, **kw: app,

@@ -1,4 +1,4 @@
-"""One root-wide SQLite catalog, module-owned migrations, Core-owned ledger."""
+"""Separate SQLite databases with module-owned migrations and Core ledgers."""
 
 from contextlib import contextmanager
 import hashlib
@@ -8,6 +8,8 @@ import sqlite3
 import time
 
 from .contract import ModuleStorageError, migration_files, module_id, validate_contract
+from .coordination import acquire_database_write, database_write
+from .legacy import ensure_partitioned, legacy_pending, read_path
 from .sql import authorize, check_deadline, render, statements
 
 
@@ -15,36 +17,80 @@ LEDGER = "_contextopus_module_migrations"
 
 
 class ModuleStorage:
-    def __init__(self, layout):
+    def __init__(self, layout, module=None):
         self.layout = layout
-        self.path = Path(layout.root) / "core/storage/modules.sqlite3"
+        self.module = module_id(module) if module is not None else None
+        self.directory = Path(layout.root) / "core/storage/modules"
+        self.legacy_path = Path(layout.root) / "core/storage/modules.sqlite3"
+        self.path = self.directory / (self.module + ".sqlite3") if self.module else self.directory
 
-    def _safe_path(self):
+    def for_module(self, module):
+        """Bind internal connections and writer ownership to one module file."""
+        module_id(module)
+        if self.module is not None:
+            if module != self.module:
+                raise ModuleStorageError("Storage is bound to another module")
+            return self
+        return type(self)(self.layout, module)
+
+    def native(self):
+        """Trusted in-process module API; never exposed by the child SQL bridge."""
+        from .trusted import NativeModuleStorage
+        return NativeModuleStorage(self)
+
+    def _acquire_write_gate(self, deadline=None):
+        if self.module is None:
+            raise ModuleStorageError("A module-bound storage connection is required")
+        self._safe_path()
+        self._writable_root()
+        if not self.path.is_file():
+            raise ModuleStorageError("Module storage is absent; explicitly prepare/apply its schema first")
+        return acquire_database_write(self.layout, self.path, deadline, module=self.module)
+
+    @contextmanager
+    def _write_guard(self, deadline=None):
+        if self.module is None:
+            raise ModuleStorageError("A module-bound storage connection is required")
+        self._safe_path()
+        self._writable_root()
+        with database_write(self.layout, self.path, deadline, module=self.module):
+            yield
+
+    def _safe_path(self, selected=None):
+        selected = self.path if selected is None else selected
         root = Path(self.layout.root).resolve()
-        if not self.path.resolve().is_relative_to(root):
+        if not selected.resolve().is_relative_to(root):
             raise ModuleStorageError("Module storage escapes the common root")
-        for path in (self.path, self.path.parent, self.path.parent.parent):
+        for path in (selected, *selected.parents):
+            if path == root:
+                break
             if path.is_symlink():
                 raise ModuleStorageError("Module storage paths cannot contain symlinks")
 
     def _writable_root(self):
         if (Path(self.layout.root) / ".contextopus-freeze.json").exists():
             raise ModuleStorageError("Root is frozen for relocation")
+        if legacy_pending(self.layout.root):
+            raise ModuleStorageError("Legacy shared module storage requires explicit storage apply/install before writes")
 
     @contextmanager
-    def _connection(self, *, write=False, create=False, deadline=None):
-        self._safe_path()
+    def _connection(self, *, write=False, create=False, deadline=None, cross_thread=False):
+        if self.module is None:
+            raise ModuleStorageError("A module-bound storage connection is required")
+        selected = self.path if write else read_path(self.layout.root, self.module, self.path)
+        self._safe_path(selected)
         if write:
             self._writable_root()
         check_deadline(deadline)
-        if not self.path.is_file() and not create:
+        if not selected.is_file() and not create:
             raise ModuleStorageError("Module storage is absent; explicitly prepare/apply its schema first")
         timeout = 5.0 if deadline is None else max(0.001, min(5.0, deadline - time.monotonic()))
         if create:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         mode = "rwc" if create else "rw" if write else "ro"
-        conn = sqlite3.connect(self.path.resolve().as_uri() + "?mode=" + mode,
-                               uri=True, isolation_level=None, timeout=timeout)
+        conn = sqlite3.connect(selected.resolve().as_uri() + "?mode=" + mode,
+                               uri=True, isolation_level=None, timeout=timeout,
+                               check_same_thread=not cross_thread)
         try:
             conn.row_factory = sqlite3.Row
             # Some SQLite builds omit extension-loading support and its Python
@@ -80,12 +126,14 @@ class ModuleStorage:
             f'SELECT version,name,checksum FROM "{LEDGER}" WHERE module=? ORDER BY version', (module,))]
 
     def _inspect(self, module, contract, package, conn=None):
-        module_id(module)
+        bound = self.for_module(module)
+        if bound is not self:
+            return bound._inspect(module, contract, package, conn)
         contract = validate_contract(contract)
         files = migration_files(contract, package)
         if conn is not None:
             applied = self._ledger(conn, module)
-        elif self.path.exists():
+        elif read_path(self.layout.root, module, self.path).exists():
             with self._connection() as reader:
                 applied = self._ledger(reader, module)
         else:
@@ -102,17 +150,19 @@ class ModuleStorage:
                     raise ModuleStorageError("Applied migration changed: " + item["name"])
         bounds = contract["compatible_versions"]
         compatible = current == 0 or bounds["min"] <= current <= bounds["max"]
-        pending = current < target
+        layout_pending = legacy_pending(self.layout.root)
+        schema_pending = current < target
+        pending = schema_pending or layout_pending
         status = "pending" if pending else "current" if compatible else "incompatible"
         revision = hashlib.sha256(json.dumps({"module": module, "contract": contract,
             "files": [{k: item[k] for k in ("version", "name", "checksum")} for item in files],
             "applied": applied}, sort_keys=True).encode()).hexdigest()
         result = {"status": status, "current_version": current, "target_version": target,
-                  "compatible": compatible, "needs_migration": pending, "errors": [],
+                  "compatible": compatible, "needs_migration": pending, "needs_layout_migration": layout_pending, "errors": [],
                   "migrations": [{**{k: item[k] for k in ("version", "name", "checksum")},
                                   "applied": item["version"] <= current} for item in files],
                   "revision": revision}
-        if not compatible and not pending:
+        if not compatible and not schema_pending:
             result["errors"] = [f"Schema version {current} is unsupported by this module ({bounds['min']}..{bounds['max']}); no automatic downgrade"]
         return result, files
 
@@ -156,8 +206,23 @@ class ModuleStorage:
                     raise ModuleStorageError("Migration schema objects must stay within their owning module")
 
     def apply(self, module, contract, package, expected_revision):
-        """Atomically migrate pending steps and the ledger under the root guard."""
-        with self.layout.guard():
+        """Atomically migrate this module file and its Core-owned ledger."""
+        bound = self.for_module(module)
+        if bound is not self:
+            return bound.apply(module, contract, package, expected_revision)
+        if legacy_pending(self.layout.root):
+            with self.layout.guard():
+                # A nested root guard is reentrant and skips admission checks.
+                # Reject a newly published freeze before changing legacy data.
+                if (Path(self.layout.root) / ".contextopus-freeze.json").exists():
+                    raise ModuleStorageError("Root is frozen for relocation")
+                reviewed, _ = self._inspect(module, contract, package)
+                if reviewed["revision"] != expected_revision:
+                    raise ModuleStorageError("Storage preparation changed; prepare and review again")
+                if reviewed["errors"]:
+                    raise ModuleStorageError("; ".join(reviewed["errors"]))
+                ensure_partitioned(self.layout.root)
+        with self._write_guard():
             before, files = self._inspect(module, contract, package)
             if before["revision"] != expected_revision:
                 raise ModuleStorageError("Storage preparation changed; prepare and review again")
@@ -187,14 +252,20 @@ class ModuleStorage:
                         migrated.append(item["version"])
                     self._foreign_keys(conn, module)
                     result, _ = self._inspect(module, contract, package, conn)
+                    self._writable_root()
                     conn.execute("COMMIT")
                     return {**result, "applied_versions": migrated}
                 except BaseException:
+                    conn.set_progress_handler(None, 0)
                     conn.set_authorizer(None)
-                    conn.execute("ROLLBACK")
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
                     raise
 
     def query(self, module, sql, parameters=(), *, deadline=None):
+        bound = self.for_module(module)
+        if bound is not self:
+            return bound.query(module, sql, parameters, deadline=deadline)
         sql = render(module, sql)
         with self._connection(deadline=deadline) as conn:
             conn.set_authorizer(authorize(module))
@@ -204,8 +275,15 @@ class ModuleStorage:
             return {"columns": columns, "rows": rows}
 
     def execute(self, module, sql, parameters=(), *, deadline=None):
+        bound = self.for_module(module)
+        if bound is not self:
+            return bound.execute(module, sql, parameters, deadline=deadline)
         sql = render(module, sql)
-        with self.layout.guard():
+        self._safe_path()
+        self._writable_root()
+        if not self.path.is_file():
+            raise ModuleStorageError("Module storage is absent; explicitly prepare/apply its schema first")
+        with self._write_guard(deadline):
             with self._connection(write=True, deadline=deadline) as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
@@ -214,6 +292,7 @@ class ModuleStorage:
                     cursor = conn.execute(sql, parameters)
                     if not authorization.wrote:
                         raise ModuleStorageError("execute accepts domain DML only; use query for reads")
+                    cursor.fetchall()
                     result = {"rowcount": cursor.rowcount, "lastrowid": cursor.lastrowid}
                     check_deadline(deadline)
                     self._writable_root()
@@ -221,6 +300,8 @@ class ModuleStorage:
                     conn.execute("COMMIT")
                     return result
                 except BaseException:
+                    conn.set_progress_handler(None, 0)
                     conn.set_authorizer(None)
-                    conn.execute("ROLLBACK")
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
                     raise

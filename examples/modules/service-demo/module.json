@@ -1,0 +1,38 @@
+{
+  "id": "service-demo",
+  "version": "1.0.0",
+  "core_requires": ">=1.4,<2",
+  "storage": {
+    "engine": "sqlite",
+    "schema_version": 1,
+    "migrations": "migrations",
+    "compatible_versions": {"min": 1, "max": 1}
+  },
+  "service": {
+    "factory": "worker.py:create_service",
+    "ready_timeout": 10,
+    "stop_timeout": 5
+  },
+  "operations": [
+    {
+      "name": "service-demo.enqueue",
+      "kind": "execute",
+      "service": true,
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "amount": {"type": "integer", "minimum": 1}
+        },
+        "required": ["id", "amount"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "service-demo.status",
+      "kind": "query",
+      "service": true,
+      "arguments_schema": {"type": "object", "additionalProperties": false}
+    }
+  ]
+}

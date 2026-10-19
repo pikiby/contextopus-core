@@ -142,3 +142,118 @@ def test_relocation_preserves_unfinished_temporary_cards_and_pending_proposals(t
         assert app.execute('core.relocation_apply', {'plan_revision': review['revision']})['status'] == 'complete'
     for name, content in files.items():
         assert (destination / 'modules/workspace/workspace_contexts' / name).read_text() == content
+
+
+def test_module_files_are_snapshotted_after_cross_process_writer_drains(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from pathlib import Path
+    import os
+    import sqlite3
+    import subprocess
+    import sys
+    import threading
+    import time
+
+    from contextopus.core.module_storage import ModuleStorage
+    from contextopus.core.storage import StorageLayout
+
+    source, destination = source_tree(tmp_path)
+    storage = ModuleStorage(StorageLayout(source))
+    package = tmp_path / "package"
+    (package / "migrations").mkdir(parents=True)
+    (package / "migrations/001-schema.sql").write_text(
+        'CREATE TABLE "{{module}}::items" (value TEXT);'
+    )
+    contract = {"engine": "sqlite", "schema_version": 1, "migrations": "migrations",
+                "compatible_versions": {"min": 1, "max": 1}}
+    for module in ("alpha", "beta"):
+        review = storage.prepare(module, contract, package)
+        storage.apply(module, contract, package, review["revision"])
+        storage.execute(module, 'INSERT INTO "{{module}}::items" VALUES (?)', [module])
+    staging = storage.path / ".partition-abandoned-alpha.sqlite3"
+    staging.write_bytes(b"incomplete disposable staging")
+    backup = source / "core/storage/.backups/modules.sqlite3.pre-partition-example"
+    backup.parent.mkdir()
+    backup.write_bytes(b"durable recovery evidence")
+    proposal = relocation.plan(source, destination)
+    manifest = {entry["path"] for entry in proposal["files"]}
+    assert "core/storage/modules/alpha.sqlite3" in manifest
+    assert "core/storage/modules/beta.sqlite3" in manifest
+    assert not any(name.endswith(".sqlite3.lock") or "/.partition-" in name for name in manifest)
+    assert backup.relative_to(source).as_posix() in manifest
+    ready, release, outcome = [tmp_path / name for name in ("writer-ready", "release", "outcome")]
+    code = '''
+import sys, time
+from pathlib import Path
+from contextopus.core.storage import StorageLayout
+from contextopus.core.module_storage import ModuleStorage
+root, ready, release, outcome = map(Path, sys.argv[1:])
+storage = ModuleStorage(StorageLayout(root)).for_module("alpha")
+with storage._write_guard():
+    with storage._connection(write=True) as database:
+        database.execute("BEGIN IMMEDIATE")
+        ready.touch()
+        deadline = time.monotonic() + 10
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Test release signal absent")
+            time.sleep(.01)
+        database.execute("ROLLBACK")
+try:
+    storage.execute("alpha", 'INSERT INTO "{{module}}::items" VALUES (?)', ["unsafe"])
+except RuntimeError as error:
+    outcome.write_text(str(error))
+else:
+    outcome.write_text("unsafe write succeeded")
+'''
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, str(source), str(ready), str(release), str(outcome)],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    quiescing, verifying = threading.Event(), threading.Event()
+    quiesce, verify = relocation.quiesce_module_writes, relocation._verify_source
+
+    @contextmanager
+    def observe_quiesce(*args, **kwargs):
+        quiescing.set()
+        with quiesce(*args, **kwargs):
+            yield
+
+    def observe_verify(*args, **kwargs):
+        verifying.set()
+        return verify(*args, **kwargs)
+
+    monkeypatch.setattr(relocation, "quiesce_module_writes", observe_quiesce)
+    monkeypatch.setattr(relocation, "_verify_source", observe_verify)
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert ready.exists(), process.communicate(timeout=1) if process.poll() is not None else "Writer not ready"
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = executor.submit(relocation.apply, proposal)
+            try:
+                assert quiescing.wait(3)
+                assert not verifying.wait(.1)
+                assert not (source / ".contextopus-freeze.json").exists()
+            finally:
+                release.touch()
+            assert result.result(timeout=5)["status"] == "complete"
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode == 0, (stdout, stderr)
+        assert "frozen" in outcome.read_text().lower()
+        for module in ("alpha", "beta"):
+            relative = f"core/storage/modules/{module}.sqlite3"
+            assert (source / relative).is_file()
+            assert (destination / ".backups/relocations" / proposal["snapshot_id"] / relative).is_file()
+            with sqlite3.connect(destination / relative) as database:
+                assert database.execute(f'SELECT value FROM "{module}::items"').fetchall() == [(module,)]
+        assert (destination / backup.relative_to(source)).read_bytes() == backup.read_bytes()
+        assert not (destination / staging.relative_to(source)).exists()
+    finally:
+        release.touch()
+        if process.poll() is None:
+            process.terminate()
+            process.communicate(timeout=5)

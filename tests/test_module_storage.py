@@ -46,7 +46,7 @@ def test_discovery_and_queries_never_create_database(tmp_path):
     assert not storage.path.parent.exists()
 
 
-def test_two_modules_share_catalog_without_table_or_data_collisions(tmp_path):
+def test_two_modules_have_separate_files_without_table_or_data_collisions(tmp_path):
     storage = service(tmp_path)
     path = package(tmp_path)
     for module in ("alpha", "beta"):
@@ -55,9 +55,13 @@ def test_two_modules_share_catalog_without_table_or_data_collisions(tmp_path):
     for module in ("alpha", "beta"):
         assert storage.query(module, 'SELECT body FROM "{{module}}::sessions" WHERE id=?', (1,)) == {
             "columns": ["body"], "rows": [{"body": module}]}
-    assert storage.path == tmp_path / "memory/core/storage/modules.sqlite3"
-    with sqlite3.connect(storage.path) as conn:
-        assert conn.execute('SELECT count(*) FROM "_contextopus_module_migrations"').fetchone()[0] == 2
+    assert storage.path == tmp_path / "memory/core/storage/modules"
+    for module in ("alpha", "beta"):
+        bound = storage.for_module(module)
+        assert bound.path == storage.path / (module + ".sqlite3")
+        with sqlite3.connect(bound.path) as conn:
+            assert conn.execute('SELECT module FROM "_contextopus_module_migrations"').fetchall() == [(module,)]
+            assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%::%'").fetchall() == [(module + "::sessions",)]
 
 
 @pytest.mark.parametrize("extension_api_present", [False, True])
@@ -92,7 +96,7 @@ def test_optional_extension_api_keeps_storage_usable_and_loading_denied(tmp_path
     storage.execute("alpha", 'INSERT INTO "{{module}}::sessions" VALUES (1,?)', ("retained",))
     # Without an authorizer, the connection itself must still prohibit loading
     # (or the function is absent in SQLite builds without that capability).
-    with storage._connection() as connection:
+    with storage.for_module("alpha")._connection() as connection:
         with pytest.raises(sqlite3.OperationalError, match="not authorized|no such function"):
             connection.execute("SELECT load_extension('anything')")
     with pytest.raises(ModuleStorageError, match="not authorized|no such function"):
@@ -128,7 +132,7 @@ def test_failed_migrations_roll_back_all_steps_and_can_retry(tmp_path):
     with pytest.raises(ModuleStorageError):
         install(storage, "alpha", rules, path)
     assert storage.inspect("alpha", rules, path)["current_version"] == 0
-    with sqlite3.connect(storage.path) as conn:
+    with sqlite3.connect(storage.for_module("alpha").path) as conn:
         assert conn.execute("SELECT name FROM sqlite_master").fetchall() == []
     (path / "migrations/002-schema.sql").write_text('INSERT INTO "{{module}}::sessions" VALUES (7);')
     assert install(storage, "alpha", rules, path)["applied_versions"] == [1, 2]
@@ -389,14 +393,14 @@ def test_native_execute_obeys_root_lock_and_same_thread_reentrancy(tmp_path):
     assert storage.query("alpha", 'SELECT body FROM "{{module}}::sessions" ORDER BY id')["rows"] == [{"body": "reentrant"}, {"body": "worker"}]
 
 
-def test_relocation_uses_consistent_sqlite_backup_for_shared_wal_catalog(tmp_path, monkeypatch):
+def test_relocation_uses_consistent_sqlite_backup_for_module_wal_files(tmp_path, monkeypatch):
     from contextopus.core import relocation
     storage, path = service(tmp_path), package(tmp_path)
     for module in ("alpha", "beta"):
         install(storage, module, contract(), path)
     # Keep WAL open: committed data must be obtained through SQLite backup,
     # rather than copying only the main database file.
-    keeper = sqlite3.connect(storage.path)
+    keeper = sqlite3.connect(storage.for_module("alpha").path)
     try:
         keeper.execute("PRAGMA journal_mode=WAL")
         keeper.execute("BEGIN")
@@ -411,16 +415,146 @@ def test_relocation_uses_consistent_sqlite_backup_for_shared_wal_catalog(tmp_pat
         monkeypatch.setattr(relocation, "_sqlite_backup", capture)
         destination = tmp_path / "relocated"
         plan = relocation.plan(storage.layout.root, destination)
-        entry = next(item for item in plan["files"] if item["path"] == "core/storage/modules.sqlite3")
+        entry = next(item for item in plan["files"] if item["path"] == "core/storage/modules/alpha.sqlite3")
         assert entry["kind"] == "sqlite" and "snapshot" not in entry
         assert relocation.apply(plan)["status"] == "complete"
         moved = ModuleStorage(StorageLayout(destination))
         for module in ("alpha", "beta"):
             assert moved.query(module, 'SELECT body FROM "{{module}}::sessions"')["rows"] == [{"body": module}]
             assert moved.inspect(module, contract(), path)["status"] == "current"
-        assert any(source == storage.path and str(target).endswith("modules.sqlite3.relocating") for source, target in backups)
-        with sqlite3.connect(moved.path) as conn:
+        assert any(source == storage.for_module("alpha").path and str(target).endswith("alpha.sqlite3.relocating") for source, target in backups)
+        with sqlite3.connect(moved.for_module("alpha").path) as conn:
             assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        assert storage.path.is_file()  # source is retained by relocation
+        assert storage.for_module("alpha").path.is_file()  # source is retained by relocation
     finally:
         keeper.close()
+
+
+def test_long_module_write_does_not_hold_root_or_block_other_database(tmp_path, monkeypatch):
+    storage, path = service(tmp_path), package(tmp_path)
+    for module in ("alpha", "beta"):
+        install(storage, module, contract(), path)
+    running, release, done = threading.Event(), threading.Event(), threading.Event()
+    failures = []
+    native_connect = sqlite3.connect
+
+    class Connection(sqlite3.Connection):
+        long_sql = False
+
+        def execute(self, sql, *args, **kwargs):
+            self.long_sql = sql.startswith("WITH RECURSIVE")
+            return super().execute(sql, *args, **kwargs)
+
+        def set_progress_handler(self, callback, steps):
+            def progress():
+                if self.long_sql and not running.is_set():
+                    running.set()
+                    if not release.wait(2):
+                        return 1
+                return callback()
+            return super().set_progress_handler(progress if callback is not None else None, steps)
+
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: native_connect(*args, factory=Connection, **kwargs))
+
+    def long_write():
+        try:
+            storage.execute("alpha", 'WITH RECURSIVE x(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM x WHERE n<10000000) INSERT INTO "{{module}}::sessions" SELECT n,CAST(n AS TEXT) FROM x',
+                            deadline=time.monotonic() + .35)
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=long_write)
+    worker.start()
+    try:
+        assert running.wait(1)
+        assert storage.execute("beta", 'INSERT INTO "{{module}}::sessions" VALUES (1,?)', ("independent",), deadline=time.monotonic() + .15)["rowcount"] == 1
+        with storage.layout.guard(deadline=time.monotonic() + .15):
+            assert not done.is_set()
+    finally:
+        release.set()
+        worker.join(2)
+    assert not worker.is_alive()
+    assert len(failures) == 1 and isinstance(failures[0], ModuleStorageError)
+    assert "interrupted" in str(failures[0]) or "deadline" in str(failures[0])
+    assert storage.query("alpha", 'SELECT count(*) AS n FROM "{{module}}::sessions"')["rows"] == [{"n": 0}]
+    assert storage.query("beta", 'SELECT body FROM "{{module}}::sessions"')["rows"] == [{"body": "independent"}]
+
+
+def test_sql_write_admission_respects_deadline_while_root_is_busy(tmp_path):
+    storage, path = service(tmp_path), package(tmp_path)
+    install(storage, "alpha", contract(), path)
+    failures, done = [], threading.Event()
+
+    def writer():
+        try:
+            storage.execute("alpha", 'INSERT INTO "{{module}}::sessions" VALUES (1,?)', ("late",), deadline=time.monotonic() + .04)
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            done.set()
+
+    with storage.layout.guard():
+        thread = threading.Thread(target=writer)
+        thread.start()
+        assert done.wait(.5)
+    thread.join(1)
+    assert len(failures) == 1 and isinstance(failures[0], ModuleStorageError)
+    assert "deadline" in str(failures[0])
+    assert storage.query("alpha", 'SELECT * FROM "{{module}}::sessions"')["rows"] == []
+
+
+@pytest.mark.parametrize("link", ["directory", "database", "lock"])
+def test_quiesce_rejects_storage_symlinks_without_external_lockfiles(tmp_path, link):
+    from contextopus.core.module_storage.coordination import quiesce_module_writes
+    storage = service(tmp_path)
+    external = tmp_path / "external"
+    external.mkdir()
+    database = external / "alpha.sqlite3"
+    database.touch()
+    storage.directory.parent.mkdir(parents=True)
+    if link == "directory":
+        storage.directory.symlink_to(external, target_is_directory=True)
+    else:
+        storage.directory.mkdir()
+        if link == "database":
+            (storage.directory / "alpha.sqlite3").symlink_to(database)
+        else:
+            (storage.directory / "alpha.sqlite3").touch()
+            sentinel = external / "lock-sentinel"
+            sentinel.write_text("retained")
+            (storage.directory / "alpha.sqlite3.lock").symlink_to(sentinel)
+    before = {path.name: path.read_bytes() for path in external.iterdir()}
+    with storage.layout.guard():
+        with pytest.raises(ModuleStorageError, match="symlink|escapes"):
+            with quiesce_module_writes(storage.layout):
+                pytest.fail("Unsafe storage was admitted")
+    assert {path.name: path.read_bytes() for path in external.iterdir()} == before
+
+
+def test_nested_apply_cannot_partition_legacy_storage_after_root_freezes(tmp_path):
+    from contextlib import closing
+    import hashlib
+    storage, path = service(tmp_path), package(tmp_path)
+    migration = path / "migrations/001-schema.sql"
+    storage.legacy_path.parent.mkdir(parents=True)
+    with closing(sqlite3.connect(storage.legacy_path)) as connection:
+        connection.executescript(migration.read_text().replace("{{module}}", "alpha"))
+        connection.execute('CREATE TABLE "_contextopus_module_migrations" (module TEXT NOT NULL, version INTEGER NOT NULL, name TEXT NOT NULL, checksum TEXT NOT NULL, PRIMARY KEY(module,version))')
+        connection.execute('INSERT INTO "_contextopus_module_migrations" VALUES (?,?,?,?)',
+                           ("alpha", 1, migration.name, hashlib.sha256(migration.read_bytes()).hexdigest()))
+        connection.execute('INSERT INTO "alpha::sessions" VALUES (1,?)', ("retained",))
+        connection.commit()
+    reviewed = storage.prepare("alpha", contract(), path)
+    original = storage.legacy_path.read_bytes()
+    with storage.layout.guard():
+        # Nested guards are reentrant: they do not repeat the root admission
+        # check. Apply must independently reject a freeze published meanwhile.
+        (storage.layout.root / ".contextopus-freeze.json").write_text("{}")
+        with pytest.raises(ModuleStorageError, match="frozen"):
+            storage.apply("alpha", contract(), path, reviewed["revision"])
+    assert storage.legacy_path.read_bytes() == original
+    assert not storage.directory.exists()
+    assert not (storage.legacy_path.parent / ".backups").exists()
+    assert storage.query("alpha", 'SELECT body FROM "{{module}}::sessions"')["rows"] == [{"body": "retained"}]

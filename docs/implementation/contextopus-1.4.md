@@ -1,5 +1,9 @@
 # Contextopus 1.4 implementation and verification
 
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
 ## Delivered behavior
 
 Workspace temporary memory is optional. Reusable assignments, inputs, findings

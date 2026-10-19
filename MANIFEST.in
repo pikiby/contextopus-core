@@ -4,6 +4,11 @@ recursive-include examples *.py *.json *.md *.sql
 recursive-include docs *.md *.svg *.png *.gif
 include README.md
 include uv.lock
-include scripts/build_release.py scripts/verify_release.py scripts/verify_installed.py
+recursive-include scripts *.py
+recursive-include distribution *.py *.sh *.ps1 *.md
+global-exclude *.pyc *.pyo
 recursive-include plugins/contextopus *.json *.md
-recursive-include tests/fixtures *.py *.md *.json *.jsonl *.yaml
+recursive-include tests *.py *.md *.json *.jsonl *.yaml
+
+prune modules
+prune plugins/persistent-context-workspace

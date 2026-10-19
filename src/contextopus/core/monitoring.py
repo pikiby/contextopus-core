@@ -97,7 +97,7 @@ class RootServices:
                 "chunks": None,
                 "error": str(exc),
             }
-        directory = self.layout.workspace_rag
+        directory = self.layout.rag
         size = (
             sum(
                 p.stat().st_size

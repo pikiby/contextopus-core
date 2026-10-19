@@ -1,4 +1,5 @@
 import json
+import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -11,10 +12,11 @@ from contextopus.core.storage import StorageLayout
 
 def event(tmp_path, count=3):
     layout = StorageLayout(tmp_path)
-    instructions = layout.workspace('chosen') / 'INSTRUCTIONS.md'
+    instructions = layout.root / 'module-rules/chosen.md'
     instructions.parent.mkdir(parents=True, exist_ok=True)
     instructions.write_text('Original exact rules')
     journal = OperationJournal(layout)
+    journal.search_operations['core.search'] = lambda context: hashlib.sha256(instructions.read_bytes()).hexdigest()
     identifier = journal.begin(SimpleNamespace(workspace='chosen'), 'core.search', {
         'query': 'private source query', 'purpose': 'Find required conditions', 'task_id': 'task-one'})
     rows = [{'key': ['workspace', 'chosen', str(i)], 'revision': 'revision-' + str(i),
@@ -46,7 +48,7 @@ def test_scope_frozen_pagination_and_rule_revision(tmp_path):
     assert history.query(context='other')['events'] == []
     assert history.query(task_id='other')['events'] == []
     revision = snapshot['events'][0]['instructions_revision']
-    (journal.layout.workspace('chosen') / 'INSTRUCTIONS.md').write_text('Changed rules')
+    (journal.layout.root / 'module-rules/chosen.md').write_text('Changed rules')
     assert history.query(instructions_revision=revision)['events']
     assert history.query(instructions_revision='unknown')['events'] == []
     with pytest.raises(ValueError):

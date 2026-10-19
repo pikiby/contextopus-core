@@ -90,6 +90,7 @@ class OperationJournal:
         self.layout = layout
         self._original_path = layout.analytics / "operations.sqlite3"
         self._controller = _controller(layout.root)
+        self.search_operations = {"core.search": None}
 
     @property
     def path(self):
@@ -147,7 +148,10 @@ class OperationJournal:
                 None,
                 None,
             ))
-            begin(db, ident, self.layout, context, operation, parameters)
+            if operation in self.search_operations:
+                provider = self.search_operations[operation]
+                revision = provider(context) if provider is not None else None
+                begin(db, ident, self.layout, context, operation, parameters, revision=revision)
         return ident
 
     def finish(self, ident, result=None, error=None, duration=None):

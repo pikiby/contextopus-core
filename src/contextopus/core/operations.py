@@ -21,6 +21,7 @@ class OperationRegistry:
         self._operations = {}
         self.journal = journal
         self.modules = {}
+        self.compatibility_adapters = {}
         self.active_operations = {}
         import threading
 
@@ -33,6 +34,22 @@ class OperationRegistry:
         if spec.kind not in {"query", "execute"} or spec.name in self._operations:
             raise ValueError(f"Invalid or duplicate operation: {spec.name}")
         self._operations[spec.name] = spec
+
+    def register_compatibility_adapter(self, owner, register, **metadata):
+        """Explicitly mark a replaceable adapter, preserving its whole contribution."""
+        if owner in self.modules:
+            raise ValueError('Module already registered: ' + owner)
+        contribution = OperationRegistry()
+        register(contribution)
+        specs = list(contribution._operations.values())
+        self.replace_owned(owner, specs)
+        self.register_module(owner, **metadata)
+        self.compatibility_adapters[owner] = (specs, dict(self.modules[owner]))
+
+    def restore_compatibility_adapter(self, owner):
+        specs, metadata = self.compatibility_adapters[owner]
+        self.replace_owned(owner, specs)
+        self.modules[owner] = dict(metadata)
 
     def replace_owned(self, owner, specs):
         """Validate a complete contribution before atomically publishing its operations."""
@@ -82,29 +99,36 @@ class OperationRegistry:
         from pathlib import Path
 
         root = getattr(context, "root", None)
-        candidate = self._operations.get(operation)
-        guard = (
-            StorageLayout(root).guard()
-            if root and Path(root).exists() and (candidate is None or candidate.guard_root)
-            else nullcontext()
-        )
-        with guard:
-            refresh = getattr(self, "refresh_modules", None)
-            if refresh and (candidate is None or candidate.guard_root):
-                refresh()
-            if operation not in self._operations:
-                raise ValueError(f"Unknown operation: {operation}; use describe")
-            spec = self._operations[operation]
-            if kind != spec.kind:
-                raise ValueError(f"Operation {operation} requires {spec.kind}")
-            arguments = {} if arguments is None else arguments
-            schema = spec.arguments_schema
-            if hasattr(schema, "model_validate"):
-                arguments = schema.model_validate(arguments).model_dump()
-            else:
-                from jsonschema import Draft202012Validator
-                Draft202012Validator(schema).validate(arguments)
-            return self._invoke(spec, arguments, context)
+        # Refresh may stop a stale child or wait for its Core calls. It must run
+        # before any root guard, including when an operation was just removed.
+        refresh = getattr(self, "refresh_modules", None)
+        if refresh:
+            refresh()
+        while True:
+            candidate = self._operations.get(operation)
+            guard = (
+                StorageLayout(root).guard()
+                if root and Path(root).exists() and (candidate is None or candidate.guard_root)
+                else nullcontext()
+            )
+            with guard:
+                if self._operations.get(operation) is not candidate:
+                    # A replacement may have a different root-admission policy.
+                    # Release the old guard before dispatching the new handler.
+                    continue
+                if candidate is None:
+                    raise ValueError(f"Unknown operation: {operation}; use describe")
+                spec = candidate
+                if kind != spec.kind:
+                    raise ValueError(f"Operation {operation} requires {spec.kind}")
+                arguments = {} if arguments is None else arguments
+                schema = spec.arguments_schema
+                if hasattr(schema, "model_validate"):
+                    arguments = schema.model_validate(arguments).model_dump()
+                else:
+                    from jsonschema import Draft202012Validator
+                    Draft202012Validator(schema).validate(arguments)
+                return self._invoke(spec, arguments, context)
 
     def _invoke(self, spec, arguments, context):
         operation = spec.name

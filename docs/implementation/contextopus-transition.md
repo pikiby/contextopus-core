@@ -1,5 +1,9 @@
 # Contextopus 1.0.0 transition
 
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
 ## Source baseline
 
 The transition began from the preexisting dirty 0.14.0/v4 working tree, whose Git

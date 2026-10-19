@@ -1,6 +1,6 @@
 # Search evidence and analysis
 
-Use `w-analyze` to investigate a specific question over a bounded period. The skill loads the installed analysis procedure. It evaluates both compliance with historical instructions and whether the selected algorithm and parameters helped the task. A search call or file read alone does not prove that an agent used the result correctly.
+With Workspace installed, use its `w-analyze` skill to investigate a specific question over a bounded period. Core exposes the bounded evidence operations independently. The skill loads the installed analysis procedure. It evaluates both compliance with historical instructions and whether the selected algorithm and parameters helped the task. A search call or file read alone does not prove that an agent used the result correctly.
 
 ## What is retained
 
@@ -56,4 +56,4 @@ Optional `relevant_keys` is a list of caller-labelled relevant material keys, fo
 
 Keep findings tied to event IDs and distinguish evidence from inference. The analysis procedure does not change project rules or records automatically. `workspace.analytics_evaluate` retains an assessment only when the user asks to retain it.
 
-See [search settings](search-selection.md) for live tuning and [architecture](architecture.md#operation-evidence-and-analysis) for the Git/SQLite separation.
+See [search settings](search-selection.md) for live tuning and [architecture](https://github.com/pikiby/contextopus-workspace/blob/main/docs/architecture.md#operation-evidence-and-analysis) for the Git/SQLite separation.

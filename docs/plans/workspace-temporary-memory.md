@@ -1,5 +1,9 @@
 # Workspace temporary memory
 
+> Historical document: release/verification conditions below apply to the named
+> version or dated check. The independent repository layout is unreleased; see
+> [current development instructions](../development.md).
+
 ## Accepted behavior
 
 Temporary memory is optional. Use `.tmp` for shared assignments, reusable inputs,

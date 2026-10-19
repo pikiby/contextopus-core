@@ -109,10 +109,10 @@ def test_python_dependencies_use_uv_only_on_prepare(tmp_path, monkeypatch):
 
 def test_builtin_cannot_be_disabled(tmp_path):
     app = manager(tmp_path)
-    app.app.registry.register_module('workspace', state='available')
+    app.app.registry.register_module('core', state='available')
     with pytest.raises(ValueError, match='Built-in'):
-        app.disable('workspace')
-    assert 'workspace' in app.app.registry.modules
+        app.disable('core')
+    assert 'core' in app.app.registry.modules
 
 
 @pytest.mark.parametrize('changes', [{'dependencies': {'python': 'bad'}}, {'operations': [{'name':'sample.run', 'kind':'query', 'command':[123]}]}])

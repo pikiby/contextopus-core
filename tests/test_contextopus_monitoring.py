@@ -24,9 +24,9 @@ def test_usage_24h_does_not_count_status_poll_or_old_requests(tmp_path):
     assert result['average_seconds']==0.2
 
 def test_corrupt_index_reason_is_visible_and_not_zero(tmp_path):
-    layout=StorageLayout(tmp_path);layout.workspace_rag.mkdir(parents=True)
-    (layout.workspace_rag/'lancedb').mkdir()
-    (layout.workspace_rag/'active.json').write_text('{invalid')
+    layout=StorageLayout(tmp_path);layout.rag.mkdir(parents=True)
+    (layout.rag/'lancedb').mkdir()
+    (layout.rag/'active.json').write_text('{invalid')
     status=RootServices(layout,None,OperationRegistry()).status()
     assert status['state']=='error'
     assert status['database']['error']

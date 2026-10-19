@@ -14,6 +14,8 @@ class ProcessResources:
         import threading
         self._service_lock = threading.RLock()
         self._services = {}
+        self.services_started = False
+        self._closed = False
 
     def acquire(self, config):
         lease = self.providers.acquire(config)
@@ -23,6 +25,8 @@ class ProcessResources:
     def service(self, key, factory):
         """One module runtime per root in this process, independent of Workspace."""
         with self._service_lock:
+            if self._closed:
+                raise RuntimeError('Process resources are closed')
             if key not in self._services:
                 self._services[key] = factory()
             return self._services[key]
@@ -30,20 +34,33 @@ class ProcessResources:
     def start_services(self):
         """Called by the long-lived owner, never by status or module discovery."""
         with self._service_lock:
-            for service in self._services.values():
-                start = getattr(service, "start_if_enabled", None)
-                if start is not None:
-                    start()
+            self.services_started = True
+            services = list(self._services.values())
+        for service in services:
+            start = getattr(service, "start_if_enabled", None)
+            if start is not None:
+                start()
 
     def close(self):
         # Stop producers before releasing their model leases.
         with self._service_lock:
-            for service in reversed(list(self._services.values())):
-                service.close()
+            self._closed = True
+            services = list(reversed(list(self._services.values())))
             self._services.clear()
+        failures = []
+        for service in services:
+            try:
+                service.close()
+            except Exception as exc:
+                failures.append(exc)
         for lease in reversed(self._leases):
-            lease.close()
+            try:
+                lease.close()
+            except Exception as exc:
+                failures.append(exc)
         self._leases.clear()
+        if failures:
+            raise ExceptionGroup('Process resources failed to close', failures)
 
     def __enter__(self):
         return self

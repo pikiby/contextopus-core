@@ -15,25 +15,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --extra test
-      - name: Check Windows snapshot, Unicode and storage behavior first
-        if: runner.os == 'Windows'
-        run: >-
-          uv run --locked pytest -v --durations=20 -o faulthandler_timeout=120
-          tests/test_base_context.py
-          tests/test_utf8_dataflows.py
-          tests/test_workspace_settings_v4.py::test_quiescent_root_snapshot_restores_data_configuration_git_sqlite_and_rag
-          tests/test_workspace_settings_v4.py::test_snapshot_cleanup_only_retries_readonly_git_access_denied
-          tests/test_unified_records.py::test_migrate_current_preserves_ids_pending_proposal_and_retry
-          tests/test_workspace_v3.py::test_snapshot_interruption_resumes_same_backup_without_overwrite
-          tests/test_workspace_text_io.py::test_snapshot_sync_uses_original_writable_descriptor
-          tests/test_workspace_text_io.py::test_unicode_root_upgrade_receipt_replays_after_reopen
-          tests/test_core_portability.py::test_simultaneous_processes_bootstrap_wal_without_lost_events
-          tests/test_core_portability.py::test_windows_native_lock_exclusion_and_reacquisition
-          tests/test_record_links_v13.py::test_native_links_distinguish_contexts_and_duplicate_unicode_titles
-          tests/test_record_links_v13.py::test_codec_own_root_vault_takes_priority_over_enclosing_vault
-          tests/test_record_links_v13.py::test_codec_rejects_ambiguous_ancestors_without_an_own_root_vault
-          tests/test_record_links_v13.py::test_mcp_upgrade_copy_uses_own_vault_boundary_inside_another_vault
-          tests/test_core_foundation.py::test_relocation_sqlite_wal_consistent_backup
       - run: uv run --locked pytest -v --durations=20 -o faulthandler_timeout=120
       - run: uv build --no-sources
       - run: uv run --locked python scripts/build_release.py
@@ -49,26 +30,3 @@ jobs:
         with:
           name: contextopus-${{ matrix.os }}-py${{ matrix.python }}
           path: dist/
-  upgrade-1-1-to-current:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          ref: ff711966921c562f22aa7bcdb9358a871c8d4282
-          path: .ci/contextopus-v11-source
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: '3.12'
-      - run: uv sync --locked --extra test
-      - name: Verify the old writer source identity
-        run: >-
-          uv run --locked python -c "import pathlib,subprocess,tomllib; old=pathlib.Path('.ci/contextopus-v11-source'); assert subprocess.check_output(['git','-C',str(old),'rev-parse','HEAD'],text=True).strip()=='ff711966921c562f22aa7bcdb9358a871c8d4282'; assert tomllib.loads((old/'pyproject.toml').read_text())['project']['version']=='1.1.0'"
-      - run: uv venv --python 3.12 .ci/v11-venv
-      - name: Install the pinned 1.1 writer separately
-        run: uv pip install --python .ci/v11-venv/bin/python ./.ci/contextopus-v11-source
-      - name: Create with the real old writer and migrate its copy
-        env:
-          CONTEXTOPUS_V11_PYTHON: ${{ github.workspace }}/.ci/v11-venv/bin/python
-        run: uv run --locked pytest -v tests/test_upgrade_11_to_13.py -o faulthandler_timeout=120

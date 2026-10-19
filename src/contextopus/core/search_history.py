@@ -8,7 +8,6 @@ import sqlite3
 
 from .analytics import sanitize
 
-SEARCH_OPERATIONS = {"core.search", "workspace.search", "workspace.projects_search"}
 
 
 def initialize(db):
@@ -17,16 +16,7 @@ def initialize(db):
         instructions_revision TEXT, diagnostics TEXT)""")
 
 
-def begin(db, event_id, layout, context, operation, arguments):
-    if operation not in SEARCH_OPERATIONS:
-        return
-    name = getattr(context, "workspace", None)
-    revision = None
-    if name:
-        layout._name(name)
-        path = layout.workspace_base / name / "INSTRUCTIONS.md"
-        if path.is_file() and not path.is_symlink():
-            revision = hashlib.sha256(path.read_bytes()).hexdigest()
+def begin(db, event_id, layout, context, operation, arguments, revision=None):
     query = arguments.get("query", "")
     db.execute("INSERT INTO search_evidence VALUES (?,?,?,?,?,NULL)", (
         event_id, hashlib.sha256(query.encode()).hexdigest(),
@@ -54,7 +44,7 @@ def finish(db, event_id, result):
         "candidates", "nearby_rejected"}})
     metadata["candidates"] = retained
     if isinstance(result.get("analytics"), dict):
-        metadata["workspace_event_id"] = result["analytics"].get("event_id")
+        metadata["module_event_id"] = result["analytics"].get("event_id")
     metadata["truncated"] = bool(metadata.get("truncated") or len(candidates) > 1000)
     db.execute("UPDATE search_evidence SET diagnostics=? WHERE event_id=?", (
         json.dumps(metadata, allow_nan=False), event_id))

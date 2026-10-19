@@ -76,28 +76,13 @@ def test_native_module_skill_update_and_config_only(tmp_path):
     assert (project / '.agents/skills/sample-help/scripts/help.py').read_text() == 'print("new help")\n'
 
 
-def test_native_updates_previous_managed_w_analyze_description(tmp_path):
-    import hashlib
-    project = tmp_path / 'project'
-    integrate(plan('codex', project))
-    skill = project / '.agents/skills/w-analyze/SKILL.md'
-    current = skill.read_bytes()
-    previous = current.replace(b'description:', b'description: Previous managed description. #', 1)
-    skill.write_bytes(previous)
-    manifest_path = project / '.contextopus/codex-integration.json'
-    manifest = json.loads(manifest_path.read_text())
-    manifest['skills']['.agents/skills/w-analyze/SKILL.md'] = hashlib.sha256(previous).hexdigest()
-    manifest_path.write_text(json.dumps(manifest))
-    preview = plan('codex', project)
-    integrate(preview)
-    assert skill.read_bytes() == current
 
 
 def test_module_skill_names_cannot_case_collide_with_bundled_skills(tmp_path):
     root, project = tmp_path / 'root', tmp_path / 'project'
     manager, skill = setup_module_root(root)
-    skill.rename(skill.with_name('W-context'))
+    skill.rename(skill.with_name('M'))
     manager.prepare('sample')
     manager.enable('sample')
-    with pytest.raises(IntegrationConflict, match='name collision: W-context'):
+    with pytest.raises(IntegrationConflict, match='name collision: M'):
         plan('codex', project, root=root)

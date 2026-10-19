@@ -124,14 +124,14 @@ def test_relative_python_resolves_before_subprocess_changes_working_directory(tm
     assert verifier.verify(args)["verified"] is True
 
 
-def test_native_error_cannot_be_mistaken_for_workspace_guide():
+def test_native_error_cannot_be_mistaken_for_modules_guide():
     with pytest.raises(ValueError):
         verifier.decode_tool_result('{"error":"failed"}')
     with pytest.raises(ValueError):
-        verifier.require_workspace_guide({"content": "Unrelated Workspace help"})
-    content = "Workspace: workspace.startup and workspace.search"
+        verifier.require_modules_guide({"content": "Unrelated module help"})
+    content = "Modules: core.modules and core.module_install"
     assert verifier.decode_tool_result(json.dumps({"result": json.dumps({"content": content})})) == {"content": content}
-    assert len(verifier.require_workspace_guide({"name": "workspace", "content": content})) == 64
+    assert len(verifier.require_modules_guide({"name": "modules", "content": content})) == 64
 
 
 def test_tool_inventory_requires_all_four_exact_server_tools():

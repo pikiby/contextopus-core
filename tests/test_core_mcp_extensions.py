@@ -55,7 +55,6 @@ run(sys.argv[1],port=int(sys.argv[2]))
                 [
                     repo / "src",
                     repo / "tests",
-                    repo / "plugins/persistent-context-workspace",
                 ],
             )
         ),
@@ -142,7 +141,7 @@ def test_managed_http_relocation_excludes_runtime_artifacts_and_updates_identity
     env = {
         **os.environ,
         "PYTHONPATH": os.pathsep.join(
-            map(str, [repo / "src", repo / "plugins/persistent-context-workspace"])
+            map(str, [repo / "src"])
         ),
     }
     remote = None
@@ -229,7 +228,7 @@ def test_large_public_plan_handle_survives_real_http_owner_restart(tmp_path):
     env = {
         **os.environ,
         "PYTHONPATH": os.pathsep.join(
-            map(str, [repo / "src", repo / "plugins/persistent-context-workspace"])
+            map(str, [repo / "src"])
         ),
     }
     code = """
