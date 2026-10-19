@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import socket
 import threading
+import tempfile
 
 import pytest
 
@@ -78,7 +79,7 @@ def declared_external_adapter(monkeypatch):
 
 
 @pytest.fixture
-def legacy(tmp_path, monkeypatch):
+def legacy(tmp_path, monkeypatch, request):
     if os.name == "nt":
         pytest.skip("The legacy daemon bridge uses a Unix launcher/socket")
     binary = tmp_path / "bin/sample-adapter"
@@ -86,7 +87,11 @@ def legacy(tmp_path, monkeypatch):
     binary.write_text("#!/bin/sh\nexit 0\n")
     binary.chmod(0o755)
     monkeypatch.setenv("PATH", str(binary.parent) + os.pathsep + os.environ.get("PATH", ""))
-    endpoint = tmp_path / "legacy.sock"
+    # macOS limits Unix socket paths to roughly 104 bytes; pytest's nested
+    # per-user temporary directory can exceed that before the socket basename.
+    socket_directory = tempfile.TemporaryDirectory(prefix='contextopus-', dir='/tmp')
+    request.addfinalizer(socket_directory.cleanup)
+    endpoint = Path(socket_directory.name) / 'legacy.sock'
     monkeypatch.setenv("CONTEXTOPUS_TEST_LEGACY_SOCKET", str(endpoint))
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(endpoint))

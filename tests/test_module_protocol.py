@@ -179,8 +179,11 @@ def test_real_child_can_call_core_again_after_oversized_or_invalid_reply(tmp_pat
             assert app.query('core.modules')[0]['service']['state'] == 'running'
 
 
-@pytest.mark.parametrize('body', [b'{"type":"ready"}', b'{"type":"ready"}' + b' ' * (MAX_MESSAGE - 16)])
-def test_decoder_rejects_complete_json_body_without_terminal_lf(body):
+@pytest.mark.parametrize('body', [b'{"type":"ready"}', b'{"type":"ready"}' + b' ' * (MAX_MESSAGE - 16)],
+                         ids=['short', 'near-limit'])
+def test_decoder_rejects_complete_json_body_without_terminal_lf(body, request):
+    # Pytest exports this ID in PYTEST_CURRENT_TEST; Windows limits its length.
+    assert len(request.node.nodeid) < 512
     assert len(body) <= MAX_MESSAGE
     with pytest.raises(ValueError, match='must end with a newline'):
         decode_frame(body)

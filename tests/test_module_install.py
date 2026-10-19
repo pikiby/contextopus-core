@@ -346,24 +346,30 @@ def save(args, core):
     assert app.app.module_storage.query('sample','SELECT * FROM "{{module}}::sessions"')['rows'] == []
 
 
-def test_child_descendants_terminated_after_final_result(tmp_path):
+@pytest.mark.parametrize('startup_delay', [0, 1.25], ids=['immediate', 'delayed'])
+def test_child_descendants_terminated_after_final_result(tmp_path, startup_delay):
     path = tmp_path / 'modules/sample'
     manifest = release(path)
     (path / 'package/adapter.py').write_text('''import subprocess,sys,time
 from pathlib import Path
 def read(args, core):
-    child = subprocess.Popen([sys.executable,'-c',"import os,sys,time; from pathlib import Path; Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(100)",args['pidfile']])
-    for i in range(100):
-        if Path(args['pidfile']).exists(): return {'ok':True}
+    child = subprocess.Popen([sys.executable,'-c',"import os,sys,time; from pathlib import Path; time.sleep(float(sys.argv[2])); Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(100)",args['pidfile'],str(args['startup_delay'])])
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        # Read a completed PID acknowledgement rather than assuming cold
+        # Windows child startup takes less than one second.
+        pidfile = Path(args['pidfile'])
+        if pidfile.exists() and pidfile.read_text() == str(child.pid): return {'ok':True}
+        if child.poll() is not None: raise RuntimeError('descendant exited before acknowledging startup')
         time.sleep(.01)
     raise RuntimeError('descendant did not start')
 ''')
     manifest['operations'] = [{'name':'sample.read','kind':'query','handler':'adapter.py:read',
-                               'protocol':'contextopus-core-v1','timeout':5}]
+                               'protocol':'contextopus-core-v1','timeout':15}]
     (path / 'module.json').write_text(json.dumps(manifest))
     app = manager(tmp_path)
     app.install('sample')
-    assert app.app.registry.dispatch('query','sample.read',{'pidfile':str(tmp_path/'pid')}) == {'ok':True}
+    assert app.app.registry.dispatch('query','sample.read',{'pidfile':str(tmp_path/'pid'), 'startup_delay':startup_delay}) == {'ok':True}
     deadline = time.monotonic() + 2
     while True:
         try:

@@ -1,7 +1,7 @@
 """Artifact integrity, portability and deterministic starter-bundle packaging."""
 
 import hashlib
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import importlib.util
 import json
 from pathlib import Path
@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -178,8 +179,22 @@ def test_duplicate_module_ids_are_rejected_by_builder_and_loader(inputs):
         bundle.load_bundle(root)
 
 
-def test_case_insensitive_collisions_are_rejected(inputs):
-    (inputs["module"] / "package/WORKER.py").write_text("collision")
+def test_case_insensitive_collisions_are_rejected(inputs, monkeypatch):
+    # APFS/NTFS may overwrite worker.py when asked to create WORKER.py. Supply
+    # those two actual directory-entry spellings to the real tree scanner.
+    package = inputs['module'] / 'package'
+    filesystem = builder.tree_files.__globals__['os']
+    scandir = filesystem.scandir
+    @contextmanager
+    def colliding_entries(path):
+        with scandir(path) as entries:
+            values = list(entries)
+            if Path(path) == package:
+                original = next(entry for entry in values if entry.name == 'worker.py')
+                values.append(SimpleNamespace(name='WORKER.py', path=str(package / 'WORKER.py'),
+                    is_symlink=lambda: False, stat=lambda **kwargs: original.stat(**kwargs)))
+            yield iter(values)
+    monkeypatch.setattr(filesystem, 'scandir', colliding_entries)
     with pytest.raises(ValueError, match="collision"):
         build(inputs)
 
@@ -199,7 +214,7 @@ def test_core_version_declaration_mismatch_is_rejected(inputs):
         bundle.load_bundle(root)
 
 
-@pytest.mark.parametrize("extra", [[("../escape", b"bad")], [("/absolute", b"bad")], [("folder\\bad", b"bad")], [("contextopus/__init__.py", b"duplicate")]])
+@pytest.mark.parametrize("extra", [[("../escape", b"bad")], [("/absolute", b"bad")], [("folder/bad:name", b"bad")], [("contextopus/__init__.py", b"duplicate")]])
 def test_wheel_traversal_and_duplicate_archive_entries_are_rejected(inputs, extra):
     duplicate = any(name == "contextopus/__init__.py" for name, _ in extra)
     with (pytest.warns(UserWarning, match="Duplicate name") if duplicate else nullcontext()):

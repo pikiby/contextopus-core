@@ -1,5 +1,6 @@
 """Process-owned persistent folder module services, independent of context."""
 import json
+import errno
 import os
 import queue
 import subprocess
@@ -263,8 +264,16 @@ class ModuleService:
             try:
                 if process is not None:
                     terminate(process, getattr(self, '_job', None))
-                    process.stdin.close()
-                    process.stdout.close()
+                    try:
+                        try:
+                            process.stdin.close()
+                        except OSError as exc:
+                            # Buffered shutdown bytes cannot be flushed after
+                            # the child exits (Windows may report EINVAL).
+                            if process.poll() is None or exc.errno not in {errno.EPIPE, errno.EINVAL}:
+                                raise
+                    finally:
+                        process.stdout.close()
             finally:
                 # Core capabilities must be revoked even when tree cleanup
                 # fails; never leave an open transaction after disconnect.

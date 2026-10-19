@@ -1,16 +1,100 @@
 """Installed folder modules write independently through their actual child SDK."""
 
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import json
 import hashlib
+import os
 import sqlite3
 import time
+from types import SimpleNamespace
 
 import pytest
 
 from contextopus.core import relocation
 from contextopus.core.module_storage import legacy
 from contextopus.startup import Application
+
+
+@pytest.mark.parametrize('platform', ['nt', 'posix'])
+def test_partition_file_sync_uses_commit_compatible_descriptor(tmp_path, monkeypatch, platform):
+    path = tmp_path / 'backup.sqlite3'
+    original = b'unchanged backup bytes'
+    path.write_bytes(original)
+    descriptors, closed, synced = {}, [], []
+
+    def open_file(filename, flags):
+        descriptor = os.open(filename, flags)
+        descriptors[descriptor] = flags
+        return descriptor
+
+    def commit(descriptor):
+        writable = descriptors[descriptor] & (os.O_WRONLY | os.O_RDWR)
+        if platform == 'nt' and not writable:
+            raise OSError(errno.EBADF, 'Windows commit requires a writable descriptor')
+        # Model the API rule independently of the host: a simulated POSIX
+        # descriptor must not be passed to the Windows CRT's real fsync.
+        synced.append(descriptor)
+
+    def close_file(descriptor):
+        os.close(descriptor)
+        closed.append(descriptor)
+
+    monkeypatch.setattr(legacy, 'os', SimpleNamespace(
+        name=platform, O_RDONLY=os.O_RDONLY, O_RDWR=os.O_RDWR,
+        open=open_file, fsync=commit, close=close_file,
+    ))
+    legacy._sync(path)
+    assert synced == closed and len(synced) == 1
+    expected = os.O_RDWR if platform == 'nt' else os.O_RDONLY
+    assert list(descriptors.values()) == [expected]
+    assert path.read_bytes() == original
+
+
+def test_partition_file_sync_commits_with_the_native_api(tmp_path, monkeypatch):
+    path = tmp_path / 'backup.sqlite3'
+    original = b'backup bytes for native commit'
+    path.write_bytes(original)
+    committed = []
+
+    def commit(descriptor):
+        os.fsync(descriptor)
+        committed.append(descriptor)
+
+    monkeypatch.setattr(legacy, 'os', SimpleNamespace(
+        name=os.name, O_RDONLY=os.O_RDONLY, O_RDWR=os.O_RDWR,
+        open=os.open, fsync=commit, close=os.close,
+    ))
+    legacy._sync(path)
+    assert len(committed) == 1
+    assert path.read_bytes() == original
+
+
+def test_partition_file_sync_preserves_io_errors_and_closes_descriptor(tmp_path, monkeypatch):
+    path = tmp_path / 'backup.sqlite3'
+    path.touch()
+    opened, closed = [], []
+    real_open, real_close = legacy.os.open, legacy.os.close
+
+    def open_file(filename, flags):
+        descriptor = real_open(filename, flags)
+        opened.append(descriptor)
+        return descriptor
+
+    def close_file(descriptor):
+        real_close(descriptor)
+        closed.append(descriptor)
+
+    def failed_commit(descriptor):
+        raise OSError(errno.EIO, 'storage failure')
+
+    monkeypatch.setattr(legacy, 'os', SimpleNamespace(
+        name='nt', O_RDONLY=os.O_RDONLY, O_RDWR=os.O_RDWR,
+        open=open_file, fsync=failed_commit, close=close_file,
+    ))
+    with pytest.raises(OSError, match='storage failure'):
+        legacy._sync(path)
+    assert opened == closed and len(opened) == 1
 
 
 ADAPTER = '''

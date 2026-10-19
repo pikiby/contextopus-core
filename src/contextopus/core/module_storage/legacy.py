@@ -288,7 +288,9 @@ def _sync(path):
     if path.is_dir():
         sync_directory(path)
         return
-    descriptor = os.open(path, os.O_RDONLY)
+    # Windows _commit (used by fsync) rejects a read-only file descriptor.
+    # Keep POSIX's read-only access for existing read-only backup files.
+    descriptor = os.open(path, os.O_RDWR if os.name == 'nt' else os.O_RDONLY)
     try:
         os.fsync(descriptor)
     finally:

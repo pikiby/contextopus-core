@@ -1,14 +1,79 @@
 """Real isolated persistent children; no live roots, model or network."""
 import json
+import errno
+import io
 import os
 from pathlib import Path
+import subprocess
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
 from contextopus.core.resources import ProcessResources
 from contextopus.startup import Application
+
+
+@pytest.mark.parametrize('error_code,terminated,suppressed', [
+    (errno.EINVAL, True, True),
+    (errno.EPIPE, True, True),
+    (errno.EIO, True, False),
+    (errno.EINVAL, False, False),
+], ids=['dead-invalid-pipe', 'dead-broken-pipe', 'dead-storage-error', 'still-running'])
+def test_close_reaps_before_tolerating_dead_pipe_flush_errors(monkeypatch, error_code, terminated, suppressed):
+    from contextopus.core.module_management import services
+
+    events = []
+    output = io.BytesIO()
+    access_closed = threading.Event()
+
+    class Input:
+        def close(self):
+            events.append('stdin.close')
+            raise OSError(error_code, 'fixture pipe close failure')
+
+    class Process:
+        stdin = Input()
+        stdout = output
+        done = False
+
+        def poll(self):
+            return 0 if self.done else None
+
+        def wait(self, timeout):
+            raise subprocess.TimeoutExpired('fixture', timeout)
+
+    process = Process()
+
+    def terminate(target, job):
+        assert target is process
+        events.append('terminate')
+        process.done = terminated
+
+    monkeypatch.setattr(services, 'terminate', terminate)
+    service = services.ModuleService(None, 'sample', {'service': {'stop_timeout': .01}},
+                                     'fixture', [], None, {})
+    service.process = process
+    service.error = 'Module message must end with a newline'
+    service._errors = io.BytesIO()
+    service._accesses['fixture'] = SimpleNamespace(close=access_closed.set)
+    if suppressed:
+        service.close(preserve_error=True)
+        assert service._cleanup_error is None
+        # Cleanup is repeatable and preserves the original malformed-frame error.
+        service.close(preserve_error=True)
+    else:
+        with pytest.raises(OSError) as caught:
+            service.close(preserve_error=True)
+        assert caught.value.errno == error_code
+        assert service._cleanup_error is caught.value
+    assert events == ['terminate', 'stdin.close']
+    assert output.closed
+    assert service._errors.closed and access_closed.wait(1)
+    assert service._finished.is_set()
+    assert service.state == 'error'
+    assert service.error == 'Module message must end with a newline'
 
 ADAPTER = '''import json, os, threading, time
 from pathlib import Path
