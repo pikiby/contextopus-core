@@ -124,7 +124,7 @@ def verify(destination=None):
             member = archive.extractfile(f"{distribution}-{version}/{name}")
             if member is None or member.read() != (ROOT / name).read_bytes():
                 raise ValueError(f"sdist misses the exact {name}")
-        required_source = [ROOT / 'pyproject.toml', ROOT / 'README.md', ROOT / 'uv.lock',
+        required_source = [ROOT / 'pyproject.toml', ROOT / 'README.md', ROOT / 'CHANGELOG.md', ROOT / 'uv.lock',
                            ROOT / 'scripts/build_release.py', ROOT / 'scripts/verify_release.py',
                            ROOT / 'scripts/verify_installed.py',
                            ROOT / 'tests/fake_embeddings.py',
