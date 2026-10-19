@@ -346,32 +346,47 @@ def save(args, core):
     assert app.app.module_storage.query('sample','SELECT * FROM "{{module}}::sessions"')['rows'] == []
 
 
+DESCENDANT_ADAPTER = '''import subprocess,sys,time
+from pathlib import Path
+def read(args, core):
+    code = "import os,sys,time; from pathlib import Path; print('descendant started', file=sys.stderr, flush=True); time.sleep(float(sys.argv[2])); ready = Path(sys.argv[1] + '.ready'); ready.write_text(str(os.getpid())); ready.replace(sys.argv[1]); time.sleep(100)"
+    if args.get('fail_startup'):
+        code = "raise RuntimeError('intentional descendant startup failure')"
+    command = [sys.executable, '-c', code, args['pidfile'], str(args['startup_delay'])]
+    if args['relay']:
+        command = [sys.executable, '-c', 'import subprocess,sys; sys.exit(subprocess.call(sys.argv[1:]))', *command]
+    error_path = Path(args['pidfile'] + '.stderr')
+    # These children do not speak Core's protocol. Supply valid native standard
+    # handles explicitly, including through Windows virtual-environment launchers.
+    with error_path.open('wb') as errors:
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=errors)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            # Windows venv launchers start a separate interpreter, so Popen.pid
+            # need not match os.getpid(). Atomic rename completes its acknowledgement.
+            pidfile = Path(args['pidfile'])
+            if pidfile.exists():
+                pid = pidfile.read_text()
+                if pid.isdecimal() and int(pid) > 0:
+                    return {'pid':int(pid), 'launcher_pid':child.pid}
+            if child.poll() is not None:
+                break
+            time.sleep(.01)
+        detail = error_path.read_text(encoding='utf-8', errors='replace')[-4000:]
+        raise RuntimeError('descendant did not start: executable=' + repr(sys.executable)
+                           + ', command=' + repr(command)
+                           + ', launcher_pid=' + str(child.pid) + ', exit=' + repr(child.poll())
+                           + ', stderr=' + repr(detail))
+'''
+
+
 @pytest.mark.parametrize('startup_delay,relay', [(0, False), (1.25, False), (0, True)],
                          ids=['immediate', 'delayed', 'interpreter-behind-launcher'])
 def test_child_descendants_terminated_after_final_result(tmp_path, startup_delay, relay):
     path = tmp_path / 'modules/sample'
     manifest = release(path)
-    (path / 'package/adapter.py').write_text('''import subprocess,sys,time
-from pathlib import Path
-def read(args, core):
-    code = "import os,sys,time; from pathlib import Path; time.sleep(float(sys.argv[2])); ready = Path(sys.argv[1] + '.ready'); ready.write_text(str(os.getpid())); ready.replace(sys.argv[1]); time.sleep(100)"
-    command = [sys.executable, '-c', code, args['pidfile'], str(args['startup_delay'])]
-    if args['relay']:
-        command = [sys.executable, '-c', 'import subprocess,sys; sys.exit(subprocess.call(sys.argv[1:]))', *command]
-    child = subprocess.Popen(command)
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        # Windows venv launchers start a separate interpreter, so Popen.pid
-        # need not match os.getpid(). Atomic rename completes its acknowledgement.
-        pidfile = Path(args['pidfile'])
-        if pidfile.exists():
-            pid = pidfile.read_text()
-            if pid.isdecimal() and int(pid) > 0:
-                return {'pid':int(pid), 'launcher_pid':child.pid}
-        if child.poll() is not None: raise RuntimeError('descendant exited before acknowledging startup')
-        time.sleep(.01)
-    raise RuntimeError('descendant did not start')
-''')
+    (path / 'package/adapter.py').write_text(DESCENDANT_ADAPTER)
     manifest['operations'] = [{'name':'sample.read','kind':'query','handler':'adapter.py:read',
                                'protocol':'contextopus-core-v1','timeout':15}]
     (path / 'module.json').write_text(json.dumps(manifest))
@@ -380,6 +395,7 @@ def read(args, core):
     result = app.app.registry.dispatch('query','sample.read',{
         'pidfile':str(tmp_path/'pid'), 'startup_delay':startup_delay, 'relay':relay})
     assert result['pid'] == int((tmp_path / 'pid').read_text())
+    assert 'descendant started' in (tmp_path / 'pid.stderr').read_text()
     if relay:
         assert result['pid'] != result['launcher_pid']
     deadline = time.monotonic() + 2
@@ -392,6 +408,24 @@ def read(args, core):
             if time.monotonic() > deadline:
                 raise
             time.sleep(.01)
+
+
+def test_descendant_startup_failure_reports_exit_and_stderr(tmp_path):
+    path = tmp_path / 'modules/sample'
+    manifest = release(path)
+    (path / 'package/adapter.py').write_text(DESCENDANT_ADAPTER)
+    manifest['operations'] = [{'name':'sample.read','kind':'query','handler':'adapter.py:read',
+                               'protocol':'contextopus-core-v1','timeout':15}]
+    (path / 'module.json').write_text(json.dumps(manifest))
+    app = manager(tmp_path)
+    app.install('sample')
+    with pytest.raises(RuntimeError) as caught:
+        app.app.registry.dispatch('query', 'sample.read', {
+            'pidfile':str(tmp_path / 'pid'), 'startup_delay':0, 'relay':False, 'fail_startup':True})
+    assert 'exit=1' in str(caught.value)
+    assert 'intentional descendant startup failure' in str(caught.value)
+    assert 'Traceback' in (tmp_path / 'pid.stderr').read_text()
+    assert not (tmp_path / 'pid').exists()
 
 
 def test_python_client_preserves_named_sql_parameters(tmp_path):
