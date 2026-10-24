@@ -15,7 +15,7 @@ from .protocol import (MAX_MESSAGE, SERVICE_PROTOCOL, decode_frame, encode_call_
 
 
 class ModuleService:
-    def __init__(self, app, module, manifest, fingerprint, command, cwd, env):
+    def __init__(self, app, module, manifest, fingerprint, command, cwd, env, *, pending_activation=False):
         self.app, self.module, self.manifest = app, module, manifest
         self.fingerprint, self.command, self.cwd, self.env = fingerprint, command, cwd, env
         self.state, self.error = 'stopped', None
@@ -24,6 +24,11 @@ class ModuleService:
         self._outgoing = queue.Queue(maxsize=32)
         self._pending = {}
         self._ready = threading.Event()
+        # Replacement readiness precedes publishing enabled=True. Do not treat
+        # that deliberate intermediate state as an external disable request.
+        self._configuration_ready = threading.Event()
+        if not pending_activation:
+            self._configuration_ready.set()
         self._stopped = threading.Event()
         self._closing = threading.Event()
         self._finished = threading.Event()
@@ -176,7 +181,7 @@ class ModuleService:
                 failed = self.state == 'error'
             for access in accesses:
                 access.expire()
-            if time.monotonic() - checked >= .5:
+            if self._configuration_ready.is_set() and time.monotonic() - checked >= .5:
                 checked = time.monotonic()
                 try:
                     from .manifest import ModuleManifestReader

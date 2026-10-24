@@ -70,9 +70,11 @@ class AdapterReplacement:
                 return {'id': module, 'state': 'activation_pending'}
             if 'service' in manifest:
                 self.runtime.stop(module)
-                self._start_service(module, manifest)
+                self._start_service(module, manifest, pending_activation=True)
             record.update(enabled=True, adapter_selection='folder')
             self._save()
+            if 'service' in manifest:
+                self.runtime.services[module]._configuration_ready.set()
             self._publish_activation(module, manifest, specs)
             return {'id': module, 'state': 'enabled'}
         except Exception as error:

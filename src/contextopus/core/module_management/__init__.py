@@ -150,12 +150,13 @@ class ModuleManager(AdapterReplacement, ModuleManifestReader):
                 except Exception as exc:
                     self.errors[module] = str(exc)
 
-    def _start_service(self, module, manifest):
+    def _start_service(self, module, manifest, *, pending_activation=False):
         from .services import ModuleService
         code = self._code(self._directory(module))
         command = self._command(code, manifest['service'], service=True)
         service = ModuleService(self.app, module, manifest, self._digest(module), command,
-                                code / 'package', self._environment(self._directory(module)))
+                                code / 'package', self._environment(self._directory(module)),
+                                pending_activation=pending_activation)
         self.runtime.services[module] = service
         service.start()
 

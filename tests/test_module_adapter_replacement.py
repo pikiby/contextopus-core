@@ -521,3 +521,25 @@ def test_first_update_failure_after_durable_selection_cannot_restore_legacy(tmp_
         assert_no_legacy(app)
     with Application(root, discover=False) as restarted:
         assert_no_legacy(restarted)
+
+
+def test_slow_replacement_readiness_does_not_observe_unpublished_disabled_state(tmp_path, legacy):
+    import time
+    root = tmp_path / "root"
+    directory = candidate(root)
+    worker = directory / "package/worker.py"
+    worker.write_text(SERVICE.replace("    def start(self):", "    def start(self):\n        import time; time.sleep(.35)"), encoding="utf-8")
+    with Application(root, discover=False) as app:
+        app.resources.start_services()
+        assert app.execute("core.module_install", {"module": MODULE})["state"] == "enabled"
+        assert app.query("sample_adapter.status")["implementation"] == "folder"
+        # Once publication succeeds, a later external disable is still observed.
+        state_path = root / "core/configuration/modules.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state[MODULE]["enabled"] = False
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        service = app.module_manager.runtime.services[MODULE]
+        deadline = time.monotonic() + 5
+        while service.status()["state"] not in {"stopped", "error"} and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert service.status()["state"] == "stopped"
