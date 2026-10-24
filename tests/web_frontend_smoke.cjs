@@ -68,7 +68,7 @@ const allText = el => [el.textContent,...(el.children || []).map(allText)].join(
   assert(calls.some(path=>path.includes('mode=semantic') && path.includes('query=needle')));
   assert.match(elements.count.textContent,/balanced.*12 considered.*1 selected/);
   assert.match(elements.warnings.textContent,/3 records omitted/);
-  assert(elements.detail.children.some(child=>child.tagName === 'DETAILS')); 
+  assert(elements.detail.children.some(child=>child.tagName === 'DETAILS'));
   delayed=true;
   elements.search.value='old';
   elements['search-form'].handlers.submit({preventDefault(){}});

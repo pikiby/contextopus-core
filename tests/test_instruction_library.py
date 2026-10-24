@@ -43,11 +43,11 @@ def test_lossless_body_full_file_revision_and_yaml_conflicts(tmp_path):
     assert "content" not in listing and "metadata" not in listing
     with pytest.raises(ValueError, match="revision conflict"):
         library.save(saved["path"], saved["metadata"], "overwrite")
-    changed = path.read_text().replace("model: chosen", "model: externally-changed")
-    path.write_text(changed)
+    changed = path.read_text(encoding="utf-8").replace("model: chosen", "model: externally-changed")
+    path.write_text(changed, encoding="utf-8", newline="\n")
     with pytest.raises(ValueError, match="revision conflict"):
         library.save(saved["path"], saved["metadata"], "overwrite", saved["revision"])
-    assert path.read_text() == changed
+    assert path.read_text(encoding="utf-8") == changed
     current = library.read("stable")
     updated = library.save(current["path"], current["metadata"], body + "Updated\n", current["revision"])
     assert updated["revision"] != current["revision"]
@@ -139,12 +139,12 @@ def test_failed_index_save_is_readable_and_explicit_reconcile_repairs(tmp_path):
         assert library.reconcile()["indexed"] == 1
         calls = len(factory.calls)
         path = library.root / "a.md"
-        path.write_text(path.read_text().replace("title: a", "title: New title"))
+        path.write_text(path.read_text(encoding="utf-8").replace("title: a", "title: New title"))
         assert library.reconcile()["refreshed"] == 1
         assert len(factory.calls) == calls
         selection = {"algorithm": "none", "parameters": {"page_size": 20}}
         assert library.search("authoritative", selection=selection)["results"]
-        path.write_text(path.read_text().replace("Complete authoritative body", "New source body"))
+        path.write_text(path.read_text(encoding="utf-8").replace("Complete authoritative body", "New source body"))
         assert library.search("authoritative", selection=selection)["results"] == []
         assert library.reconcile()["indexed"] == 1
         unrelated = IndexDocument(DocumentKey("core", "search_algorithm", "algorithm"),

@@ -5,8 +5,9 @@ module SDK, generic examples and the `m` skill. Workspace and Session Search
 own their source, domain tests, procedures, skills and module artifacts in
 independent repositories. No sibling checkout is required for Core tests or builds.
 
-Core **1.5.0**, Workspace **1.5.0** and Session Search **0.8.0** are independent
-release artifacts. Modules require Core `>=1.5,<2`. Published 1.4.0 assets describe
+Core **1.6.0**, Workspace and Session Search have independent release artifacts.
+Agents **0.3.0** requires Core `>=1.6,<2`; consult each module manifest for its
+compatibility range. Published 1.4.0 assets describe
 the earlier combined distribution. Use fresh build output directories and verify
 the exact artifacts before installation.
 
