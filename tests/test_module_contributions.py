@@ -204,7 +204,7 @@ def test_failed_close_keeps_disable_durable_and_removes_all_registrations(tmp_pa
         app.execute('core.module_disable', {'module': 'sample'})
     assert not app.module_manager.aliases
     assert not app.module_manager.procedures
-    assert not app.index.source_adapters
+    assert set(app.index.source_adapters) == {'core'}
     assert not app.services._settings.providers
     assert 'sample.status' not in app.registry._operations
     assert json.loads((tmp_path / 'core/configuration/modules.json').read_text())['sample']['enabled'] is False

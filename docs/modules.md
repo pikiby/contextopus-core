@@ -10,6 +10,14 @@ A release consists of `module.json` and `package/`. Mutable user files live in
 Core stores desired enablement and prepared content digests under
 `core/configuration/modules.json`, so rebuilding the application retains state.
 
+Modules with Markdown records can use the shared child `core.documents` API for
+scoped files, revision checks and reconciliation plans. Shared instruction bodies
+live in `core/instructions/` and are selected through YAML wikilinks, rather than
+copied into each module. See [file documents](implementation/file-document-sources.md)
+and [instruction operations](instruction-library.md). SQL and RAG remain derived
+views for these file-backed records; modules with other source types retain their
+own ingestion procedure.
+
 ```json
 {
   "id": "sample",
@@ -359,6 +367,17 @@ deletion records for safe replay. The dependency-free
 `examples/modules/service-demo` demonstrates a persistent worker with SQL jobs
 and atomic counter updates; its README uses an isolated source environment.
 
+Child modules can call `core.rag.search(query=..., collection=...)` for the same
+metadata filtering, inherited selection algorithms and diagnostics as native
+contributions. Optional `object_type`, `status`, `include_archived`, `selection`,
+`purpose`, `task_id` and `candidate_limit` retain Core semantics. The parent
+always fixes the module scope to the caller. Omit `selection` to inherit settings;
+do not implement another top-k default in the module. Results include candidate
+evidence; modules can return compact descriptions and expose full content in
+their own read operation. Existing `search_vector` remains available for callers
+that explicitly need nearest-vector candidates rather than standard selection.
+The child `search` method is available in Core 1.6+.
+
 Revision checks use `core.rag.vector_revisions(collection=..., object_ids=...)`:
 only those IDs are returned, with explicit missing and conflicting IDs. The
 no-ID call is rejected. Full inventory uses `vector_revisions_page` and an
@@ -375,3 +394,11 @@ that the child can handle without losing its connection. Document embeddings acc
 the batch after an explicit oversized-result error. A running parent model or
 native RAG call cannot be forcibly interrupted: Core stops/disconnects the child,
 and asynchronous cleanup waits for that parent call to finish.
+
+Modules that require the local shared-search extension can probe `core.rag.capabilities()`
+for `search: true` before starting workers. This probe does not load the embedding model.
+
+
+## Read-only web library contribution
+
+An enabled module may expose a query operation named `<module_id>.library` to supply collections, paginated records and full reads to the Core web interface. The UI discovers this operation through `core.modules`; no module-specific Core code is required. See [the library contract](web-interface.md#module-contribution).

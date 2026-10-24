@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0 — 2026-10-23
+
+- Share file-backed documents and full instruction libraries with optional modules.
+- Expose common filtered RAG search and metadata refresh through the child SDK.
+- Add a read-only web library with module-contributed sections and semantic search.
+- Support the independent Agents profile/team module. [Release notes](docs/releases/1.6.0.md).
+
 ## 1.5.0 — 2026-10-18
 
 - Separate Core from optional Workspace and Session Search modules; Core ships shared infrastructure and the `m` skill.

@@ -495,7 +495,7 @@ class ModuleManager(AdapterReplacement, ModuleManifestReader):
     def _handler(self, directory, operation, *, storage_declared=False, rag_declared=False):
         code = self._code(directory)
         command = None if operation.get('service') else self._command(code, operation)
-        def invoke(context, **arguments):
+        def invoke(context, /, **arguments):
             if operation.get('service'):
                 with self.runtime.lock:
                     service = self.runtime.services.get(directory.name)

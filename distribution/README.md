@@ -2,11 +2,18 @@
 
 The [**Contextopus 1.5.0 starter**](https://github.com/pikiby/contextopus-core/releases/download/v1.5.0/contextopus-starter-1.5.0.zip)
 combines Core 1.5.0, Workspace 1.5.0 and Session Search 0.8.0 in one download.
-The smaller [**Core-only bundle**](https://github.com/pikiby/contextopus-core/releases/download/v1.5.0/contextopus-core-1.5.0.zip)
-uses the same installer with no bundled modules. Both let you choose a data
+The smaller [**Core-only bundle**](https://github.com/pikiby/contextopus-core/releases/download/v1.6.0/contextopus-core-1.6.0.zip)
+contains Core 1.6.0 and uses the same installer with no bundled modules.
+Agents 0.3+ requires Core 1.6+; install it separately through its module ZIP. Both let you choose a data
 folder and coding assistants, then use Core's ordinary lifecycle mechanisms.
 
-Download checksums from the [same release](https://github.com/pikiby/contextopus-core/releases/tag/v1.5.0).
+**Several sessions can work on one shared project context with Workspace 1.6+.**
+Temporary card reservations coordinate edits while reading, searching and work
+on other cards remain available. The 1.5.0 starter bundles Workspace 1.5.0;
+[update Workspace](https://github.com/pikiby/contextopus-workspace/blob/main/docs/install.md)
+to use this feature.
+
+Download checksums from the release that supplied each archive.
 Version 1.4.0 assets belong to the earlier combined distribution.
 
 ## Start here

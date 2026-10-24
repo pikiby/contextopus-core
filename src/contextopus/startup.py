@@ -29,6 +29,9 @@ class Application:
         from .core.rag import RagIndex
 
         self.index = RagIndex(self.layout, self.resources)
+        from .core.documents.instructions import InstructionLibrary
+
+        self.instructions = InstructionLibrary(self.layout, self.index)
         from .core.module_storage import ModuleStorage
         self.module_storage = ModuleStorage(self.layout)
         self.services = RootServices(self.layout, self.resources, self.registry)
@@ -68,11 +71,30 @@ class Application:
                 model,
                 lambda request_context, **kw: fn(**kw),
                 description=fn.__doc__ or name.replace("_", " ").replace(".", " "),
-                guard_root=not (name.startswith("core.relocation_") or name.startswith("core.module_")),
+                guard_root=not (name.startswith("core.relocation_") or name.startswith("core.module_")
+                    or name in {"core.instructions_list", "core.instructions_read", "core.instructions_resolve", "core.instructions_search", "core.library"}),
             )
         )
 
     def _register_core(self):
+        from .core.documents.library import browse_instructions
+        self._operation("core.library", "query",
+                        lambda **kw: browse_instructions(self.instructions, **kw),
+                        {"action": (str, ...), "collection": (str, ""),
+                         "query": (str, ""), "mode": (str, "text"), "type": (str, ""),
+                         "offset": (int, 0), "limit": (int, 40), "id": (str, "")})
+        self._operation("core.instructions_list", "query", self.instructions.list)
+        self._operation("core.instructions_read", "query", self.instructions.read,
+                        {"reference": (str, ...)})
+        self._operation("core.instructions_resolve", "query", self.instructions.resolve,
+                        {"references": (list[str], ...)})
+        self._operation("core.instructions_save", "execute", self.instructions.save,
+                        {"path": (str, ...), "metadata": (dict, ...), "content": (str, ...),
+                         "expected_revision": (str | None, None)})
+        self._operation("core.instructions_reconcile", "execute", self.instructions.reconcile)
+        self._operation("core.instructions_search", "query", self.instructions.search,
+                        {"query": (str, ...), "limit": (int | None, None),
+                         "selection": (dict | None, None), "output": (str, "materials")})
         self._operation("core.status", "query", self.services.status)
         self._operation(
             "core.search",
@@ -263,21 +285,30 @@ class Application:
             from .core.rag import rebuild_profile
 
             self.index._generic_table()
-            # A failed docs delivery may leave only rebuildable algorithm cards.
-            # Preserve the refusal for every other module's source documents.
-            derivative = "module = 'core' AND collection = 'search_algorithm'"
+            # Core owns both algorithm descriptions and shared instruction files.
+            # Other module sources still require their registered rebuild owner.
+            derivative = "module = 'core' AND collection IN ('search_algorithm', 'instructions')"
             if self.index.table.count_rows(f"module IS NULL OR collection IS NULL OR NOT ({derivative})"):
                 raise ValueError(
                     "Profile switch requires module source adapters for existing documents"
                 )
+            instruction_rows = self.index.table.count_rows("module = 'core' AND collection = 'instructions'")
+            if instruction_rows and not self.instructions.root.is_dir():
+                raise ValueError("Instruction source directory is unavailable; cannot rebuild its index")
+            instruction_snapshot = self.instructions._snapshot()
+
+            def validate_instructions():
+                if self.instructions._snapshot() != instruction_snapshot:
+                    raise ValueError("Instructions changed during profile rebuild; retry")
+
             result = rebuild_profile(
                 self.index,
                 previous=active,
                 config=config,
                 search=active["search"],
                 chunking=chunking,
-                documents=[],
-                validate_snapshot=lambda: None,
+                documents=instruction_snapshot.documents,
+                validate_snapshot=validate_instructions,
                 read_active=self.active_profile,
                 write_active=self.write_active_profile,
                 factory=self.resources.acquire,

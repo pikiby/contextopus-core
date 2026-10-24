@@ -21,14 +21,15 @@ not need to build its own retrieval system.
 
 - **Workspace organizes project work.** Agents use current knowledge, goals and
   rules, carry out tasks, verify results and update the connected context. Each
-  task can build on decisions and findings from earlier work.
+  task can build on decisions and findings from earlier work. With Workspace
+  1.6+, several sessions can work on the same context at once, reserving cards
+  while editing so their changes do not overwrite one another.
 - **Session Search makes past sessions reusable.** Find decisions, commands,
   errors and explanations with links to the original conversation. Recover how
   work was done, check where a decision came from and use the findings in a new
   task.
 
-The same foundation can support modules for managing skills, selecting agent
-roles and finding reusable commands. Choose the modules that fit your work.
+The same foundation can support modules for managing skills and finding reusable commands. Choose the modules that fit your work.
 
 <p align="center">
   <a href="#install-contextopus"><strong>Install Contextopus</strong></a> ·
@@ -38,8 +39,8 @@ roles and finding reusable commands. Choose the modules that fit your work.
   <a href="docs/development.md">Development</a>
 </p>
 
-> **Version 1.5.0** distributes Core and optional modules independently.
-> [Release downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.5.0) · [Installation guide](distribution/README.md).
+> **Version 1.6.0** adds shared file documents, instructions and a web library for optional modules.
+> [Release downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.6.0) · [Installation guide](distribution/README.md).
 
 ## Choose your modules
 
@@ -65,6 +66,12 @@ search. Updates follow your review and approval policies. As verified findings
 are corrected and connected, new tasks can use a better account of what is
 known and what still needs checking.
 
+**Work in parallel on one shared context (Workspace 1.6+).** Give several sessions
+different tasks on the same project. Each keeps its own work cycle while using
+the same knowledge and rules. Agents temporarily reserve the cards they edit;
+other sessions can keep reading, searching and updating other cards. Revision
+checks reject outdated edits before they overwrite newer work.
+
 [Workspace repository and guide](https://github.com/pikiby/contextopus-workspace#readme)
 
 ### Session Search
@@ -76,13 +83,23 @@ them in a new task.
 
 [Session Search repository and guide](https://github.com/pikiby/contextopus-session-search#readme)
 
+### Agents
+
+**Reuse the right agents for each task.** Save complete role prompts and model
+settings in Markdown, group profiles into named teams, and define delegation
+rules for your main agent. Find a profile by meaning, read it in full and use your
+coding assistant's native subagent tools. Profile files and rules remain editable;
+shared RAG helps discover them without duplicating a search service.
+
+[Agents repository and guide](https://github.com/pikiby/contextopus-agents#readme)
+
 <a id="start-from-source"></a>
 
 ## Install Contextopus
 
-### Everything together
+### Existing starter bundle (1.5.0)
 
-The starter ZIP combines **Core + Workspace + Session Search**. Extract it,
+The existing 1.5.0 starter ZIP combines **Core + Workspace + Session Search**. Extract it,
 open the `contextopus` folder in a terminal, and run:
 
 **Linux or macOS**
@@ -106,12 +123,15 @@ Download [contextopus-starter-1.5.0.zip](https://github.com/pikiby/contextopus-c
 
 ### Choose only what you need
 
-Download [Core 1.5.0](https://github.com/pikiby/contextopus-core/releases/download/v1.5.0/contextopus-core-1.5.0.zip),
+Download [Core 1.6.0](https://github.com/pikiby/contextopus-core/releases/download/v1.6.0/contextopus-core-1.6.0.zip),
 extract it, and run the same `install.sh` or `install.ps1`. This smaller bundle
 installs Core with local CPU embeddings and your choice of clients.
 
+For Agents, install Core 1.6+ using the smaller bundle below.
+
 Add [Workspace](https://github.com/pikiby/contextopus-workspace#readme) or
-[Session Search](https://github.com/pikiby/contextopus-session-search#readme)
+[Session Search](https://github.com/pikiby/contextopus-session-search#readme) or
+[Agents](https://github.com/pikiby/contextopus-agents#readme)
 later through its installer, or install a verified module ZIP directly:
 
 ```console
@@ -190,6 +210,7 @@ flowchart TD
     MCP --> Core["Core: operations · model · RAG · storage"]
     Core --> Workspace[Workspace module]
     Core --> Sessions[Session Search module]
+    Core --> Agents[Agents module]
     Core --> Custom[User modules]
 ```
 
@@ -212,6 +233,7 @@ inputs. Core's wheel and client ZIPs contain the `m` skill only.
 - [Build, tests and installed-wheel verification](docs/development.md)
 - [Architecture and data layout](docs/architecture.md)
 - [Module contract and examples](docs/modules.md)
+- [Local read-only web library](docs/web-interface.md) — run `contextopus web` to browse enabled modules.
 - [Native integrations](docs/integrations.md)
 - [Search evidence](docs/search-analysis.md)
 - [Published release history](CHANGELOG.md)

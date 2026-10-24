@@ -83,6 +83,8 @@ class CoreClient:
         self.storage = StorageClient(self, 'storage')
         self.embeddings = NamespaceClient(self, 'embeddings')
         self.rag = NamespaceClient(self, 'rag')
+        self.documents = NamespaceClient(self, 'documents')
+        self.instructions = NamespaceClient(self, 'instructions')
         self.messages = queue.Queue(maxsize=32)
         self._pending = {}
         self._lock = threading.Lock()

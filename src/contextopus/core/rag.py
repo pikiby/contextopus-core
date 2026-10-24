@@ -290,6 +290,19 @@ class RagIndex:
             if table is not None:
                 table.delete(self.key_predicate(key))
 
+    def update_document(self, document):
+        """Refresh metadata/location only when every indexed part matches text revision."""
+        with self.layout.guard():
+            table = self._generic_table()
+            predicate = self.key_predicate(document.key)
+            rows = [] if table is None else self.read_rows(table,
+                ["revision", "part_index", "part_count"], predicate)
+            if (not rows or any(row["revision"] != document.revision or row["part_count"] != len(rows) for row in rows)
+                    or {row["part_index"] for row in rows} != set(range(len(rows)))):
+                raise ValueError("Indexed document missing, incomplete or changed; reindex its text")
+            table.update(where=predicate, values={"path": document.location,
+                "metadata": json.dumps(document.metadata, allow_nan=False)})
+
     @classmethod
     def key_predicate(cls, key):
         return " AND ".join(name + "=" + cls._quote(value) for name, value in
@@ -453,7 +466,7 @@ class RagIndex:
         # Metadata filtering is resolved into identities before nearest lookup.
         rows = self.read_rows(
             table,
-            ["module", "collection", "object_id", "metadata", "path"],
+            ["module", "collection", "object_id", "metadata", "path", "revision"],
             " AND ".join(clauses) or None,
         )
         filters = snapshot["values"]
@@ -470,6 +483,8 @@ class RagIndex:
             if row["module"] in source_documents:
                 source_document = source_documents[row["module"]].get(key)
                 if source_document is None:
+                    continue
+                if source_document.revision != row["revision"]:
                     continue
                 row = {
                     **row,

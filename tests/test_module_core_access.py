@@ -79,6 +79,66 @@ def document(module=None, ident="1"):
                 metadata=dict(type="block"))
 
 
+def test_child_metadata_refresh_retains_vector_and_checks_revision(app):
+    writer, reader = access(app), access(app, kind="query")
+    try:
+        item = document()
+        writer.call("rag.put_vector", {"document": item, "vector": [1., .5], "profile": app.config})
+        moved = {**item, "location": "profiles/renamed.md", "metadata": {"type": "profile", "description": "Changed"}}
+        writer.call("rag.update_document", {"document": moved})
+        rows = app.index.read_rows(app.index.table)
+        assert rows[0]["path"] == "profiles/renamed.md"
+        assert rows[0]["vector"] == [1., .5]
+        with pytest.raises(ValueError, match="reindex"):
+            writer.call("rag.update_document", {"document": {**moved, "revision": "stale"}})
+        with pytest.raises(PermissionError):
+            reader.call("rag.update_document", {"document": moved})
+        with pytest.raises(PermissionError):
+            writer.call("rag.update_document", {"document": document(module="other")})
+    finally:
+        writer.close()
+        reader.close()
+
+
+def test_child_instruction_chain_and_revision_checks(app):
+    writer, reader = access(app), access(app, kind="query")
+    try:
+        base = writer.call("instructions.save", {"path": "base.md", "metadata": {"id": "base", "type": "instruction"}, "content": "Keep evidence."})
+        writer.call("instructions.save", {"path": "main.md", "metadata": {"id": "main", "type": "instruction", "instructions": {"common": "[[base]]"}}, "content": "Use the selected team."})
+        resolved = reader.call("instructions.resolve", {"references": ["[[main]]"]})
+        assert [x["id"] for x in resolved["instructions"]] == ["base", "main"]
+        writer.call("instructions.save", {"path": "base.md", "metadata": base["metadata"], "content": "Keep verified evidence.", "expected_revision": base["revision"]})
+        assert reader.call("instructions.resolve", {"references": ["main"]})["revision"] != resolved["revision"]
+        with pytest.raises(PermissionError):
+            reader.call("instructions.save", {"path": "bad.md", "metadata": {"id": "bad", "type": "instruction"}, "content": "No"})
+    finally:
+        writer.close()
+        reader.close()
+
+
+def test_child_search_uses_core_selection_diagnostics_and_cannot_escape_scope(app):
+    alpha, beta = access(app), access(app, "beta")
+    try:
+        for capability in (alpha, beta):
+            capability.call("rag.put_vector", dict(document=document(), vector=[1., .5], profile=app.config))
+        result = alpha.call("rag.search", {"query": "source", "collection": "blocks"})
+        assert [row["key"] for row in result["results"]] == [["alpha", "blocks", "1"]]
+        assert result["diagnostics"]["algorithm"] == "distance_jump"
+        assert result["diagnostics"]["scope"]["module"] == "alpha"
+        assert result["diagnostics"]["scope"]["settings_context"] == "blocks"
+        with pytest.raises(PermissionError):
+            alpha.call("rag.search", {"query": "source", "module": "beta"})
+        with pytest.raises(ValueError):
+            alpha.call("rag.search", {"query": " "})
+        with pytest.raises(ValueError):
+            alpha.call("rag.search", {"query": "source", "limit": 1})
+        with pytest.raises(PermissionError):
+            ModuleCoreAccess(app, "alpha").call("rag.search", {"query": "source"})
+    finally:
+        alpha.close()
+        beta.close()
+
+
 def test_profile_loads_no_model_and_shared_pool_reuses_model_and_releases_own_leases(app):
     first, second = access(app), access(app)
     profile = first.call("embeddings.profile", {})

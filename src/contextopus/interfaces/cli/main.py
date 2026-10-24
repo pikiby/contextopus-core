@@ -22,6 +22,8 @@ def parser():
     commands = result.add_subparsers(dest="command", required=True)
     for name in ("init", "status", "doctor", "mcp", "tui"):
         commands.add_parser(name)
+    web = commands.add_parser("web", help="Browse enabled modules through a local read-only web interface")
+    web.add_argument("--port", type=int, default=41860)
     modules = commands.add_parser("modules", help="List and manage root-local modules")
     module_actions = modules.add_subparsers(dest="module_action")
     for action in ("install", "prepare", "enable", "disable", "update"):
@@ -241,6 +243,13 @@ def main(argv=None):
             emit({**status(root), "root_exists": root.is_dir(), "root": str(root)})
             return 0
         app = RemoteApplication(root, context=args.workspace)
+        if args.command == "web":
+            from contextopus.interfaces.web import run
+            try:
+                run(app, port=args.port)
+            finally:
+                app.close()
+            return 0
         if args.command == "tui":
             from contextopus.interfaces.tui import run
 

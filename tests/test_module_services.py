@@ -159,6 +159,22 @@ def wait_for(check, timeout=4):
     assert check()
 
 
+def test_child_argument_named_context_does_not_collide_with_request_context(tmp_path):
+    release(tmp_path / 'modules/sample', code='''
+class Service:
+    def dispatch(self, operation, arguments, context):
+        return {'argument_context': arguments['context'], 'request_context': context}
+def create_service(core):
+    return Service()
+''')
+    with Application(tmp_path, discover=False) as app:
+        app.execute('core.module_install', {'module': 'sample'})
+        app.module_manager.start_services()
+        result = app.query('sample.status', {'context': 'named-project'})
+        assert result['argument_context'] == 'named-project'
+        assert result['request_context'] is None
+
+
 @pytest.fixture
 def running(tmp_path):
     release(tmp_path / 'modules/sample')

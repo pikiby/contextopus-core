@@ -117,6 +117,10 @@ class ModuleCoreAccess:
                         self._transactions.abort_owned(arguments.get("transaction_id"))
                     raise
             check_deadline(deadline)
+            if method.startswith(("documents.", "instructions.")):
+                if self._transactions.active:
+                    raise ModuleStorageError("Finish the storage transaction before document work")
+                return self._documents(method, arguments, deadline)
             if method.startswith(("embeddings.", "rag.")):
                 if not self.rag_declared:
                     raise PermissionError("Module has no declared Core RAG access")
@@ -131,6 +135,40 @@ class ModuleCoreAccess:
                         return self._embeddings(method[11:], arguments, deadline)
                     return self._rag(method[4:], arguments, deadline)
             raise ValueError("Unknown Core method: " + method)
+
+    def _documents(self, method, arguments, deadline):
+        namespace, action = method.split(".", 1)
+        contracts = {
+            "documents.prepare": (("directory",), ()),
+            "documents.scan": (("directory",), ("collection",)),
+            "documents.write": (("directory", "path", "metadata", "text"), ("expected_revision", "collection")),
+            "documents.delete": (("directory", "path", "expected_revision"), ()),
+            "documents.plan": (("collection", "documents", "previous"), ("complete",)),
+            "instructions.read": (("reference",), ()),
+            "instructions.resolve": (("references",), ()),
+            "instructions.save": (("path", "metadata", "content"), ("expected_revision",)),
+            "instructions.list": ((), ()),
+            "instructions.reconcile": ((), ()),
+            "instructions.search": (("query",), ("selection",)),
+        }
+        if method not in contracts:
+            raise ValueError("Unknown Core document method")
+        self._arguments(arguments, *contracts[method])
+        if action in {"write", "delete", "prepare", "save", "reconcile"} and self.kind != "execute":
+            raise PermissionError("Query operations cannot write Core documents")
+        if namespace == "documents":
+            from ..documents.module_files import ModuleDocuments
+            service = ModuleDocuments(self.app.layout, self.module)
+            result = getattr(service, action)(**arguments)
+        else:
+            from ..documents.instructions import InstructionLibrary
+            # The shared index is not thread-safe; use the same gate as RAG.
+            with self._index() as index:
+                result = getattr(InstructionLibrary(self.app.layout, index), action)(**arguments)
+        check_deadline(deadline)
+        if encoded_json_size(result) > response_result_budget():
+            raise ValueError("Document response exceeds the module protocol budget; narrow the source directory")
+        return result
 
     def _storage(self, method, arguments, deadline):
         if not self.storage_declared:
@@ -193,7 +231,29 @@ class ModuleCoreAccess:
         return result
 
     def _rag(self, method, arguments, deadline):
-        if method in {"put_vector", "delete_document"} and self.kind != "execute":
+        if method == "capabilities":
+            self._arguments(arguments)
+            return {"search": True, "selection_contract": 2}
+        if method == "search":
+            # Child modules use the same settings, grouping and diagnostics as
+            # native contributions. The caller cannot widen its module scope.
+            self._arguments(arguments, ("query",), (
+                "collection", "object_type", "status", "include_archived",
+                "selection", "purpose", "task_id", "candidate_limit", "module",
+            ))
+            self._scope(arguments)
+            query = self._text(arguments["query"], "query")
+            if not query.strip():
+                raise ValueError("Query must be nonempty text")
+            options = {key: value for key, value in arguments.items()
+                       if key not in {"query", "module"}}
+            with self._index() as index:
+                check_deadline(deadline)
+                result = index.search_detailed(query, module=self.module, **options)
+            if encoded_json_size(result) > response_result_budget():
+                raise ValueError("Search response exceeds the module protocol budget; narrow the query scope")
+            return result
+        if method in {"put_vector", "delete_document", "update_document"} and self.kind != "execute":
             raise PermissionError("Query operations cannot write Core RAG")
         if method in {"vector_revisions", "vector_revisions_page"}:
             optional = (("object_ids", "max_bytes", "module") if method == "vector_revisions"
@@ -215,9 +275,9 @@ class ModuleCoreAccess:
             with self._index() as index:
                 index.delete_document(key)
             return {"deleted": True}
-        if method == "put_vector":
-            self._arguments(arguments, ("document", "vector", "profile"))
-            if not isinstance(arguments["profile"], dict):
+        if method in {"put_vector", "update_document"}:
+            self._arguments(arguments, ("document", "vector", "profile") if method == "put_vector" else ("document",))
+            if method == "put_vector" and not isinstance(arguments["profile"], dict):
                 raise ValueError("profile must be an active embedding configuration")
             document = arguments["document"]
             self._arguments(document, ("key", "revision", "text", "location"), ("metadata",))
@@ -230,10 +290,14 @@ class ModuleCoreAccess:
             item = IndexDocument(key, self._text(document["revision"], "revision", maximum=4096),
                                  self._text(document["text"], "text", empty=True),
                                  self._text(document["location"], "location", maximum=16384), metadata)
-            self._profile(arguments["profile"])
+            if method == "put_vector":
+                self._profile(arguments["profile"])
             with self._index() as index:
                 check_deadline(deadline)
-                index.put_vector(item, arguments["vector"], profile=arguments["profile"])
+                if method == "put_vector":
+                    index.put_vector(item, arguments["vector"], profile=arguments["profile"])
+                else:
+                    index.update_document(item)
             return {"key": [key.module, key.collection, key.id], "revision": item.revision}
         if method == "search_vector":
             self._arguments(arguments, ("collection", "object_ids", "vector", "profile"), ("limit", "module"))
