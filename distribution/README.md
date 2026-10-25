@@ -1,8 +1,8 @@
 # Install Contextopus
 
 Choose the package for **Codex, Claude Code, Cursor, Hermes, OpenCode or Crush**.
-All packages use the same Core and data directory. New client packages are local
-candidates; published 1.5/1.6 archives still use their original installers.
+Core 1.7 packages use the same runtime and data directory. Download the archive
+for your client and platform from the release page.
 
 1. Verify the release checksum and extract your package.
 2. Run `sh install.sh` on Linux/macOS or `powershell -File install.ps1` on Windows.
@@ -15,7 +15,8 @@ candidates; published 1.5/1.6 archives still use their original installers.
 `--skip-model` defers downloads, leaving semantic search unavailable.
 `--yes` accepts the selected setup without interactive confirmation.
 
-Existing Core is reused with its modules and model unchanged. A stopped,
+Existing Core and model settings are reused. Missing selected bundled modules
+are installed through Core; existing modules are checked, not silently upgraded. A stopped,
 incompatible or partial installation needs explicit repair/update. A fresh setup
 can install uv and Python, but does not install the coding assistant itself.
 Dependencies and model weights require network access; the bundle is not offline.

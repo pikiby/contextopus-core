@@ -120,7 +120,7 @@ This package contains the shared Core installer and {'native plugin skills/MCP c
 
 {native_steps}
 
-An existing Core is reused without modifying its modules/model. A stopped or incompatible existing installation requires explicit repair/update. Data is never stored in this plugin folder; uninstalling the plugin does not delete Core data.
+An existing Core and its model settings are reused. Missing selected bundled modules are installed through Core; existing modules are checked, not silently upgraded. A stopped or incompatible existing installation requires explicit repair/update. Data is never stored in this plugin folder; uninstalling the plugin does not delete Core data.
 
 Full skill names are provided. Short aliases are opt-in. For file delivery use `contextopus integrate {client} --user --alias workspace=w` and review before `--apply`. Plugin aliases use the client's own mechanism when supported; do not edit the plugin cache.
 
