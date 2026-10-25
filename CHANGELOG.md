@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0
+
+See the [release notes](docs/releases/1.7.0.md) for changes, compatibility and verification.
+
 ## 1.6.0 — 2026-10-23
 
 - Share file-backed documents and full instruction libraries with optional modules.

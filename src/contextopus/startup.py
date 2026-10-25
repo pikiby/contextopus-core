@@ -384,24 +384,86 @@ class Application:
                      ("N", "page_size", "top_k") if name in parameters), None)}
         return {**result, "effective": effective}
 
+    def _procedure_directory(self, module=None):
+        """Discover help without invoking module providers or loading their bodies."""
+        rows = {}
+        for name, (owner, provider) in self.module_manager.procedures.items():
+            if module is None or owner == module:
+                rows[name] = {"name": name, "description": "Registered procedure: " + name}
+        modules = sorted(self.module_manager.loaded)
+        for owner in modules:
+            if module is not None and owner != module:
+                continue
+            base = self.module_manager.sources(owner, "procedures")
+            if not base.is_dir():
+                continue
+            for candidate in sorted(base.rglob("*.md")):
+                relative = candidate.relative_to(base)
+                if any(part.startswith('.') for part in relative.parts):
+                    continue
+                path = self.module_manager._inside(base, str(relative))
+                name = owner + "/" + relative.with_suffix("").as_posix()
+                with path.open(encoding="utf-8") as stream:
+                    heading = next((line.strip().lstrip('#').strip() for line in stream
+                                    if line.startswith('# ')), name)
+                rows.setdefault(name, {"name": name, "description": heading})
+        if module is None:
+            base = package_resources.files("contextopus").joinpath("resources", "procedures")
+            def collect(directory, prefix=""):
+                for path in directory.iterdir():
+                    if path.name.startswith('.'):
+                        continue
+                    if path.is_dir():
+                        collect(path, prefix + path.name + "/")
+                    elif path.name.endswith('.md'):
+                        name = prefix + path.name[:-3]
+                        heading = next((line.lstrip('#').strip() for line in
+                                        path.read_text(encoding="utf-8").splitlines()
+                                        if line.startswith('# ')), name)
+                        rows.setdefault(name, {"name": name, "description": heading})
+            collect(base)
+        return {
+            "procedures": [rows[key] for key in sorted(rows)],
+            "modules": modules if module is None else [module],
+            "instruction": "This is a directory, not an action procedure. Before making changes, "
+                "fetch and read the applicable procedure with guide(procedure=<exact name>). "
+                "An operation signature does not replace the procedure. Do not proceed with "
+                "changes until the applicable procedure has been obtained.",
+        }
+
     def procedure(self, name):
+        from .core.procedure_response import enrich_procedure
+        result = self._procedure_text(name)
+        return enrich_procedure(result, self.registry, self.normalize_operation)
+
+    def _procedure_text(self, name):
+        parts = name.split("/")
+        if any(not p or p in {".", ".."} or "\\" in p for p in parts):
+            raise ValueError("Invalid procedure name")
         self.module_manager.refresh()
         if name in self.module_manager.procedures:
             return self.module_manager.procedures[name][1]()
-        if "/" in name and hasattr(self, "module_manager"):
+        if name in self.module_manager.loaded:
+            return {"name": name, "status": "directory", **self._procedure_directory(name)}
+        if "/" in name:
             module, relative = name.split("/", 1)
             if module in self.module_manager.loaded:
                 base = self.module_manager.sources(module, "procedures")
                 path = self.module_manager._inside(base, relative + ".md")
-                return {"name": name, "content": path.read_text(encoding="utf-8")}
+                if path.is_file():
+                    return {"name": name, "content": path.read_text(encoding="utf-8")}
+                return {"name": name, "status": "not_found",
+                        "error": "Unknown procedure: " + name,
+                        **self._procedure_directory(module)}
         if name == 'default':
             name = 'modules'
         parts = name.split("/")
-        if any(not p or p in {".", ".."} or "\\" in p for p in parts):
-            raise ValueError("Invalid procedure name")
         path = package_resources.files("contextopus").joinpath(
             "resources", "procedures", *parts[:-1], parts[-1] + ".md"
         )
+        if not path.is_file():
+            return {"name": name, "status": "not_found",
+                    "error": "Unknown procedure: " + name, **self._procedure_directory()}
         return {"name": name, "content": path.read_text(encoding="utf-8")}
 
     def index_upgrade(self):

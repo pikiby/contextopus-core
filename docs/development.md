@@ -1,11 +1,11 @@
 # Develop and verify Core
 
-This repository owns the Core runtime, CLI/TUI/MCP, native client adapters,
+This repository owns the Core runtime, CLI/web/MCP, native client adapters,
 module SDK, generic examples and the `m` skill. Workspace and Session Search
 own their source, domain tests, procedures, skills and module artifacts in
 independent repositories. No sibling checkout is required for Core tests or builds.
 
-Core **1.6.0**, Workspace and Session Search have independent release artifacts.
+Core **1.7.0**, Workspace, Agents, Session Search and Skill Catalog have independent release artifacts.
 Agents **0.3.0** requires Core `>=1.6,<2`; consult each module manifest for its
 compatibility range. Published 1.4.0 assets describe
 the earlier combined distribution. Use fresh build output directories and verify
@@ -67,7 +67,7 @@ and open the terminal interface:
 
 ```console
 contextopus root --set /absolute/path/to/contextopus-data
-contextopus tui
+contextopus web
 ```
 
 `--root DIRECTORY` or `CONTEXTOPUS_ROOT` overrides the persistent binding. Keep

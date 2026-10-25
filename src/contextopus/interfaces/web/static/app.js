@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id);
   const state = {modules: [], module: '', mode: 'text', query: '', records: [], selected: null, total: null, hasMore: false};
   const requests = new Map();
+  const metadataInputs = new Map();
   let debounce;
   let moduleVersion = 0;
   let listVersion = 0;
@@ -77,6 +78,8 @@
     }
   }
   function resetFilters() {
+    metadataInputs.clear();
+    $('metadata-filters').replaceChildren();
     $('collection').replaceChildren(new Option('All collections', ''));
     $('type').replaceChildren(new Option('All types', ''));
   }
@@ -155,6 +158,17 @@
       const result = await api('/api/collections', {module: id}, 'collections');
       if (version !== selectionVersion || state.module !== id) return;
       if (result.error) throw new Error(displayValue(result.error));
+      for (const filter of result.filters || []) {
+        if (!/^[a-z][a-z0-9_]*$/.test(filter.name)) continue;
+        const label = node('label');
+        const input = node('input');
+        input.type = 'text'; input.placeholder = 'Any';
+        input.setAttribute('aria-label', filter.label || filter.name);
+        input.addEventListener('change', () => loadRecords());
+        metadataInputs.set(filter.name, input);
+        label.append(node('span', filter.label || filter.name), input);
+        $('metadata-filters').append(label);
+      }
       for (const collection of result.collections || []) $('collection').add(new Option(collection.title || collection.id, collection.id));
       if ([...$('collection').options].some(option => option.value === previousCollection)) $('collection').value = previousCollection;
       if (previousType) $('type').add(new Option(previousType, previousType));
@@ -183,7 +197,7 @@
       button.type = 'button';
       button.setAttribute('aria-pressed', String(active));
       button.append(node('span', `${record.key?.[1] || state.module} / ${record.type || 'record'}`, 'eyebrow'), node('strong', record.title || record.key?.[2] || 'Untitled record'), node('p', record.description || 'No description supplied.'));
-      const badges = [record.status, ...(Array.isArray(record.tags) ? record.tags : [])].filter(Boolean);
+      const badges = [record.source, record.status, ...(Array.isArray(record.tags) ? record.tags : [])].filter(Boolean);
       if (badges.length) {
         const tags = node('div', undefined, 'tags');
         badges.forEach(tag => tags.append(node('span', displayValue(tag), 'badge')));
@@ -210,7 +224,8 @@
     $('count').textContent = append ? 'Loading more records…' : state.mode === 'semantic' && state.query ? 'Searching by meaning…' : 'Loading records…';
     $('load-more').hidden = true;
     try {
-      const result = await api('/api/records', {module: state.module, collection: $('collection').value, query: state.query, mode: state.query ? state.mode : 'text', type: $('type').value, offset, limit: 40}, 'list');
+      const filters = Object.fromEntries([...metadataInputs].map(([name, input]) => [name, input.value.trim()]).filter(([,value]) => value));
+      const result = await api('/api/records', {...(Object.keys(filters).length ? {filters: JSON.stringify(filters)} : {}), module: state.module, collection: $('collection').value, query: state.query, mode: state.query ? state.mode : 'text', type: $('type').value, offset, limit: 40}, 'list');
       if (version !== listVersion) return;
       if (result.error) throw new Error(displayValue(result.error));
       state.records = append ? [...state.records, ...(result.records || [])] : result.records || [];
@@ -311,6 +326,9 @@
     detail.append(node('span', record.type || 'record', 'badge'), node('h2', record.title || key[2]), node('p', record.description || '', 'description'));
     const metadata = node('dl', undefined, 'meta');
     const fields = {Module: key[0], Collection: key[1]};
+    for (const [key, label] of [['source','Source / client'],['session_id','Native session ID'],['project','Project'],['source_uri','Original session'],['updated_at','Description updated']]) {
+      if (record.metadata?.[key]) fields[label] = record.metadata[key];
+    }
     const status = record.status ?? record.metadata?.status;
     if (status) fields.Status = status;
     for (const [name, value] of Object.entries(fields)) {
@@ -362,7 +380,7 @@
       if (link.description) button.append(node('small', link.description));
       if (link.unavailable || !validKey(link.key)) {
         button.disabled = true;
-        button.append(node('small', 'Unavailable' + (link.reference ? ' · ' + link.reference : '')));
+        button.append(node('small', (link.unavailable ? 'Unavailable' : 'Reference') + (link.reference ? ' · ' + link.reference : '')));
       } else {
         button.append(node('small', link.key.join(' / ') + ' ↗'));
         button.addEventListener('click', () => openRecord(link.key, true));

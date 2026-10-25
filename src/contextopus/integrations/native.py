@@ -26,6 +26,7 @@ CLIENTS = {
     "opencode": ("opencode.json", ".opencode/skills", "mcp"),
     "crush": ("crush.json", ".agents/skills", "mcp"),
     "hermes": ("config.yaml", "skills", "mcp_servers"),
+    "cursor": (".cursor/mcp.json", ".cursor/skills", "mcpServers"),
 }
 
 
@@ -52,6 +53,8 @@ def plan(
     endpoint: str = "http://127.0.0.1:8765/mcp",
     root: str | Path | None = None,
     hermes_home: str | Path | None = None,
+    selected_skills: list[str] | None = None,
+    skill_aliases: dict[str, str] | None = None,
 ) -> dict:
     if client not in CLIENTS:
         raise ValueError(f"Unknown client: {client}")
@@ -78,6 +81,7 @@ def plan(
         user_paths = {
             "codex": (project / ".codex/config.toml", project / ".agents/skills"),
             "claude-code": (project / ".claude.json", project / ".claude/skills"),
+            "cursor": (project / ".cursor/mcp.json", project / ".cursor/skills"),
             "opencode": (
                 config_base / "opencode/opencode.json",
                 config_base / "opencode/skills",
@@ -164,63 +168,56 @@ def plan(
     managed_path = managed_base / ".contextopus" / (client + "-integration.json")
     managed_prior = managed_path.read_bytes() if managed_path.exists() else None
     managed = json.loads(managed_prior) if managed_prior else {"skills": {}}
+    from .skill_delivery import delivery_options, entrypoints, named_content
+    options = delivery_options(managed, selected_skills, skill_aliases)
     hashes = dict(managed.get("skills", {}))
     source = files("contextopus").joinpath("resources", "skills")
-    known = json.loads(files("contextopus").joinpath("resources", "legacy_skill_hashes.json").read_text())
-    canonical_names = set()
-    for skill in (
-        sorted(source.iterdir(), key=lambda item: item.name) if install_skills else []
-    ):
-        if not skill.is_dir():
-            continue
-        canonical_names.add(skill.name)
-        target = skills_root / skill.name / "SKILL.md"
-        skill_content = skill.joinpath("SKILL.md").read_bytes()
-        prior = target.read_bytes() if target.exists() else None
-        relative = (
-            target.relative_to(project).as_posix()
-            if target.is_relative_to(project)
-            else str(target)
-        )
-        hashes[relative] = _digest(skill_content)
-        if (
-            prior is not None
-            and prior != skill_content
-            and managed.get("skills", {}).get(relative) != _digest(prior)
-            and _digest(prior.replace(b"\r\n", b"\n")) not in known.get(skill.name, [])
-        ):
-            raise IntegrationConflict(f"Skill name collision: {skill.name} at {target}")
-        writes.append((target, prior, skill_content))
-    module_hashes = {}
-    module_errors = []
-    if module_skills_requested:
-        from contextopus.core.module_management import ModuleManifestReader
-        from contextopus.core.storage import StorageLayout
-        directories, _, module_errors = ModuleManifestReader(StorageLayout(root)).inspect_sources('skills')
-        occupied_names = {item.name.casefold() for item in source.iterdir() if item.is_dir()}
-        for directory in directories:
-            if not directory.is_dir():
-                continue
-            for skill in sorted(directory.iterdir()):
-                if not skill.is_dir() or not (skill / 'SKILL.md').is_file():
+    canonical_names, module_hashes, module_errors = set(), {}, []
+    identities = []
+    if install_skills:
+        sources = [(item.name, item) for item in sorted(source.iterdir(), key=lambda p:p.name) if item.is_dir()]
+        module_sources = set()
+        if root is not None:
+            from contextopus.core.module_management import ModuleManifestReader
+            from contextopus.core.storage import StorageLayout
+            directories, _, module_errors = ModuleManifestReader(StorageLayout(root)).inspect_sources('skills')
+            if module_errors:
+                raise IntegrationConflict('Module skill discovery failed: ' + str(module_errors))
+            for directory in directories:
+                for item in sorted(directory.iterdir()):
+                    if item.is_dir() and (item / 'SKILL.md').is_file():
+                        sources.append((item.name, item))
+                        module_sources.add(str(item))
+        try:
+            entries = entrypoints(sources, options)
+        except ValueError as exc:
+            raise IntegrationConflict(str(exc)) from exc
+        hashes = {}
+        for identity, name, skill in entries:
+            canonical_names.add(name)
+            identities.append({'identity': identity, 'installed_name': name,
+                               'relationship': 'alias' if identity in options['aliases'] else 'namespaced'})
+            # Resources are real directories in supported wheel installations.
+            skill = Path(str(skill))
+            for asset in sorted(skill.rglob('*')):
+                if asset.is_symlink():
+                    raise IntegrationConflict('Skill symlinks are not supported: ' + str(asset))
+                if not asset.is_file():
                     continue
-                if skill.name.casefold() in occupied_names:
-                    raise IntegrationConflict('Module skill name collision: ' + skill.name)
-                occupied_names.add(skill.name.casefold())
-                canonical_names.add(skill.name)
-                for asset in sorted(skill.rglob('*')):
-                    if not asset.is_file():
-                        continue
-                    target = skills_root / skill.name / asset.relative_to(skill)
-                    content = asset.read_bytes()
-                    prior = target.read_bytes() if target.exists() else None
-                    relative = target.relative_to(project).as_posix() if target.is_relative_to(project) else str(target)
-                    known_entrypoint = (asset == skill / 'SKILL.md' and prior is not None
-                        and _digest(prior.replace(b'\r\n', b'\n')) in known.get(skill.name, []))
-                    if prior is not None and prior != content and managed.get('skills', {}).get(relative) != _digest(prior) and not known_entrypoint:
-                        raise IntegrationConflict('Module skill file collision: ' + str(target))
-                    hashes[relative] = module_hashes[relative] = _digest(content)
-                    writes.append((target, prior, content))
+                target = skills_root / name / asset.relative_to(skill)
+                content = asset.read_bytes()
+                if asset == skill / 'SKILL.md':
+                    content = named_content(content, name)
+                if target.is_symlink() or not target.resolve().is_relative_to(skills_root.resolve()):
+                    raise IntegrationConflict('Skill destination escapes its directory: ' + str(target))
+                prior = target.read_bytes() if target.exists() else None
+                relative = target.relative_to(project).as_posix() if target.is_relative_to(project) else str(target)
+                if prior is not None and prior != content and managed.get('skills', {}).get(relative) != _digest(prior):
+                    raise IntegrationConflict('Skill name collision: ' + name + ' at ' + str(target))
+                hashes[relative] = _digest(content)
+                if str(skill) in module_sources:
+                    module_hashes[relative] = _digest(content)
+                writes.append((target, prior, content))
     retired, preserved = [], []
     legacy_roots = {skills_root} if install_skills or native_plugin else set()
     if legacy_skills is not None:
@@ -255,27 +252,26 @@ def plan(
                 continue
             retired.append({"path": str(target), "expected": _digest(prior)})
             hashes.pop(relative, None)
-    if module_skills_requested:
-        for relative in sorted(set(managed.get('module_skills', {})) - set(module_hashes)):
+    if install_skills:
+        for relative in sorted(set(managed.get('skills', {})) - set(hashes)):
             target = Path(relative) if Path(relative).is_absolute() else project / relative
             if not target.is_relative_to(skills_root):
-                raise IntegrationConflict('Managed module skill path escapes skill directory')
+                raise IntegrationConflict('Managed skill path escapes skill directory')
             if not target.is_file():
-                hashes.pop(relative, None)
                 continue
             prior = target.read_bytes()
-            if _digest(prior) != managed['module_skills'][relative]:
+            if _digest(prior) != managed['skills'][relative]:
                 preserved.append({'path': str(target), 'reason': 'user_modified_or_unrecognized'})
             else:
                 retired.append({'path': str(target), 'expected': _digest(prior)})
-                hashes.pop(relative, None)
     else:
         module_hashes = dict(managed.get('module_skills', {}))
+        identities = managed.get('entrypoints', [])
     # A former built-in skill can also appear in the module ownership receipt.
     # Its removal must be applied once after the module is disabled.
     retired = list({item['path']: item for item in retired}.values())
     managed_content = (
-        json.dumps({"skills": hashes, "module_skills": module_hashes}, sort_keys=True, indent=2) + "\n"
+        json.dumps({"skills": hashes, "module_skills": module_hashes, "delivery": options, "entrypoints": identities}, sort_keys=True, indent=2) + "\n"
     ).encode()
     writes.append((managed_path, managed_prior, managed_content))
     return {
@@ -285,6 +281,8 @@ def plan(
         "removals": retired,
         "preserved": preserved,
         "module_errors": module_errors,
+        "entrypoints": identities,
+        "delivery": options,
         "writes": [
             {
                 "path": str(path),

@@ -3,7 +3,7 @@
 ```mermaid
 flowchart LR
     CLI --> Service
-    TUI --> Service
+    Web --> Service
     Codex --> Service
     ClaudeCode --> Service
     OpenCode --> Service
@@ -20,7 +20,7 @@ flowchart LR
     SDK --> Core
 ```
 
-One installed Core Python runtime owns model/provider pools, shared RAG and database services. CLI, TUI and coding clients use the same Application operations through the local owner. Import, status and procedure reads do not download or load an embedding model. Local embeddings are an explicit installation extra; provider/profile selection belongs to Core and is shared by enabled modules.
+One installed Core Python runtime owns model/provider pools, shared RAG and database services. CLI, web and coding clients use the same Application operations through the local owner. Import, status and procedure reads do not download or load an embedding model. Local embeddings are an explicit installation extra; provider/profile selection belongs to Core and is shared by enabled modules.
 
 Persistent data belongs in an explicit root or the platform's user-data directory, outside plugin caches. Root configuration, RAG and analytics have separate paths. Workspace is an optional module with selected project rules, task state, temporary work and reviewed permanent knowledge. Its code, reference documents, domain rules and skills live in the separate module package. The Core wheel supplies infrastructure and the `m` module-management skill; it does not register or migrate Workspace on startup. Legacy operations are compatibility aliases; namespaced module operations are preferred.
 
@@ -29,7 +29,7 @@ Persistent data belongs in an explicit root or the platform's user-data director
 | Core | Storage, typed operations, shared lifetime, settings and relocation |
 | Workspace | Optional native contribution for project knowledge and explicit work cycles |
 | MCP | Query/execute transport and canonical procedure retrieval |
-| CLI/TUI | Thin views and controls over shared operations |
+| CLI/web | Thin views and controls over shared operations |
 | Session search | Optional child service using Core SQL, embeddings and RAG; a compatibility adapter can expose an existing standalone installation |
 | GraphFrontier | Future integration; no readiness claim |
 | Skills registry | Proposed idea; not an implemented module |

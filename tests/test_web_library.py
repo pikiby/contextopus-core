@@ -168,3 +168,21 @@ def test_record_pagination_reaches_contribution(web_server):
     code, _, _ = request(server, "/api/record?module=custom_notes&collection=notes&id=note&offset=40&limit=40")
     assert code == 200
     assert app.calls[-1][1] == {"action": "record", "collection": "notes", "id": "note", "offset": 40, "limit": 40}
+
+
+def test_module_metadata_filters_are_forwarded_and_validated(web_server):
+    from urllib.parse import urlencode
+    server, app = web_server
+    values = {'source':'claude-desktop','tag':'database'}
+    code, _, _ = request(server, '/api/records?' + urlencode({'module':'custom_notes','filters':json.dumps(values)}))
+    assert code == 200
+    assert app.calls[-1][1]['filters'] == values
+    for bad in ('[]', '{"source":[]}', '{bad'):
+        code, _, _ = request(server, '/api/records?' + urlencode({'module':'custom_notes','filters':bad}))
+        assert code == 400
+
+
+def test_cli_has_web_without_tui():
+    assert parser().parse_args(['web']).command == 'web'
+    with pytest.raises(SystemExit):
+        parser().parse_args(['tui'])

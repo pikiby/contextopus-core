@@ -10,8 +10,6 @@ import pytest
 
 from contextopus.integrations import autostart, service
 from contextopus.integrations.native import plan, integrate, IntegrationConflict, _digest
-from contextopus.interfaces.tui.backend import Backend
-from contextopus.interfaces.tui.render import action_names
 
 
 def test_native_service_definitions_use_foreground_owner_and_native_restart(tmp_path, monkeypatch):
@@ -41,18 +39,3 @@ def test_native_start_does_not_spawn_an_extra_owner(tmp_path):
         assert service.start(tmp_path)["state"] == "running"
         native.assert_called_once_with(tmp_path, "start")
         spawn.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_tui_can_start_stopped_service_without_mcp_call(tmp_path):
-    class Offline:
-        endpoint = "http://127.0.0.1:8765/mcp"
-        root = str(tmp_path)
-        def query(self, *args):
-            raise AssertionError("Cannot query a stopped MCP")
-    backend = Backend(Offline())
-    with patch.object(service, "status", return_value={"state": "stopped"}), patch.object(service, "start", return_value={"state": "running"}) as start:
-        snapshot = await backend.snapshot()
-        assert "Start MCP" in action_names(snapshot["status"])
-        assert (await backend.service("start"))["state"] == "running"
-        start.assert_called_once_with(str(tmp_path))

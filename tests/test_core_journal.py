@@ -107,7 +107,7 @@ def test_sanitize_bounds_recursive_and_large_values():
 
 def test_registry_journals_external_module_without_workspace_cycle(tmp_path):
     from contextopus.core.operations import OperationRegistry, OperationSpec
-    from jsonschema import ValidationError
+    from contextopus.core.operations import OperationInputError
 
     journal = OperationJournal(StorageLayout(tmp_path))
     registry = OperationRegistry(journal)
@@ -126,7 +126,7 @@ def test_registry_journals_external_module_without_workspace_cycle(tmp_path):
         "query", "third.double", {"value": 3}, SimpleNamespace(workspace=None)
     ) == {"value": 6}
     assert journal.summary()["requests"] == 1
-    with pytest.raises(ValidationError):
+    with pytest.raises(OperationInputError):
         registry.dispatch("query", "third.double", {"value": "invalid"})
     assert journal.summary()["requests"] == 1
     assert not (tmp_path / "modules/workspace").exists()

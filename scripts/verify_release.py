@@ -13,7 +13,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-CLIENTS = ("codex", "claude-code", "opencode", "crush", "hermes")
+CLIENTS = ("codex", "claude-code", "cursor", "opencode", "crush", "hermes")
 
 
 def verify(destination=None):
@@ -28,8 +28,8 @@ def verify(destination=None):
         sdist.name,
         f'contextopus-core-{version}.zip',
         *(
-            f"contextopus-{client}-{version}.zip"
-            for client in CLIENTS
+            f"contextopus-{client}-{platform}-{version}.zip"
+            for client in CLIENTS for platform in ("unix", "windows")
         ),
     }
     observed = {}
@@ -56,7 +56,7 @@ def verify(destination=None):
                     raise ValueError('Unsafe Core installer archive member')
             archive.extractall(temporary)
         bundle = load_bundle(Path(temporary) / 'contextopus')
-        if bundle['core']['version'] != version or bundle['modules']:
+        if bundle['core']['version'] != version:
             raise ValueError('Core-only installer has inconsistent contents')
     required = {
         "contextopus/startup.py",
@@ -74,7 +74,7 @@ def verify(destination=None):
         "contextopus/resources/procedures/modules.md",
         "contextopus/interfaces/mcp/presentation.py",
     }
-    skills = {'m'}
+    skills = {'modules'}
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
         dist_info = f"{distribution}-{version}.dist-info"
@@ -109,7 +109,7 @@ def verify(destination=None):
                     raise ValueError(f"Wheel has missing or stale application content: {member}")
         packaged_skills = {PurePosixPath(n).parts[-2] for n in names
                            if n.startswith("contextopus/resources/skills/") and n.endswith("/SKILL.md")}
-        if packaged_skills != {'m'}:
+        if packaged_skills != {'modules'}:
             raise ValueError(f"Wrong wheel skill set: {packaged_skills}")
         if any(
             PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts
@@ -157,40 +157,38 @@ def verify(destination=None):
         if (plugin_skills / path.parent.name / 'SKILL.md').read_bytes() != path.read_bytes():
             raise ValueError('Stale client plugin skill copy: ' + path.parent.name)
     for client in CLIENTS:
-        with zipfile.ZipFile(
-            destination / f"contextopus-{client}-{version}.zip"
-        ) as archive:
-            bundled_skills = {PurePosixPath(n).parts[-2] for n in archive.namelist()
-                              if n.startswith("skills/") and n.endswith("/SKILL.md")}
-            if bundled_skills != skills:
-                raise ValueError(f"Wrong {client} bundle skill set: {bundled_skills}")
-            if any(PurePosixPath(name).is_absolute() or '..' in PurePosixPath(name).parts
-                   for name in archive.namelist()):
-                raise ValueError(f'Unsafe {client} bundle member path')
-            instructions = archive.read('INSTALL.txt').decode()
-            if f'contextopus_core-{version}-py3-none-any.whl' not in instructions or 'guide, read, write, finish' not in instructions:
-                raise ValueError(f'Stale {client} installation instructions')
-            if 'modules install ID' not in instructions:
-                raise ValueError(f'Missing generic module installation instructions: {client}')
-            if client == "hermes":
-                for required_text in (
-                    "contextopus integrate hermes --user",
-                    "--hermes-home <directory>",
-                    "$HERMES_HOME/config.yaml",
-                    "$HERMES_HOME/skills/",
-                    "%LOCALAPPDATA%/hermes",
-                    "HERMES_DATA_DIR_SUFFIX",
-                ):
-                    if required_text not in instructions:
-                        raise ValueError("Incomplete Hermes installation instructions")
-                if archive.read("HERMES.md") != (ROOT / "docs/integrations/hermes.md").read_bytes():
-                    raise ValueError("Stale Hermes integration guide")
-            for name in ("LICENSE", "NOTICE"):
-                if archive.read(name) != (ROOT / name).read_bytes():
-                    raise ValueError(f"{client} bundle misses the exact {name}")
-            for name, path in source_skills.items():
-                if archive.read(f'skills/{name}/SKILL.md') != path.read_bytes():
-                    raise ValueError(f'Stale {client} skill bundle: {name}')
+        for platform in ('unix', 'windows'):
+            with tempfile.TemporaryDirectory(prefix='contextopus-client-check-') as temporary:
+                with zipfile.ZipFile(destination / f'contextopus-{client}-{platform}-{version}.zip') as archive:
+                    for info in archive.infolist():
+                        safe_path(info.filename.rstrip('/'))
+                        if stat.S_IFMT(info.external_attr >> 16) not in {0, stat.S_IFDIR, stat.S_IFREG}:
+                            raise ValueError('Unsafe client archive member')
+                    archive.extractall(temporary)
+                package = Path(temporary) / 'contextopus'
+                client_data = json.loads((package / 'client.json').read_text())
+                if client_data['client'] != client or client_data['platform'] != platform:
+                    raise ValueError('Client identity mismatch')
+                runtime = load_bundle(package / 'runtime')
+                if runtime['core'] != bundle['core'] or runtime['modules'] != bundle['modules']:
+                    raise ValueError('Client runtime differs from starter')
+                for name in ('LICENSE', 'NOTICE'):
+                    if (package / name).read_bytes() != (ROOT / name).read_bytes():
+                        raise ValueError('Client license mismatch')
+                if client_data['delivery'] == 'plugin':
+                    expected_skills = dict(source_skills)
+                    for module in runtime['modules']:
+                        folder = package / 'runtime' / module['path']
+                        manifest = json.loads((folder / 'module.json').read_text())
+                        if manifest.get('skills'):
+                            for skill in (folder / 'package' / manifest['skills']).glob('*/SKILL.md'):
+                                expected_skills[skill.parent.name] = skill
+                    actual = {p.parent.name for p in (package / 'skills').glob('*/SKILL.md')}
+                    if actual != set(expected_skills) | {'setup'}:
+                        raise ValueError('Client skill inventory mismatch')
+                    for name, source in expected_skills.items():
+                        if (package / 'skills' / name / 'SKILL.md').read_bytes() != source.read_bytes():
+                            raise ValueError('Stale bundled skill: ' + name)
     for relative in ('plugins/contextopus/.codex-plugin/plugin.json', 'plugins/contextopus/plugin.json'):
         manifest = json.loads((ROOT / relative).read_text())
         if manifest['version'] != version or manifest['name'] != 'contextopus':

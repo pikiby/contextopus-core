@@ -23,7 +23,7 @@ class InstallError(RuntimeError):
     """A failed precondition or an incomplete installation."""
 
 
-CLIENTS = ("codex", "claude-code", "opencode", "crush", "hermes")
+CLIENTS = ("codex", "claude-code", "cursor", "opencode", "crush", "hermes")
 ENDPOINT = "http://127.0.0.1:8765"
 MIN_UV = (0, 13, 1)
 

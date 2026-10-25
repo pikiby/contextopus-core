@@ -5,6 +5,14 @@ from contextlib import nullcontext
 from typing import Callable
 
 
+class OperationInputError(ValueError):
+    """Rejected before a handler runs; safe structured recovery for every module."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        super().__init__(payload['error']['message'])
+
+
 @dataclass(frozen=True)
 class OperationSpec:
     name: str
@@ -68,6 +76,28 @@ class OperationRegistry:
         self._operations = replacement
         self._owned = {**owned, owner: set(names)}
 
+    def input_error(self, code, operation, message, **details):
+        from difflib import get_close_matches
+        error = {"code": code, "message": message, "operation": operation,
+                 "execution_started": False, **details}
+        if operation in self._operations:
+            error["definition"] = self._describe_spec(self._operations[operation])
+            error["recovery"] = "Use the attached definition and the applicable procedure. Do not change user intent or approval."
+        else:
+            error["candidates"] = get_close_matches(operation, sorted(self._operations), n=5, cutoff=0.35)
+            error["recovery"] = "No operation was selected or executed. Inspect a candidate with guide(operation=<name>), or use guide(catalog=true)."
+        return OperationInputError({"status": "error", "error": error})
+
+    @staticmethod
+    def _describe_spec(spec):
+        schema = spec.arguments_schema
+        return {
+            "operation": spec.name, "kind": spec.kind,
+            "tool": "finish" if spec.name == "workspace.finish" else ("read" if spec.kind == "query" else "write"),
+            "description": spec.description,
+            "arguments_schema": schema.model_json_schema() if hasattr(schema, "model_json_schema") else schema,
+        }
+
     def describe(self, operation=None):
         refresh = getattr(self, "refresh_modules", None)
         if refresh:
@@ -82,17 +112,8 @@ class OperationRegistry:
                 }
             }
         if operation not in self._operations:
-            raise ValueError(f"Unknown operation: {operation}; use describe")
-        spec = self._operations[operation]
-        schema = spec.arguments_schema
-        return {
-            "operation": spec.name,
-            "kind": spec.kind,
-            "description": spec.description,
-            "arguments_schema": schema.model_json_schema()
-            if hasattr(schema, "model_json_schema")
-            else schema,
-        }
+            raise self.input_error("unknown_operation", operation, "Unknown operation: " + operation)
+        return self._describe_spec(self._operations[operation])
 
     def dispatch(self, kind, operation, arguments=None, context=None):
         from .storage import StorageLayout
@@ -117,17 +138,28 @@ class OperationRegistry:
                     # Release the old guard before dispatching the new handler.
                     continue
                 if candidate is None:
-                    raise ValueError(f"Unknown operation: {operation}; use describe")
+                    raise self.input_error("unknown_operation", operation, "Unknown operation: " + operation)
                 spec = candidate
                 if kind != spec.kind:
-                    raise ValueError(f"Operation {operation} requires {spec.kind}")
+                    raise self.input_error("wrong_tool", operation, f"Operation {operation} requires {spec.kind}")
                 arguments = {} if arguments is None else arguments
                 schema = spec.arguments_schema
-                if hasattr(schema, "model_validate"):
-                    arguments = schema.model_validate(arguments).model_dump()
-                else:
-                    from jsonschema import Draft202012Validator
-                    Draft202012Validator(schema).validate(arguments)
+                from pydantic import ValidationError as ModelValidationError
+                from jsonschema import Draft202012Validator, ValidationError as SchemaValidationError
+                try:
+                    if hasattr(schema, "model_validate"):
+                        arguments = schema.model_validate(arguments).model_dump()
+                    else:
+                        Draft202012Validator(schema).validate(arguments)
+                except (ModelValidationError, SchemaValidationError) as exc:
+                    # Never echo input values (which may contain secrets) in recovery.
+                    if isinstance(exc, ModelValidationError):
+                        issues = [{"path": list(e["loc"]), "rule": e["type"]}
+                                  for e in exc.errors(include_input=False, include_context=False, include_url=False)]
+                    else:
+                        issues = [{"path": list(exc.absolute_path), "rule": exc.validator}]
+                    raise self.input_error("invalid_arguments", operation,
+                        "Arguments do not match the registered schema.", issues=issues) from None
                 return self._invoke(spec, arguments, context)
 
     def _invoke(self, spec, arguments, context):
@@ -157,6 +189,11 @@ class OperationRegistry:
             ):
                 result = spec.handler(context, **arguments)
         except Exception as exc:
+            if isinstance(exc, OperationInputError):
+                # A nested call failed after this handler started: no automatic retry.
+                exc.payload["error"]["execution_started"] = True
+                exc.payload["error"]["recovery"] = "The outer operation started. Inspect its current state before any retry; partial effects are possible."
+                exc.payload["error"]["outer_operation"] = operation
             if observed:
                 self.journal.finish(
                     ident, error=exc, duration=time.monotonic() - started

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contextopus-core"
-version = "1.6.0"
+version = "1.7.0"
 description = "Shared local runtime, retrieval and module services for Contextopus"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
-dependencies = ["lancedb>=0.40,<1", "mcp>=1.10,<2", "PyYAML>=6,<7", "pydantic>=2.11,<3", "textual==8.2.8", "platformdirs>=4,<5", "tomlkit>=0.13,<1", "jsonschema>=4,<5", "wsproto>=1.2,<2", "packaging>=24"]
+dependencies = ["lancedb>=0.40,<1", "mcp>=1.10,<2", "PyYAML>=6,<7", "pydantic>=2.11,<3", "platformdirs>=4,<5", "tomlkit>=0.13,<1", "jsonschema>=4,<5", "wsproto>=1.2,<2", "packaging>=24"]
 
 [project.optional-dependencies]
 local = ["sentence-transformers>=3,<6"]

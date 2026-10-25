@@ -169,6 +169,6 @@ def test_cli_preview_and_apply_redact_other_server_credentials(tmp_path, monkeyp
     assert config.read_text() == content
     assert main(args + ["--apply"]) == 0
     assert "private-value" not in capsys.readouterr().out
-    assert (home / "skills/m/SKILL.md").exists()
+    assert (home / "skills/contextopus-modules/SKILL.md").exists()
     with pytest.raises(SystemExit):
         parser().parse_args(["reconnect", "hermes"])

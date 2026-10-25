@@ -9,6 +9,8 @@ from typing import Any, Literal
 import anyio
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from contextopus.core.operations import OperationInputError
 from mcp.types import TextContent, ToolAnnotations
 from starlette.responses import JSONResponse
 from contextopus.startup import Application
@@ -92,7 +94,8 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             "authorized changes under the existing approval rules. Enabled modules contribute their own "
             "operations and procedures. guide() returns the active default procedure, or the module "
             "installation procedure for Core alone. guide(operation=...) returns only an operation "
-            "signature and does not replace a procedure. Request signatures only when unknown. "
+            "signature and does not replace a procedure. Procedures include schemas for their declared operations. "
+            "Use attached schemas; request only missing signatures. Do not guess operation names or fields. "
             "Reuse procedures already obtained for the same task; reload when changed or lost."
         ),
     )
@@ -102,14 +105,24 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
     async def health(request):
         return JSONResponse({"root": owner.current_root(), "pid": os.getpid()})
 
+    def reject_call(code, message, recovery):
+        raise ToolError(json.dumps({"status": "error", "error": {
+            "code": code, "message": message, "execution_started": False,
+            "recovery": recovery,
+        }}, ensure_ascii=False))
+
     def route(kind, operation, arguments, work_root=None, context=None, workspace=None):
         if context is not None and workspace is not None and context != workspace:
-            raise ValueError("context and workspace disagree")
+            reject_call("conflicting_coordinates", "context and workspace disagree", "Use the selected context once, outside arguments; do not silently switch contexts.")
         app = owner.application(work_root, context or workspace)
         # Reaching transport dispatch proves this owner is serving requests.
         # It provides no evidence about a particular native client's identity.
         app.services.runtime_mcp["server"] = "running"
-        return getattr(app, kind)(app.normalize_operation(operation), arguments)
+        try:
+            return getattr(app, kind)(app.normalize_operation(operation), arguments)
+        except OperationInputError as exc:
+            # Preserve MCP isError, including for guide and legacy entrypoints.
+            raise ToolError(json.dumps(exc.payload, ensure_ascii=False)) from None
 
     def normalize(operation, work_root=None, context=None, workspace=None):
         return owner.application(work_root, context or workspace).normalize_operation(operation)
@@ -123,9 +136,9 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         context: str | None = None,
         workspace: str | None = None,
     ) -> dict:
-        """guide() reads the active default procedure; operation=... gives only a signature, not a replacement for a procedure. Catalog is opt-in."""
+        """guide() reads the active default procedure. procedure=<module> lists its procedures; fetch an exact listed name before acting. operation=... gives only a signature, not a replacement for a procedure. Procedures include their declared operation schemas. Use those schemas; request missing ones only. Catalog is opt-in."""
         if sum((procedure is not None, operation is not None, catalog)) > 1:
-            raise ValueError('Choose procedure, operation or catalog')
+            reject_call('conflicting_guide_selectors', 'Choose procedure, operation or catalog', 'Request exactly one procedure, one operation signature, or catalog=true.')
         if operation is not None or catalog:
             return await anyio.to_thread.run_sync(partial(route, 'query', 'describe',
                 {'operation': normalize(operation, work_root, context, workspace)} if operation is not None else {}, work_root, context, workspace))
@@ -136,7 +149,7 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         # Validate before executing a mutation. Presentation runs only after the
         # existing registry has completed approval checks and observation.
         if detail not in ('compact', 'full'):
-            raise ValueError('detail must be compact or full')
+            reject_call('invalid_detail', 'detail must be compact or full', 'Use compact normally; full only when needed evidence is missing.')
         result = await anyio.to_thread.run_sync(partial(route, kind, operation, arguments, work_root, context, workspace))
         from .presentation import present
         result = present(result, operation=normalize(operation, work_root, context, workspace), arguments=arguments, detail=detail)

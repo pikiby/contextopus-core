@@ -3,3 +3,5 @@
 .full-metadata{margin:28px 0;color:var(--muted);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 0}.full-metadata summary{cursor:pointer;font-size:12px;font-weight:600}.full-metadata summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}.metadata-body{margin:14px 0 0}.metadata-body div{margin:12px 0}.metadata-body dt{font-size:11px;font-weight:600}.metadata-body dd{margin:4px 0 0;font:12px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
 
 .content-paging{margin:24px 0;padding:16px;border:1px solid #d5dfed;border-radius:8px;background:#eef3fa}.content-paging .page-status{margin:0 0 8px;font-size:12px;font-weight:600}.content-paging .source{margin-bottom:12px}.page-controls{display:flex;gap:8px;flex-wrap:wrap}.page-controls .back{margin:0}
+
+#metadata-filters input { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #bbb8; border-radius: 6px; background: transparent; color: inherit; }

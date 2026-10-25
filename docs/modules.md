@@ -48,6 +48,12 @@ directories. These are exposed only for enabled modules through
 `package/procedures/setup.md`; skills and filter algorithms retain their provider
 file contracts. `tui` names an operation contributed by the module.
 
+`guide(procedure="sample")` lists the enabled module's procedure names and
+Markdown headings. Fetch the selected exact name, such as `sample/setup`, to
+read its full procedure before acting. Unknown names return `status: not_found`
+with available procedures instead of a filesystem error. A directory or an
+operation signature is not a substitute for the action procedure.
+
 Legacy Python handlers receive one arguments dictionary and return
 JSON-compatible data.
 They run in a child Python interpreter. Dependencies are prepared explicitly with
@@ -63,7 +69,7 @@ sandbox. Command executables must already exist on PATH or be bundled.
 
 ## One installation action
 
-Once the author has placed the package in `<root>/modules/<id>`, ask `$m` to
+Once the author has placed the package in `<root>/modules/<id>`, ask `$modules` to
 install that module. The skill reads `guide(procedure="modules")` and calls the
 shared operation. An explicit request to install authorizes the declared
 installation sequence; inspection alone does not.
@@ -402,3 +408,43 @@ for `search: true` before starting workers. This probe does not load the embeddi
 ## Read-only web library contribution
 
 An enabled module may expose a query operation named `<module_id>.library` to supply collections, paginated records and full reads to the Core web interface. The UI discovers this operation through `core.modules`; no module-specific Core code is required. See [the library contract](web-interface.md#module-contribution).
+
+
+## Procedure responses and operation recovery
+
+Declare each procedure's directly used operations in its Markdown YAML frontmatter:
+
+```yaml
+---
+operations:
+  - sample.read
+  - sample.save
+---
+```
+
+Use actual registered names. A contributed provider can instead return
+`operation_names: ["sample.read", "sample.save"]` alongside its `content`.
+Core returns the body as `content`, plus `operations` containing live registry
+schemas, descriptions and the MCP tool (`read`, `write`, or dedicated `finish`).
+Aliases resolve to canonical names. Parameters are never copied into Markdown.
+Only this procedure's declared operations are included; linked procedures are
+loaded separately. Empty lists are valid for references that invoke no operations.
+Older third-party procedures without declarations remain readable.
+
+Use attached definitions first and `guide(operation=...)` only for missing ones.
+Coordinates remain outside `arguments`; the dedicated `finish` tool takes its
+parameters directly. These definitions do not authorize actions or replace user
+rules. Missing registered operations yield `status: incomplete` and
+`unavailable_operations`; do not guess substitutes. Verify declarations in module
+packaging tests against the supported Core/module registry.
+
+All registry input failures have an `error` object with a stable `code`:
+`unknown_operation`, `wrong_tool`, or `invalid_arguments`. Known operations include
+their definition; unknown names include at most five registered candidates and a
+`guide` recovery instruction. Candidate suggestions never dispatch automatically.
+Validation issues expose parameter paths and rule names, not submitted values.
+MCP preserves `isError=true`; errors are not successful domain results. When
+`execution_started` is false the handler was not called. Nested failures after a
+handler started report true; inspect current state before retrying. Domain/runtime
+failures retain their existing behavior and must not be treated as input rejection.
+Successful results, reviews, revisions and approval policies remain unchanged.

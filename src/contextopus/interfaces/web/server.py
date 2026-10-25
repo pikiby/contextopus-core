@@ -79,7 +79,7 @@ class LibraryHandler(BaseHTTPRequestHandler):
             allowed = {
                 "/api/modules": set(), "/api/collections": {"module"},
                 "/api/record": {"module", "collection", "id", "offset", "limit"},
-                "/api/records": {"module", "collection", "query", "mode", "type", "offset", "limit"},
+                "/api/records": {"module", "collection", "query", "mode", "type", "offset", "limit", "filters"},
             }[url.path]
             if set(params) - allowed:
                 raise ValueError("Unknown query parameter")
@@ -98,6 +98,11 @@ class LibraryHandler(BaseHTTPRequestHandler):
                         raise ValueError("Invalid search mode")
                     if len(params.get("query", "")) > 2000:
                         raise ValueError("Search query exceeds 2000 characters")
+                if 'filters' in params:
+                    filters = json.loads(params['filters'])
+                    if not isinstance(filters, dict) or len(filters) > 16 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>1000 for k,v in filters.items()):
+                        raise ValueError('Invalid metadata filters')
+                    params['filters'] = filters
                 if action == "record" and not params.get("id"):
                     raise ValueError("Record id is required")
                 result = backend.call(module, action, **params)

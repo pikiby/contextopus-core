@@ -1,10 +1,14 @@
+---
+operations: ["core.module_disable", "core.module_install", "core.module_source_plan", "core.module_update", "core.modules"]
+---
+
 # Manage Contextopus modules
 
 Use this procedure for root-local modules. Resolve the selected Core root and the module named by the user. Query `core.modules` to inspect discovered manifests, compatibility, storage state and errors. Discovery is read-only: listing or discussing a module does not authorize installation. Obtain operation signatures through `guide(operation=...)` only when unknown.
 
 For an authorized installation from a built folder or ZIP, query `core.module_source_plan(module=<id>, source=<path>)`, inspect the preview, then execute `core.module_install(module=<id>, source=<same path>, source_revision=<preview revision>)`. Core checks portable paths, payload bytes, identity and compatibility, stages a new folder and invokes ordinary dependency, storage and activation steps. The CLI equivalent is `modules install ID --source PATH`; append `--plan` for inspection only. Packages containing a source checkout, symlinks, live state or caches must be built first. Source installation refuses an existing folder or lifecycle record; use the explicit update flow for an existing module.
 
-For a package already placed under `<root>/modules/<id>` with `module.json` beside `package/`, call `core.module_install(module=<id>)`. This is also the retry action after reviewing a failed first install: omit `source` so retained files and data are preserved. TUI Install uses the same operation. Do not substitute a guessed module or root.
+For a package already placed under `<root>/modules/<id>` with `module.json` beside `package/`, call `core.module_install(module=<id>)`. This is also the retry action after reviewing a failed first install: omit `source` so retained files and data are preserved. Do not substitute a guessed module or root.
 
 An installation request already authorizes this installation sequence; do not ask for the same approval again. If the user requested only inspection, explain the actual package and effects before asking whether to install. Packages are trusted code; the child interpreter and SQL namespace checks are not an operating-system sandbox. Do not expand an installation into unrelated host changes or client integration.
 

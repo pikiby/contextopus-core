@@ -27,8 +27,8 @@ def test_native_integrates_only_enabled_prepared_skills_and_supporting_files(tmp
     preview = plan('codex',project,root=root)
     assert preview['module_errors'] == []
     integrate(preview)
-    target = project / '.agents/skills/sample-help'
-    assert (target / 'SKILL.md').read_bytes() == (skill / 'SKILL.md').read_bytes()
+    target = project / '.agents/skills/contextopus-sample-help'
+    assert b'name: contextopus-sample-help' in (target / 'SKILL.md').read_bytes()
     assert (target / 'scripts/help.py').read_text() == 'print("help")\n'
     assert (target / 'asset.bin').read_bytes() == b'\x00\xff'
     manager.disable('sample')
@@ -43,7 +43,7 @@ def test_native_preserves_modified_module_skill_and_rejects_collision(tmp_path):
     manager, skill = setup_module_root(root)
     manager.prepare('sample')
     manager.enable('sample')
-    target = project / '.agents/skills/sample-help/SKILL.md'
+    target = project / '.agents/skills/contextopus-sample-help/SKILL.md'
     target.parent.mkdir(parents=True)
     target.write_text('user skill')
     with pytest.raises(IntegrationConflict, match='collision'):
@@ -73,7 +73,7 @@ def test_native_module_skill_update_and_config_only(tmp_path):
     manager.update('sample', str(replacement))
     preview = plan('codex',project,root=root)
     integrate(preview)
-    assert (project / '.agents/skills/sample-help/scripts/help.py').read_text() == 'print("new help")\n'
+    assert (project / '.agents/skills/contextopus-sample-help/scripts/help.py').read_text() == 'print("new help")\n'
 
 
 
@@ -81,8 +81,8 @@ def test_native_module_skill_update_and_config_only(tmp_path):
 def test_module_skill_names_cannot_case_collide_with_bundled_skills(tmp_path):
     root, project = tmp_path / 'root', tmp_path / 'project'
     manager, skill = setup_module_root(root)
-    skill.rename(skill.with_name('M'))
+    skill.rename(skill.with_name('MODULES'))
     manager.prepare('sample')
     manager.enable('sample')
-    with pytest.raises(IntegrationConflict, match='name collision: M'):
+    with pytest.raises(IntegrationConflict, match='name collision: MODULES'):
         plan('codex', project, root=root)

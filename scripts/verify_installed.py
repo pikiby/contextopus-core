@@ -102,7 +102,7 @@ def verify(expected_version, prefix=None, module_example=None):
     subprocess.run([str(executable), '--help'], check=True, stdout=subprocess.DEVNULL)
     resources = files('contextopus').joinpath('resources')
     skills = sorted(path.name for path in resources.joinpath('skills').iterdir() if path.is_dir())
-    if skills != ['m']:
+    if skills != ['modules']:
         raise ValueError('Core-only wheel must supply only the module-management skill')
     try:
         workspace_in_core = find_spec('contextopus.modules.workspace') is not None
@@ -125,7 +125,7 @@ def verify(expected_version, prefix=None, module_example=None):
                 raise ValueError('Installed module operation registry is stale')
             if app.query('core.modules') != [] or app.module_storage.path.exists():
                 raise ValueError('Discovery unexpectedly created module storage')
-            if planned_skills(root) != {'m'}:
+            if planned_skills(root) != {'contextopus-modules'}:
                 raise ValueError('Bare Core integration preview contains module-owned skills')
             if app.resources.providers._entries:
                 raise ValueError('Resource inspection unexpectedly loaded an embedding model')

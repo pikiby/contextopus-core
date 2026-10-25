@@ -65,7 +65,7 @@ def choose(args, input_fn=input):
             entered = input_fn(f"New data directory [{default_root()}]: ").strip()
             args.root = Path(entered) if entered else default_root()
         if args.client is None:
-            print("Native client (optional): 0 none, 1 Codex, 2 Claude Code, 3 OpenCode, 4 Crush, 5 Hermes")
+            print("Native client (optional): 0 none, 1 Codex, 2 Claude Code, 3 Cursor, 4 OpenCode, 5 Crush, 6 Hermes")
             print("Enter names or numbers separated by commas; blank means none.")
             choices = {str(index + 1): name for index, name in enumerate(CLIENTS)}
             choices.update({name: name for name in CLIENTS})

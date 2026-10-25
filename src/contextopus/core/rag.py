@@ -411,11 +411,16 @@ class RagIndex:
         purpose=None,
         task_id=None,
         candidate_limit=None,
+        object_ids=None,
     ):
         if limit is not None and (type(limit) is not int or not 1 <= limit <= 1000):
             raise ValueError("Invalid result limit")
         if candidate_limit is not None and (type(candidate_limit) is not int or not 1 <= candidate_limit <= 100000):
             raise ValueError('candidate_limit must be between 1 and 100000')
+        if object_ids is not None:
+            if not isinstance(object_ids, list) or any(not isinstance(x, str) for x in object_ids):
+                raise ValueError("object_ids must be a list of strings")
+            object_ids = set(object_ids)
         inactive_modules = self.inactive_modules()
         if module in inactive_modules:
             raise ValueError('Module ' + module + ' is ' + inactive_modules[module] +
@@ -448,6 +453,7 @@ class RagIndex:
                 scope={'module':module, 'contexts':[collection] if collection is not None else None,
                        'settings_context':collection if module else None, 'object_type':object_type,
                        'status':status, 'include_archived':include_archived,
+                       'object_ids':sorted(object_ids) if object_ids is not None else None,
                        'include':snapshot['values']['include'], 'exclude':snapshot['values']['exclude']},
                 candidate_pool_truncated=False)
             if inactive_modules:
@@ -479,6 +485,8 @@ class RagIndex:
         }
         eligible = []
         for row in rows:
+            if object_ids is not None and row["object_id"] not in object_ids:
+                continue
             key = DocumentKey(row["module"], row["collection"], row["object_id"])
             if row["module"] in source_documents:
                 source_document = source_documents[row["module"]].get(key)

@@ -13,7 +13,7 @@ class Element {
   focus() {}
   scrollIntoView() {}
 }
-const ids = ['nav','nav-status','refresh','run-search','load-more','records','detail','heading','hint','count','warnings','collection','type','search','search-form','text-mode','semantic-mode','search-hint'];
+const ids = ['metadata-filters','nav','nav-status','refresh','run-search','load-more','records','detail','heading','hint','count','warnings','collection','type','search','search-form','text-mode','semantic-mode','search-hint'];
 const elements = Object.fromEntries(ids.map(id => [id, new Element(['collection','type'].includes(id) ? 'select' : 'div')]));
 const calls = [];
 let delayed = false;
@@ -24,7 +24,7 @@ const fetch = async path => {
   calls.push(path);
   const url = new URL(path, 'http://localhost');
   if(url.pathname === '/api/modules') return response({modules:[{id:'workspace',title:'Workspace',available:true},{id:'broken',title:'Broken',available:false,error:'Not installed'}]});
-  if(url.pathname === '/api/collections') return response({collections:[{id:'demo',title:'Actual collection'}]});
+  if(url.pathname === '/api/collections') return response({collections:[{id:'demo',title:'Actual collection'}],filters:[{name:'source',label:'Source / client'}]});
   if(url.pathname === '/api/record') {
     if(failRecord) {failRecord=false;return {ok:false,json:async()=>({error:'Temporary record error'})};}
     const offset=Number(url.searchParams.get('offset') || 0);
@@ -41,6 +41,13 @@ const allText = el => [el.textContent,...(el.children || []).map(allText)].join(
 (async()=>{
   await wait(20);
   assert.equal(elements.heading.textContent,'Workspace');
+  const sourceFilter=elements['metadata-filters'].children[0].children[1];
+  sourceFilter.value='claude-code';
+  sourceFilter.handlers.change();
+  await wait(10);
+  assert(calls.some(path=>JSON.parse(new URL(path,'http://localhost').searchParams.get('filters') || '{}').source==='claude-code'));
+  sourceFilter.value='';
+
   assert.equal(elements.records.children.length,1);
   assert.match(allText(elements.detail),/Actual content/);
   assert.match(allText(elements.detail),/<script>alert\(1\)<\/script>/);
@@ -84,5 +91,5 @@ const allText = el => [el.textContent,...(el.children || []).map(allText)].join(
   elements.refresh.handlers.click();
   await wait(20);
   assert.equal(elements['run-search'].disabled,true);
-  console.log('PASS: live load, full content, safe text, semantic submit, stale request isolation, unavailable modules, refresh, semantic diagnostics, folded metadata, content pagination and paging retry.');
+  console.log('PASS: module-defined metadata filters, live load, full content, safe text, semantic submit, stale request isolation, unavailable modules, refresh, semantic diagnostics, folded metadata, content pagination and paging retry.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

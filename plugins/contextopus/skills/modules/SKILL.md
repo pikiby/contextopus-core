@@ -1,5 +1,5 @@
 ---
-name: m
+name: modules
 description: Inspect, install, update or disable Contextopus modules placed in the selected root's modules directory.
 ---
 

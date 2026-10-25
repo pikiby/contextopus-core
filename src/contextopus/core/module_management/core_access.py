@@ -233,13 +233,13 @@ class ModuleCoreAccess:
     def _rag(self, method, arguments, deadline):
         if method == "capabilities":
             self._arguments(arguments)
-            return {"search": True, "selection_contract": 2}
+            return {"search": True, "selection_contract": 2, "object_ids": True}
         if method == "search":
             # Child modules use the same settings, grouping and diagnostics as
             # native contributions. The caller cannot widen its module scope.
             self._arguments(arguments, ("query",), (
                 "collection", "object_type", "status", "include_archived",
-                "selection", "purpose", "task_id", "candidate_limit", "module",
+                "selection", "purpose", "task_id", "candidate_limit", "module", "object_ids",
             ))
             self._scope(arguments)
             query = self._text(arguments["query"], "query")

@@ -20,7 +20,7 @@ def parser():
     )
     result.add_argument("--workspace", help="Explicitly selected Workspace")
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init", "status", "doctor", "mcp", "tui"):
+    for name in ("init", "status", "doctor", "mcp"):
         commands.add_parser(name)
     web = commands.add_parser("web", help="Browse enabled modules through a local read-only web interface")
     web.add_argument("--port", type=int, default=41860)
@@ -82,8 +82,12 @@ def parser():
     relocation.add_argument("--apply", action="store_true")
     integration = commands.add_parser("integrate")
     integration.add_argument(
-        "client", choices=("codex", "claude-code", "opencode", "crush", "hermes")
+        "client", choices=("codex", "claude-code", "cursor", "opencode", "crush", "hermes")
     )
+    integration.add_argument('--skill', action='append', dest='selected_skills', help='Deliver only this canonical skill; repeat; omitted reuses saved selection')
+    integration.add_argument('--all-skills', action='store_true', help='Reset selection to all enabled entrypoints')
+    integration.add_argument('--alias', action='append', default=None, help='Canonical name=installed name; replaces saved alias map when supplied')
+    integration.add_argument('--reset-aliases', action='store_true', help='Clear user aliases and use full names')
     integration_scope = integration.add_mutually_exclusive_group(required=True)
     integration_scope.add_argument("--project", type=Path)
     integration_scope.add_argument(
@@ -200,6 +204,20 @@ def main(argv=None):
         if args.command == "integrate":
             from contextopus.integrations import plan, integrate
 
+            if args.all_skills and args.selected_skills:
+                raise ValueError('--all-skills and --skill are mutually exclusive')
+            if args.reset_aliases and args.alias:
+                raise ValueError('--reset-aliases and --alias are mutually exclusive')
+            aliases = {} if args.reset_aliases else None
+            if args.alias is not None:
+                aliases = {}
+                for assignment in args.alias:
+                    if assignment.count('=') != 1:
+                        raise ValueError('--alias requires canonical-name=installed-name')
+                    key, value = assignment.split('=', 1)
+                    if key in aliases:
+                        raise ValueError('Duplicate alias definition: ' + key)
+                    aliases[key] = value
             preview = plan(
                 args.client,
                 Path.home() if args.user else args.project,
@@ -209,6 +227,8 @@ def main(argv=None):
                 legacy_skills=args.legacy_skills,
                 root=root,
                 hermes_home=args.hermes_home,
+                selected_skills=[] if args.all_skills else args.selected_skills,
+                skill_aliases=aliases,
             )
             # Configuration content may contain credentials from other entries.
             emit(
@@ -217,6 +237,7 @@ def main(argv=None):
                     "removals": preview.get("removals", []),
                     "preserved": preview.get("preserved", []),
                     "module_errors": preview.get("module_errors", []),
+                    "entrypoints": preview.get("entrypoints", []),
                     "files": [
                         {"path": item["path"], "changed": item["changed"]}
                         for item in preview["writes"]
@@ -247,14 +268,6 @@ def main(argv=None):
             from contextopus.interfaces.web import run
             try:
                 run(app, port=args.port)
-            finally:
-                app.close()
-            return 0
-        if args.command == "tui":
-            from contextopus.interfaces.tui import run
-
-            try:
-                run(app)
             finally:
                 app.close()
             return 0

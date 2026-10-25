@@ -8,7 +8,7 @@
 apply it across tasks and tools, and refine it as you work.
 
 Context can include knowledge, instructions, skills, reusable commands, agent
-roles and session history. Contextopus helps people and agents find relevant
+roles and session descriptions. Contextopus helps people and agents find relevant
 material, read it and adapt it to the task. Reuse reduces repeated research,
 generation and explanations from the user. Saved context can be corrected,
 connected and gradually improved.
@@ -29,7 +29,7 @@ not need to build its own retrieval system.
   work was done, check where a decision came from and use the findings in a new
   task.
 
-The same foundation can support modules for managing skills and finding reusable commands. Choose the modules that fit your work.
+Skill Catalog organizes installed skills and records verified aliases, overlapping functionality and source locations. Choose the modules that fit your work.
 
 <p align="center">
   <a href="#install-contextopus"><strong>Install Contextopus</strong></a> ·
@@ -39,8 +39,8 @@ The same foundation can support modules for managing skills and finding reusable
   <a href="docs/development.md">Development</a>
 </p>
 
-> **Version 1.6.0** adds shared file documents, instructions and a web library for optional modules.
-> [Release downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.6.0) · [Installation guide](distribution/README.md).
+> **Version 1.7.0** adds per-client installation packages, structured procedure responses and the shared module Library.
+> [Release downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.7.0) · [Installation guide](distribution/README.md).
 
 ## Choose your modules
 
@@ -76,12 +76,22 @@ checks reject outdated edits before they overwrite newer work.
 
 ### Session Search
 
-**Recover how a problem was solved.** Search real Codex conversation transcripts
-for decisions, useful commands, errors and explanations. Follow a match back to
-its source session and surrounding messages to check the details before reusing
-them in a new task.
+**Find past work by meaning.** Search agent-maintained session descriptions across
+coding assistants, filtered by source, project, context, tags and work status.
+Cards are Markdown with YAML and links to original sessions and related knowledge.
+Update them explicitly with a skill or through your working instructions; no
+transcript watcher, timer or bulk conversation embeddings are required.
 
 [Session Search repository and guide](https://github.com/pikiby/contextopus-session-search#readme)
+
+### Skill Catalog
+
+**Find and organize the skills you already have.** Register their locations, describe
+them in linked Markdown and search by meaning or installation metadata. Compare
+overlapping skills and record verified aliases without changing source packages.
+The module does not synchronize skills between clients.
+
+[Skill Catalog repository and guide](https://github.com/pikiby/contextopus-skills#readme)
 
 ### Agents
 
@@ -97,49 +107,34 @@ shared RAG helps discover them without duplicating a search service.
 
 ## Install Contextopus
 
-### Existing starter bundle (1.5.0)
+### Choose your coding assistant
 
-The existing 1.5.0 starter ZIP combines **Core + Workspace + Session Search**. Extract it,
-open the `contextopus` folder in a terminal, and run:
+Download a [release package](https://github.com/pikiby/contextopus-core/releases/tag/v1.7.0) for your platform. The distribution provides a separate installation package for **Codex,
+Claude Code, Cursor, Hermes, OpenCode and Crush**. Each uses the same Core installer
+and persistent data folder. Claude Code, Cursor, Codex and Hermes packages include
+plugin skills and MCP configuration; OpenCode and Crush use native file integration.
 
-**Linux or macOS**
+Extract your client package and run `sh install.sh` on Linux/macOS or
+`powershell -File install.ps1` on Windows. Review the data folder, modules and model
+setup. An existing Core is reused; a fresh installation can obtain Python through uv.
+Reload your client and verify a real MCP read.
 
-```sh
-sh install.sh
-```
+Package and integration tests do not establish compatibility with every client version.
+[Package formats and verification limits](docs/client-packages.md).
 
-**Windows PowerShell**
+### Choose your modules
 
-```powershell
-.\install.ps1
-```
+Install Core alone or select bundled modules with `--module ID`; use
+`--module none` for Core only. Defer embedding downloads with `--skip-model`.
+Semantic search requires completing model setup later.
 
-Choose a data folder and optional coding assistants, review the plan and confirm.
-The installer prepares both modules and local CPU embeddings. Git and internet
-access are required for dependencies and model downloads.
-
-Download [contextopus-starter-1.5.0.zip](https://github.com/pikiby/contextopus-core/releases/download/v1.5.0/contextopus-starter-1.5.0.zip) and verify its checksum.
-[Prerequisites and options](distribution/README.md).
-
-### Choose only what you need
-
-Download [Core 1.6.0](https://github.com/pikiby/contextopus-core/releases/download/v1.6.0/contextopus-core-1.6.0.zip),
-extract it, and run the same `install.sh` or `install.ps1`. This smaller bundle
-installs Core with local CPU embeddings and your choice of clients.
-
-For Agents, install Core 1.6+ using the smaller bundle below.
-
-Add [Workspace](https://github.com/pikiby/contextopus-workspace#readme) or
-[Session Search](https://github.com/pikiby/contextopus-session-search#readme) or
-[Agents](https://github.com/pikiby/contextopus-agents#readme)
-later through its installer, or install a verified module ZIP directly:
+For an existing Core, install a verified module through its normal lifecycle:
 
 ```console
 contextopus modules install MODULE_ID --source /path/to/module.zip
 ```
 
-The full starter also supports `--module none` for Core only, or repeated
-`--module ID` flags for a subset. [Source installation and model setup](docs/development.md#install-from-source).
+[Installer details](distribution/README.md) · [Build from source](docs/development.md)
 
 ## Connect a coding assistant
 
@@ -161,6 +156,15 @@ contextopus integrate codex --user --apply
 
 ```console
 contextopus integrate claude-code --user --apply
+```
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+```console
+contextopus integrate cursor --user --apply
 ```
 
 </details>
@@ -206,11 +210,12 @@ project-scoped connections are covered in the
 
 ```mermaid
 flowchart TD
-    Clients["Coding assistants · CLI · TUI"] --> MCP[Local MCP owner]
+    Clients["Coding assistants · CLI · Web"] --> MCP[Local MCP owner]
     MCP --> Core["Core: operations · model · RAG · storage"]
     Core --> Workspace[Workspace module]
     Core --> Sessions[Session Search module]
     Core --> Agents[Agents module]
+    Core --> Skills[Skill Catalog module]
     Core --> Custom[User modules]
 ```
 
@@ -220,7 +225,7 @@ code stays separate from mutable data and configuration. Discovery reads manifes
 explicit install/update actions prepare dependencies and migrations. Disable
 removes the contribution while retaining data.
 
-The TUI exposes status, model/search settings and module controls.
+The web library displays enabled modules and searchable records. CLI and MCP expose status, settings and module controls.
 [Architecture](docs/architecture.md) · [Module lifecycle and SDK](docs/modules.md) ·
 [Search selection](docs/search-selection.md).
 
@@ -228,7 +233,7 @@ The TUI exposes status, model/search settings and module controls.
 
 Core builds and tests from this repository alone. Module repositories own their
 module tests and artifacts; cross-repository checks take explicit Core/module
-inputs. Core's wheel and client ZIPs contain the `m` skill only.
+inputs. Core's wheel contains the `modules` entrypoint. Client packages also include skills from their explicitly bundled modules.
 
 - [Build, tests and installed-wheel verification](docs/development.md)
 - [Architecture and data layout](docs/architecture.md)
@@ -245,3 +250,7 @@ installation or compatibility with every client version.
 ## License
 
 [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+
+## Current release
+
+[1.7.0: Client packages and a shared web library](docs/releases/1.7.0.md) · [Downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.7.0)

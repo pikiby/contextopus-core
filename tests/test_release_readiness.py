@@ -33,65 +33,27 @@ def test_canonical_release_versions_and_documentation_agree():
 
 
 def test_release_bundles_hash_only_the_exact_asset_set(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location('build_release_under_test', ROOT / 'scripts/build_release.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    monkeypatch.setattr(module, 'ROOT', tmp_path)
-    monkeypatch.setattr(module, 'VERSION', '1.3.0')
-    def core_installer(destination, wheel):
-        assert wheel.name == 'contextopus_core-1.3.0-py3-none-any.whl'
-        (destination / 'contextopus-core-1.3.0.zip').write_bytes(b'Core installer fixture')
-    monkeypatch.setattr(module, 'build_core_installer', core_installer)
-    destination = tmp_path / 'dist'
-    destination.mkdir()
-    # Build orchestration must not include another candidate merely because its
-    # filename contains the same version. Runtime archive contents are verified
-    # independently by verify_release against the real artifacts.
-    (destination / 'contextopus_core-1.3.0-py3-none-any.whl').write_bytes(b'wheel fixture')
-    (destination / 'contextopus_core-1.3.0.tar.gz').write_bytes(b'source fixture')
-    (destination / 'unrelated-1.3.0-candidate.zip').write_bytes(b'not a release asset')
-    for name in ('LICENSE', 'NOTICE'):
-        (tmp_path / name).write_text(name)
-    core_skill = tmp_path / 'src/contextopus/resources/skills/m/SKILL.md'
-    core_skill.parent.mkdir(parents=True)
-    core_skill.write_text('Core module management')
-    guide = tmp_path / 'docs/integrations/hermes.md'
-    guide.parent.mkdir(parents=True)
-    guide.write_text('Reviewed Hermes native integration guide')
-    module.main()
-    entries = (destination / 'SHA256SUMS').read_text().splitlines()
-    assert len(entries) == 8
-    assert {line.split('  ')[1] for line in entries} == {
-        'contextopus_core-1.3.0-py3-none-any.whl',
-        'contextopus_core-1.3.0.tar.gz',
-        'contextopus-core-1.3.0.zip',
-        *(f'contextopus-{client}-1.3.0.zip' for client in
-          ('codex', 'claude-code', 'opencode', 'crush', 'hermes')),
-    }
-    assert all('candidate' not in line for line in entries)
+    spec=importlib.util.spec_from_file_location('release_test', ROOT/'scripts/build_release.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    monkeypatch.setattr(module,'VERSION','1.3.0')
+    destination=tmp_path/'dist';destination.mkdir()
+    for name in ('contextopus_core-1.3.0-py3-none-any.whl','contextopus_core-1.3.0.tar.gz','unrelated.zip'):
+        (destination/name).write_bytes(b'fixture')
+    def core(dest,wheel,modules=()):
+        assert modules==[tmp_path/'workspace']
+        (dest/'contextopus-core-1.3.0.zip').write_bytes(b'starter')
+    def client(starter,output,name,platform):
+        assert starter.read_bytes()==b'starter'
+        output.write_bytes((name+platform).encode())
+    monkeypatch.setattr(module,'build_core_installer',core)
+    monkeypatch.setattr(module,'build_client_installer',client)
+    module.main(destination,[tmp_path/'workspace'])
+    entries=(destination/'SHA256SUMS').read_text().splitlines()
+    assert len(entries)==15
+    assert not any('unrelated' in line for line in entries)
     for line in entries:
-        checksum, name = line.split('  ')
-        assert checksum == hashlib.sha256((destination / name).read_bytes()).hexdigest()
-    with zipfile.ZipFile(destination / 'contextopus-codex-1.3.0.zip') as archive:
-        assert archive.read('skills/m/SKILL.md') == core_skill.read_bytes()
-        instructions = archive.read('INSTALL.txt').decode()
-        assert 'guide, read, write' in instructions
-        assert 'CONTEXTOPUS_LEGACY_TOOLS=1' in instructions
-        assert 'optional modules from their own repositories' in instructions
-        assert 'modules install ID' in instructions
-    with zipfile.ZipFile(destination / 'contextopus-hermes-1.3.0.zip') as archive:
-        assert archive.read('skills/m/SKILL.md') == core_skill.read_bytes()
-        assert archive.read('HERMES.md') == guide.read_bytes()
-        instructions = archive.read('INSTALL.txt').decode()
-        assert 'contextopus integrate hermes --user --apply' in instructions
-        assert '$HERMES_HOME/config.yaml' in instructions
-        assert '~/.hermes on Linux/macOS' in instructions
-        assert '%LOCALAPPDATA%/hermes on Windows' in instructions
-        assert 'fallback ~/AppData/Local/hermes' in instructions
-        assert 'HERMES_DATA_DIR_SUFFIX' in instructions
-        assert '$HERMES_HOME/skills/' in instructions
-        assert '--hermes-home <directory>' in instructions
-        assert '--project' not in instructions
+        checksum,name=line.split('  ')
+        assert checksum==hashlib.sha256((destination/name).read_bytes()).hexdigest()
 
 
 def test_bundle_build_requires_matching_runtime_artifacts(tmp_path, monkeypatch):
