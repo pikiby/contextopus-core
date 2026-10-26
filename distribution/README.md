@@ -1,10 +1,10 @@
 # Install Contextopus
 
 Choose the package for **Codex, Claude Code, Cursor, Hermes, OpenCode or Crush**.
-Core 1.7 packages use the same runtime and data directory. Download the archive
+Core 1.8 packages use the same runtime and data directory. Download the archive
 for your client and platform from the release page.
 
-1. Verify the release checksum and extract your package.
+1. Download the package from the official release and extract it.
 2. Run `sh install.sh` on Linux/macOS or `powershell -File install.ps1` on Windows.
 3. Review the data directory, modules and model setup; confirm installation.
 4. Install the included native plugin where supported, reload the client and
