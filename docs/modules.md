@@ -10,6 +10,13 @@ A release consists of `module.json` and `package/`. Mutable user files live in
 Core stores desired enablement and prepared content digests under
 `core/configuration/modules.json`, so rebuilding the application retains state.
 
+The child `core.instructions.bind(metadata=..., role=..., reference=...)` returns
+updated metadata and the complete resolved instruction chain without writing the
+owning document. The module owns its revision checks, review policy and persistence.
+Roles are document-local labels, not dependencies on modules of the same name.
+The same read-only helper is available as the `core.instructions_bind` operation.
+Module-specific procedures remain in each enabled module; Core does not embed them.
+
 Modules with Markdown records can use the shared child `core.documents` API for
 scoped files, revision checks and reconciliation plans. Shared instruction bodies
 live in `core/instructions/` and are selected through YAML wikilinks, rather than

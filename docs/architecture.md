@@ -34,7 +34,7 @@ Persistent data belongs in an explicit root or the platform's user-data director
 | GraphFrontier | Future integration; no readiness claim |
 | Skills registry | Proposed idea; not an implemented module |
 
-Relocation copies files, checks a manifest, validates SQLite where applicable and leaves a receipt/redirect. Source deletion requires separate authorization. Settings previews identify consequences; saving does not silently reindex existing data.
+Relocation copies files, checks a manifest, validates SQLite where applicable and leaves a destination receipt. The source remains frozen; it never redirects requests. Select the destination explicitly and rebind/restart the service there. Old redirect markers also reject access instead of silently opening another root. Source deletion requires separate authorization. Settings previews identify consequences; saving does not silently reindex existing data.
 
 Each new relocation keeps its original SQLite bytes and sidecars in
 `.backups/relocations/<snapshot-id>/`, with the identity retained across retries.

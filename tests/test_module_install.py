@@ -505,7 +505,7 @@ def test_mcp_installs_folder_module_then_saves_and_reads_catalog(tmp_path, monke
         mcp = server.create_server(tmp_path)
         def call(tool, operation, arguments=None):
             return value(asyncio.run(mcp.call_tool(tool,{'operation':operation,
-                'arguments':arguments or {},'work_root':str(tmp_path)})))
+                'arguments':arguments or {}})))
         assert call('read','core.modules')[0]['state'] == 'storage_pending'
         assert call('write','core.module_install',{'module':'sample'})['state'] == 'enabled'
         assert call('write','sample.save',{'id':'mcp-session','title':'Saved through MCP'})['rowcount'] == 1

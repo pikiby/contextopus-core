@@ -37,7 +37,7 @@ def test_application_registry_external_operation_and_no_model_status(tmp_path):
             app.execute("third.query")
 
 
-def test_relocation_binary_pending_proposal_layout_alias_and_redirect(tmp_path):
+def test_relocation_binary_pending_proposal_layout_alias_and_explicit_root(tmp_path):
     source = tmp_path / "old"
     source.mkdir()
     destination = tmp_path / "new"
@@ -64,7 +64,10 @@ def test_relocation_binary_pending_proposal_layout_alias_and_redirect(tmp_path):
     assert (source / ".pcw").is_file()
     with pytest.raises((NotADirectoryError, FileExistsError)):
         (source / ".pcw/.control/alpha").mkdir(parents=True, exist_ok=True)
-    assert StorageLayout.resolve(source).root == destination
+    assert not (source / '.contextopus-redirect.json').exists()
+    with pytest.raises(ValueError, match='Select the destination explicitly'):
+        StorageLayout.resolve(source)
+    assert StorageLayout.resolve(destination).root == destination
     assert (
         relocation.checked_alias(StorageLayout(destination), backup)
         == destination / "modules/workspace/control/alpha/backups/id/workspace"

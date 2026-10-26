@@ -30,7 +30,7 @@ def enrich_procedure(result, registry, normalize):
             definitions.append(registry._describe_spec(spec))
     result["operations"] = definitions
     result["call_contract"] = {
-        "coordinates": "Keep work_root and context outside arguments; reuse the selected coordinates.",
+        "coordinates": "Pass the selected context name outside arguments. Storage is configured by the server; do not pass a filesystem path.",
         "parameters": "For read/write, put operation parameters inside arguments. For finish, pass them directly to the finish tool.",
         "instruction": "Use the attached definitions. Obtain a missing signature through guide(operation=...). A signature does not replace a procedure or grant approval.",
     }

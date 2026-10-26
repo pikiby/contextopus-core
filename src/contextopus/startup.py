@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 from importlib import metadata, resources as package_resources
 from pathlib import Path
-from pydantic import ConfigDict, create_model
+from typing import Annotated
+from pydantic import ConfigDict, Field, create_model
 from .core.operations import OperationRegistry, OperationSpec
 from .core.resources import ProcessResources
 from .core.storage import StorageLayout
@@ -82,18 +83,22 @@ class Application:
                         lambda **kw: browse_instructions(self.instructions, **kw),
                         {"action": (str, ...), "collection": (str, ""),
                          "query": (str, ""), "mode": (str, "text"), "type": (str, ""),
-                         "offset": (int, 0), "limit": (int, 40), "id": (str, "")})
+                         "offset": (Annotated[int, Field(ge=0, le=100000)], 0),
+                         "limit": (Annotated[int, Field(ge=1, le=100)], 40), "id": (str, "")})
         self._operation("core.instructions_list", "query", self.instructions.list)
         self._operation("core.instructions_read", "query", self.instructions.read,
                         {"reference": (str, ...)})
         self._operation("core.instructions_resolve", "query", self.instructions.resolve,
                         {"references": (list[str], ...)})
+        self._operation("core.instructions_bind", "query", self.instructions.bind,
+                        {"metadata": (dict, ...), "role": (str, ...), "reference": (str, ...)})
         self._operation("core.instructions_save", "execute", self.instructions.save,
                         {"path": (str, ...), "metadata": (dict, ...), "content": (str, ...),
                          "expected_revision": (str | None, None)})
         self._operation("core.instructions_reconcile", "execute", self.instructions.reconcile)
         self._operation("core.instructions_search", "query", self.instructions.search,
-                        {"query": (str, ...), "limit": (int | None, None),
+                        {"query": (str, ...),
+                         "limit": (Annotated[int, Field(ge=1, le=1000)] | None, None),
                          "selection": (dict | None, None), "output": (str, "materials")})
         self._operation("core.status", "query", self.services.status)
         self._operation(
@@ -108,10 +113,10 @@ class Application:
                 "status": (str | None, None),
                 "include_archived": (bool | None, None),
                 "distance": (float | None, None),
-                "limit": (int | None, None),
+                "limit": (Annotated[int, Field(ge=1, le=1000)] | None, None),
                 "selection": (dict | None, None),
                 "output": (str, "materials"),
-                "candidate_limit": (int | None, None),
+                "candidate_limit": (Annotated[int, Field(ge=1, le=100000)] | None, None),
                 "purpose": (str | None, None),
                 "task_id": (str | None, None),
             },
@@ -208,7 +213,9 @@ class Application:
         self._operation("core.search_events", "query", history.query, {
             "since": (str | None, None), "until": (str | None, None),
             "context": (str | None, None), "task_id": (str | None, None),
-            "instructions_revision": (str | None, None), "offset": (int, 0), "limit": (int, 50)})
+            "instructions_revision": (str | None, None),
+            "offset": (Annotated[int, Field(ge=0)], 0),
+            "limit": (Annotated[int, Field(ge=1, le=100)], 50)})
         self._operation("core.search_event", "query", history.read, {"event_id": (str, ...)})
         def replay(event_id, selection, relevant_keys=None):
             self._refresh_algorithms()

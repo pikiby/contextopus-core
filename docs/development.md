@@ -5,8 +5,8 @@ module SDK, generic examples and the `m` skill. Workspace and Session Search
 own their source, domain tests, procedures, skills and module artifacts in
 independent repositories. No sibling checkout is required for Core tests or builds.
 
-Core **1.7.0**, Workspace, Agents, Session Search and Skill Catalog have independent release artifacts.
-Agents **0.3.0** requires Core `>=1.6,<2`; consult each module manifest for its
+Core **1.8.0**, Workspace, Agents, Session Search and Skill Catalog have independent release artifacts.
+Workspace **1.8.0** requires Core `>=1.8,<2`; consult each module manifest for its
 compatibility range. Published 1.4.0 assets describe
 the earlier combined distribution. Use fresh build output directories and verify
 the exact artifacts before installation.
@@ -63,7 +63,7 @@ also supports an explicitly configured API provider and compatible tokenizer;
 see [model setup](architecture.md#explicit-embedding-setup).
 
 After verifying the selected root and installed modules, bind the default root
-and open the terminal interface:
+and open the web interface:
 
 ```console
 contextopus root --set /absolute/path/to/contextopus-data
@@ -107,10 +107,12 @@ uv run --locked python scripts/build_release.py --output-directory /absolute/pat
 uv run --locked python scripts/verify_release.py --output-directory /absolute/path/to/new-core-candidate
 ```
 
-The exact asset set is the Core wheel/source archive, five client ZIPs and
-`SHA256SUMS`. Client bundles contain Core's `m` skill, license files and connection
-instructions. Optional modules and their `w` or session skills are obtained from
-their own repositories and installed through the generic module lifecycle.
+The public asset set is the Core wheel/source archive, one starter ZIP and twelve
+client ZIPs (six clients, Unix and Windows). `SHA256SUMS` is a local verification
+input and is not uploaded as a release asset. Pass each selected module archive
+with `--module` to include it in the starter and client bundles; the coordinated
+release includes all four optional modules. They are installed through the generic
+module lifecycle and remain available independently from their own repositories.
 `verify_release.py` checks source identity, archive membership, license metadata,
 CLI entrypoints, resources and hashes. It rejects optional module code in Core
 artifacts.
@@ -122,7 +124,7 @@ installation just to verify packaging. Run its Python interpreter in isolated
 mode against this checkout's verifier:
 
 ```console
-/path/to/disposable/bin/python -I scripts/verify_installed.py --expected-version 1.5.0 --prefix /path/to/disposable
+/path/to/disposable/bin/python -I scripts/verify_installed.py --expected-version 1.8.0 --prefix /path/to/disposable
 ```
 
 On Windows use the environment's `Scripts/python.exe`. The verifier checks the

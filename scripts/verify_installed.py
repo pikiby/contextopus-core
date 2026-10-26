@@ -55,7 +55,7 @@ def module_smoke(root, example):
                 mcp = server.create_server(root)
             def call(tool, operation, arguments=None):
                 return decode(asyncio.run(mcp.call_tool(tool, {'operation': operation,
-                    'arguments': arguments or {}, 'work_root': str(root)})))
+                    'arguments': arguments or {}})))
             return actions(call)
         finally:
             atexit.unregister(owner.close)

@@ -114,21 +114,15 @@ class StorageLayout:
 
     @classmethod
     def resolve(cls, root):
+        """Open the requested root without following relocation destinations."""
         root = Path(root).expanduser().resolve()
-        seen = set()
-        while (root / ".contextopus-redirect.json").is_file():
-            if root in seen:
-                raise ValueError("Relocation redirect loop")
-            seen.add(root)
-            record = json.loads((root / ".contextopus-redirect.json").read_text())
-            target = Path(record["destination"]).resolve()
-            receipt = target / ".contextopus-receipt.json"
-            if (
-                not receipt.is_file()
-                or json.loads(receipt.read_text()).get("revision") != record["revision"]
-            ):
-                raise ValueError("Relocation receipt is absent or mismatched")
-            root = target
+        freeze = root / ".contextopus-freeze.json"
+        # Old markers only retire their source; they never select another root.
+        if (root / ".contextopus-redirect.json").exists() or (
+            freeze.is_file()
+            and json.loads(freeze.read_text(encoding="utf-8")).get("state") == "complete"
+        ):
+            raise ValueError("This root was relocated. Select the destination explicitly; automatic root redirects are not supported.")
         return cls(root)
 
 

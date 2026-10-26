@@ -2,7 +2,7 @@
 
 (() => {
   const $ = id => document.getElementById(id);
-  const state = {modules: [], module: '', mode: 'text', query: '', records: [], selected: null, total: null, hasMore: false};
+  const state = {modules: [], module: '', views: [], mode: 'text', query: '', records: [], selected: null, total: null, hasMore: false};
   const requests = new Map();
   const metadataInputs = new Map();
   let debounce;
@@ -78,10 +78,29 @@
     }
   }
   function resetFilters() {
+    state.views = [];
+    renderViews();
     metadataInputs.clear();
     $('metadata-filters').replaceChildren();
     $('collection').replaceChildren(new Option('All collections', ''));
     $('type').replaceChildren(new Option('All types', ''));
+  }
+  function renderViews() {
+    $('views').replaceChildren();
+    $('views').hidden = !state.views.length;
+    for (const view of state.views) {
+      const active = $('type').value === view.type;
+      const button = node('button', view.title, 'mode' + (active ? ' active' : ''));
+      button.type = 'button';
+      button.setAttribute('aria-pressed', String(active));
+      button.addEventListener('click', () => {
+        updateTypes([view.type]);
+        $('type').value = view.type;
+        renderViews();
+        loadRecords();
+      });
+      $('views').append(button);
+    }
   }
   async function loadModules() {
     const version = ++moduleVersion;
@@ -110,7 +129,7 @@
         resetFilters();
         $('load-more').hidden = true;
       } else {
-        await selectModule(selected?.id || state.modules.find(item => item.available !== false)?.id || state.modules[0].id, true);
+        await selectModule(selected?.id || state.modules.find(item => item.available !== false)?.id || state.modules[0].id, Boolean(selected));
       }
     } catch (error) {
       if (!cancelled(error) && version === moduleVersion) {
@@ -171,8 +190,11 @@
       }
       for (const collection of result.collections || []) $('collection').add(new Option(collection.title || collection.id, collection.id));
       if ([...$('collection').options].some(option => option.value === previousCollection)) $('collection').value = previousCollection;
-      if (previousType) $('type').add(new Option(previousType, previousType));
-      $('type').value = previousType;
+      state.views = (result.views || []).filter(view => typeof view.title === 'string' && typeof view.type === 'string');
+      const selectedType = preserveFilters ? previousType : state.views[0]?.type || '';
+      updateTypes([selectedType, ...state.views.map(view => view.type)]);
+      $('type').value = selectedType;
+      renderViews();
       await loadRecords();
     } catch (error) {
       if (!cancelled(error) && version === selectionVersion) {
@@ -334,7 +356,13 @@
     for (const [name, value] of Object.entries(fields)) {
       const pair = node('div'); pair.append(node('dt', name), node('dd', displayValue(value))); metadata.append(pair);
     }
-    detail.append(metadata, markdown(record.content));
+    detail.append(metadata);
+    for (const group of record.link_groups || []) {
+      detail.append(node('h3', group.title, 'section-title'));
+      if (!group.links?.length) detail.append(node('p', group.empty_message || 'No linked records.', 'muted'));
+      for (const link of group.links || []) detail.append(recordLink(link));
+    }
+    detail.append(markdown(record.content));
     const pagination = record.metadata?.pagination;
     if (pagination && typeof pagination === 'object') {
       const offset = Number.isInteger(pagination.offset) && pagination.offset >= 0 ? pagination.offset : 0;
@@ -373,21 +401,23 @@
     detail.append(fullMetadata);
     detail.append(node('h3', 'Connections', 'section-title'));
     if (!record.links?.length) detail.append(node('p', 'No linked records.', 'muted'));
-    for (const link of record.links || []) {
-      const button = node('button', undefined, 'link');
-      button.type = 'button';
-      button.append(node('span', link.title || link.reference || link.key?.[2] || 'Linked record'));
-      if (link.description) button.append(node('small', link.description));
-      if (link.unavailable || !validKey(link.key)) {
-        button.disabled = true;
-        button.append(node('small', (link.unavailable ? 'Unavailable' : 'Reference') + (link.reference ? ' · ' + link.reference : '')));
-      } else {
-        button.append(node('small', link.key.join(' / ') + ' ↗'));
-        button.addEventListener('click', () => openRecord(link.key, true));
-      }
-      detail.append(button);
-    }
+    for (const link of record.links || []) detail.append(recordLink(link));
     if (record.path) detail.append(node('h3', 'Source', 'section-title'), node('div', record.path, 'source'));
+  }
+  function recordLink(link) {
+    const button = node('button', undefined, 'link');
+    button.type = 'button';
+    if (link.label) button.append(node('small', link.label, 'eyebrow'));
+    button.append(node('span', link.title || link.reference || link.key?.[2] || 'Linked record'));
+    if (link.description) button.append(node('small', link.description));
+    if (link.unavailable || !validKey(link.key)) {
+      button.disabled = true;
+      button.append(node('small', (link.unavailable ? 'Unavailable' : 'Reference') + (link.reference ? ' · ' + link.reference : '')));
+    } else {
+      button.append(node('small', (link.path || link.key.join(' / ')) + ' ↗'));
+      button.addEventListener('click', () => openRecord(link.key, true));
+    }
+    return button;
   }
   async function openRecord(key, focus = false, offset = 0, limit = 40) {
     if (!validKey(key)) return;
@@ -436,8 +466,8 @@
   });
   $('text-mode').addEventListener('click', () => setMode('text'));
   $('semantic-mode').addEventListener('click', () => setMode('semantic'));
-  $('collection').addEventListener('change', () => {$('type').value = ''; loadRecords();});
-  $('type').addEventListener('change', () => loadRecords());
+  $('collection').addEventListener('change', () => loadRecords());
+  $('type').addEventListener('change', () => {renderViews(); loadRecords();});
   $('load-more').addEventListener('click', () => loadRecords(true));
   $('refresh').addEventListener('click', loadModules);
   loadModules();

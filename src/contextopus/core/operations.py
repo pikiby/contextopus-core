@@ -208,4 +208,12 @@ class OperationRegistry:
             )
             if search_recorded:
                 result = {**result, "search_event_id": ident}
+        if isinstance(result, dict) and isinstance(result.get("next_call"), dict):
+            call = dict(result["next_call"])
+            target = self._operations.get(call.get("operation"))
+            if target is not None:
+                call["definition"] = self._describe_spec(target)
+            else:
+                call["status"] = "unavailable"
+            result = {**result, "next_call": call}
         return result

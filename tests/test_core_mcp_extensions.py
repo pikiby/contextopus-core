@@ -124,7 +124,7 @@ run(sys.argv[1],port=int(sys.argv[2]))
             process.wait(timeout=10)
 
 
-def test_managed_http_relocation_excludes_runtime_artifacts_and_updates_identity(
+def test_managed_http_relocation_requires_explicit_service_rebind(
     tmp_path,
 ):
     source = tmp_path / "old"
@@ -196,14 +196,35 @@ def test_managed_http_relocation_excludes_runtime_artifacts_and_updates_identity
             assert result["status"] == "complete"
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/health") as response:
                 identity = json.loads(response.read())
-            assert identity == {"root": str(destination), "pid": owner_pid}
-            assert json.loads((destination / "runtime/service.json").read_text()) == {
-                "pid": owner_pid,
-                "root": str(destination),
-            }
+            assert identity == {"root": str(source), "pid": owner_pid}
+            assert not (destination / "runtime/service.json").exists()
             assert not (destination / "runtime/service.log").exists()
             assert (runtime / "service.log").exists()
-            assert remote.query("core.doctor")["root"] == str(destination)
+            with pytest.raises(RuntimeError, match='Select the destination explicitly'):
+                remote.query('core.doctor')
+            remote.close()
+            remote = None
+            process.terminate()
+            process.wait(timeout=10)
+            process = subprocess.Popen(
+                [sys.executable, '-c',
+                 'import sys;from contextopus.interfaces.mcp.server import run;run(sys.argv[1],port=int(sys.argv[2]))',
+                 str(destination), str(port)], env=env, stdout=log, stderr=log,
+            )
+            for _ in range(100):
+                if process.poll() is not None:
+                    pytest.fail((runtime / 'service.log').read_text())
+                try:
+                    with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=.2) as response:
+                        if json.loads(response.read())['root'] == str(destination):
+                            break
+                except OSError:
+                    pass
+                time.sleep(.05)
+            else:
+                pytest.fail('Rebound MCP owner did not start')
+            remote = RemoteApplication(destination, endpoint=f'http://127.0.0.1:{port}/mcp')
+            assert remote.query('core.doctor')['root'] == str(destination)
             assert (
                 destination
                 / "modules/workspace/workspace_contexts/alpha/knowledge/topic.md"

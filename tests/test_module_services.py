@@ -307,17 +307,17 @@ def test_changed_source_stops_running_code_without_another_request(running):
     assert running.query('core.modules')[0]['state'] == 'error'
 
 
-def test_new_root_discovered_after_owner_start_activates(tmp_path):
+def test_new_context_after_owner_start_activates_same_root_modules(tmp_path):
     from contextopus.interfaces.mcp.server import ServerOwner
-    root, later = tmp_path / 'initial', tmp_path / 'later'
-    release(later / 'modules/sample')
-    with Application(later, discover=False) as offline:
-        offline.execute('core.module_install', {'module': 'sample'})
+    root = tmp_path / 'initial'
     owner = ServerOwner(root)
     try:
         owner.application()
         owner.resources.start_services()
-        app = owner.application(later)
+        release(root / 'modules/sample')
+        with Application(root, discover=False) as offline:
+            offline.execute('core.module_install', {'module': 'sample'})
+        app = owner.application('another-context')
         assert app.query('sample.status')['version'] == 1
     finally:
         owner.close()

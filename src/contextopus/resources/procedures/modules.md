@@ -4,7 +4,7 @@ operations: ["core.module_disable", "core.module_install", "core.module_source_p
 
 # Manage Contextopus modules
 
-Use this procedure for root-local modules. Resolve the selected Core root and the module named by the user. Query `core.modules` to inspect discovered manifests, compatibility, storage state and errors. Discovery is read-only: listing or discussing a module does not authorize installation. Obtain operation signatures through `guide(operation=...)` only when unknown.
+Use this procedure for modules of the connected Core server. Resolve the module named by the user; the server owns its storage location. Query `core.modules` to inspect discovered manifests, compatibility, storage state and errors. Discovery is read-only: listing or discussing a module does not authorize installation. Obtain operation signatures through `guide(operation=...)` only when unknown.
 
 For an authorized installation from a built folder or ZIP, query `core.module_source_plan(module=<id>, source=<path>)`, inspect the preview, then execute `core.module_install(module=<id>, source=<same path>, source_revision=<preview revision>)`. Core checks portable paths, payload bytes, identity and compatibility, stages a new folder and invokes ordinary dependency, storage and activation steps. The CLI equivalent is `modules install ID --source PATH`; append `--plan` for inspection only. Packages containing a source checkout, symlinks, live state or caches must be built first. Source installation refuses an existing folder or lifecycle record; use the explicit update flow for an existing module.
 

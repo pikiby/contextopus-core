@@ -8,7 +8,7 @@ The bundle includes module-owned skills; optional modules keep their normal life
 No client-specific database, model or copy of Core logic is introduced.
 
 ```console
-python distribution/build.py --core-wheel /path/to/core.whl --module /path/to/workspace --module /path/to/agents --bundle-version 1.7.0 --output /tmp/starter.zip
+python distribution/build.py --core-wheel /path/to/core.whl --module /path/to/workspace --module /path/to/agents --bundle-version 1.8.0 --output /tmp/starter.zip
 python distribution/build_clients.py /tmp/starter.zip /tmp/contextopus-claude-code.zip --client claude-code
 ```
 

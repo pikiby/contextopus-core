@@ -39,8 +39,8 @@ Skill Catalog organizes installed skills and records verified aliases, overlappi
   <a href="docs/development.md">Development</a>
 </p>
 
-> **Version 1.7.0** adds per-client installation packages, structured procedure responses and the shared module Library.
-> [Release downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.7.0) · [Installation guide](distribution/README.md).
+> **Version 1.8.0** makes procedure inputs precise, protects Workspace changes against revised assignments, and shows contexts with their linked rules in the Library.
+> [Release downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.8.0) · [Installation guide](distribution/README.md).
 
 ## Choose your modules
 
@@ -109,7 +109,7 @@ shared RAG helps discover them without duplicating a search service.
 
 ### Choose your coding assistant
 
-Download a [release package](https://github.com/pikiby/contextopus-core/releases/tag/v1.7.0) for your platform. The distribution provides a separate installation package for **Codex,
+Download a [release package](https://github.com/pikiby/contextopus-core/releases/tag/v1.8.0) for your platform. The distribution provides a separate installation package for **Codex,
 Claude Code, Cursor, Hermes, OpenCode and Crush**. Each uses the same Core installer
 and persistent data folder. Claude Code, Cursor, Codex and Hermes packages include
 plugin skills and MCP configuration; OpenCode and Crush use native file integration.
@@ -253,4 +253,4 @@ installation or compatibility with every client version.
 
 ## Current release
 
-[1.7.0: Client packages and a shared web library](docs/releases/1.7.0.md) · [Downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.7.0)
+[1.8.0: Reliable procedures and context rules](docs/releases/1.8.0.md) · [Downloads](https://github.com/pikiby/contextopus-core/releases/tag/v1.8.0)

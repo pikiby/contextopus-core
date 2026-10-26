@@ -1,4 +1,4 @@
-"""Native FastMCP transport with one process owner for all roots and modules."""
+"""Native FastMCP transport bound to one configured root and its modules."""
 
 import atexit
 import json
@@ -24,38 +24,28 @@ class ServerOwner:
         self.applications = {}
         self._lock = threading.RLock()
 
-    def application(self, root=None, context=None):
+    def application(self, context=None):
         from contextopus.core.storage import StorageLayout
 
-        key = (str(StorageLayout.resolve(root or self.root).root), context)
+        if context is not None and (
+            not isinstance(context, str) or not context.strip()
+            or context in {'.', '..'} or '/' in context or '\\' in context
+        ):
+            raise ValueError('Use a context name, not a filesystem path')
+        root = StorageLayout.resolve(self.root).root
         with self._lock:
-            created = key not in self.applications
-            if key not in self.applications:
-                self.applications[key] = Application(
-                    key[0], key[1], resources=self.resources
+            created = context not in self.applications
+            if context not in self.applications:
+                self.applications[context] = Application(
+                    root, context, resources=self.resources
                 )
-            app = self.applications[key]
+            app = self.applications[context]
         if created and self.resources.services_started:
             self.resources.start_services()
         return app
 
     def current_root(self):
-        import json
-        from contextopus.core.storage import StorageLayout
-
-        current = StorageLayout.resolve(self.root).root
-        if str(current) != self.root:
-            record = Path(self.root) / "runtime/service.json"
-            if (
-                record.is_file()
-                and json.loads(record.read_text()).get("pid") == os.getpid()
-            ):
-                target = current / "runtime/service.json"
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(
-                    json.dumps({"pid": os.getpid(), "root": str(current)})
-                )
-        return str(current)
+        return self.root
 
     def close(self):
         failures = []
@@ -73,19 +63,28 @@ class ServerOwner:
             raise ExceptionGroup('MCP owner failed to close', failures)
 
 
+class ContextopusMCP(FastMCP):
+    async def call_tool(self, name, arguments):
+        # FastMCP otherwise ignores extra fields. Reject stale clients before
+        # they can execute a request against a different, server-owned root.
+        if 'work_root' in arguments:
+            raise ToolError('Storage is configured by the server. Remove work_root and use a context name.')
+        return await super().call_tool(name, arguments)
+
+
 def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
     owner = ServerOwner(root)
     owner.application()
     owner.resources.start_services()
-    mcp = FastMCP(
+    mcp = ContextopusMCP(
         "Contextopus",
         host=host,
         port=port,
         instructions=(
             "Use the Contextopus MCP tools advertised by this client for Contextopus context discovery, "
             "instructions, knowledge retrieval and memory changes. Their native names may include a server "
-            "prefix; select those advertised tools, not similarly named local tools. A supplied work_root "
-            "identifies Contextopus data, not a code directory to explore. Obtain and read the applicable "
+            "prefix; select those advertised tools, not similarly named local tools. Select context by name; "
+            "storage is configured by the server and is not a tool argument. Obtain and read the applicable "
             "procedure through this server's guide tool before context operations. Do not replace Contextopus "
             "operations with shell commands, direct context-file reads, generic code search or web search. "
             "Native skill loading and obtaining declared external sources still use the readers required by "
@@ -111,10 +110,10 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             "recovery": recovery,
         }}, ensure_ascii=False))
 
-    def route(kind, operation, arguments, work_root=None, context=None, workspace=None):
+    def route(kind, operation, arguments, context=None, workspace=None):
         if context is not None and workspace is not None and context != workspace:
             reject_call("conflicting_coordinates", "context and workspace disagree", "Use the selected context once, outside arguments; do not silently switch contexts.")
-        app = owner.application(work_root, context or workspace)
+        app = owner.application(context if context is not None else workspace)
         # Reaching transport dispatch proves this owner is serving requests.
         # It provides no evidence about a particular native client's identity.
         app.services.runtime_mcp["server"] = "running"
@@ -124,15 +123,14 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             # Preserve MCP isError, including for guide and legacy entrypoints.
             raise ToolError(json.dumps(exc.payload, ensure_ascii=False)) from None
 
-    def normalize(operation, work_root=None, context=None, workspace=None):
-        return owner.application(work_root, context or workspace).normalize_operation(operation)
+    def normalize(operation, context=None, workspace=None):
+        return owner.application(context if context is not None else workspace).normalize_operation(operation)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def guide(
         procedure: str | None = None,
         operation: str | None = None,
         catalog: bool = False,
-        work_root: str | None = None,
         context: str | None = None,
         workspace: str | None = None,
     ) -> dict:
@@ -141,18 +139,19 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
             reject_call('conflicting_guide_selectors', 'Choose procedure, operation or catalog', 'Request exactly one procedure, one operation signature, or catalog=true.')
         if operation is not None or catalog:
             return await anyio.to_thread.run_sync(partial(route, 'query', 'describe',
-                {'operation': normalize(operation, work_root, context, workspace)} if operation is not None else {}, work_root, context, workspace))
+                {'operation': normalize(operation, context, workspace)} if operation is not None else {}, context, workspace))
         return await anyio.to_thread.run_sync(partial(route, 'query', 'procedure',
-            {'name': procedure or 'default'}, work_root, context, workspace))
+            {'name': procedure or 'default'}, context, workspace))
 
-    async def dispatch(kind, operation, arguments, work_root, context, workspace, detail):
+    async def dispatch(kind, operation, arguments, context, workspace, detail):
         # Validate before executing a mutation. Presentation runs only after the
         # existing registry has completed approval checks and observation.
         if detail not in ('compact', 'full'):
             reject_call('invalid_detail', 'detail must be compact or full', 'Use compact normally; full only when needed evidence is missing.')
-        result = await anyio.to_thread.run_sync(partial(route, kind, operation, arguments, work_root, context, workspace))
+        operation = normalize(operation, context, workspace)
+        result = await anyio.to_thread.run_sync(partial(route, kind, operation, arguments, context, workspace))
         from .presentation import present
-        result = present(result, operation=normalize(operation, work_root, context, workspace), arguments=arguments, detail=detail)
+        result = present(result, operation=operation, arguments=arguments, detail=detail)
         if isinstance(result, dict):
             return result
         # FastMCP otherwise expands a list into separate content blocks, losing
@@ -162,20 +161,20 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def read(
         operation: str, arguments: dict | None = None,
-        work_root: str | None = None, context: str | None = None,
+        context: str | None = None,
         workspace: str | None = None, detail: Literal['compact', 'full'] = 'compact',
     ) -> Any:
         """Run a query; compact metadata is standard, full detail preserves all evidence."""
-        return await dispatch('query', operation, arguments, work_root, context, workspace, detail)
+        return await dispatch('query', operation, arguments, context, workspace, detail)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=False))
     async def write(
         operation: str, arguments: dict | None = None,
-        work_root: str | None = None, context: str | None = None,
+        context: str | None = None,
         workspace: str | None = None, detail: Literal['compact', 'full'] = 'compact',
     ) -> Any:
         """Run an authorized mutation under its existing review and approval policy."""
-        return await dispatch('execute', operation, arguments, work_root, context, workspace, detail)
+        return await dispatch('execute', operation, arguments, context, workspace, detail)
 
     @mcp.tool(annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False,
@@ -185,7 +184,6 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         expected_revision: str | None = None,
         confirmation: str | None = None,
         cancel: bool = False,
-        work_root: str | None = None,
         context: str | None = None,
         workspace: str | None = None,
     ) -> Any:
@@ -200,7 +198,7 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         return await dispatch('execute', 'finish', {
             'cycle_id': cycle_id, 'expected_revision': expected_revision,
             'confirmation': confirmation, 'cancel': cancel,
-        }, work_root, context, workspace, 'compact')
+        }, context, workspace, 'compact')
 
     # Explicit temporary compatibility for old clients. It preserves full legacy
     # responses and is never advertised by the default server.
@@ -208,13 +206,13 @@ def create_server(root, host="127.0.0.1", port=8765, *, legacy_tools=None):
         legacy_tools = os.environ.get('CONTEXTOPUS_LEGACY_TOOLS') == '1'
     if legacy_tools:
         async def legacy_query(operation: str, arguments: dict | None = None,
-                               work_root: str | None = None, context: str | None = None,
+                               context: str | None = None,
                                workspace: str | None = None) -> Any:
-            return await dispatch('query', operation, arguments, work_root, context, workspace, 'full')
+            return await dispatch('query', operation, arguments, context, workspace, 'full')
         async def legacy_execute(operation: str, arguments: dict | None = None,
-                                 work_root: str | None = None, context: str | None = None,
+                                 context: str | None = None,
                                  workspace: str | None = None) -> Any:
-            return await dispatch('execute', operation, arguments, work_root, context, workspace, 'full')
+            return await dispatch('execute', operation, arguments, context, workspace, 'full')
         for name in ('contextopus_query', 'pcw_query'):
             mcp.tool(name=name, annotations=ToolAnnotations(readOnlyHint=True))(legacy_query)
         for name in ('contextopus_execute', 'pcw_execute'):

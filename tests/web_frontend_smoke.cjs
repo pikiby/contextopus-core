@@ -13,7 +13,7 @@ class Element {
   focus() {}
   scrollIntoView() {}
 }
-const ids = ['metadata-filters','nav','nav-status','refresh','run-search','load-more','records','detail','heading','hint','count','warnings','collection','type','search','search-form','text-mode','semantic-mode','search-hint'];
+const ids = ['views','metadata-filters','nav','nav-status','refresh','run-search','load-more','records','detail','heading','hint','count','warnings','collection','type','search','search-form','text-mode','semantic-mode','search-hint'];
 const elements = Object.fromEntries(ids.map(id => [id, new Element(['collection','type'].includes(id) ? 'select' : 'div')]));
 const calls = [];
 let delayed = false;

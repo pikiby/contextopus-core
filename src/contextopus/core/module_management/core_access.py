@@ -146,6 +146,7 @@ class ModuleCoreAccess:
             "documents.plan": (("collection", "documents", "previous"), ("complete",)),
             "instructions.read": (("reference",), ()),
             "instructions.resolve": (("references",), ()),
+            "instructions.bind": (("metadata", "role", "reference"), ()),
             "instructions.save": (("path", "metadata", "content"), ("expected_revision",)),
             "instructions.list": ((), ()),
             "instructions.reconcile": ((), ()),

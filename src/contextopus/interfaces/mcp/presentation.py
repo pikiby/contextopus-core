@@ -30,7 +30,7 @@ def present(result, *, operation, arguments=None, detail='compact'):
     def walk(value, field=None):
         # Review text, configuration nulls/false/0 and historical source evidence
         # have their own exact contracts; presentation must not reinterpret them.
-        if field in {'review_changes', 'settings', 'effective_settings', 'changes', 'diagnostics', 'metadata'}:
+        if field in {'review_changes', 'relation_candidates', 'settings', 'effective_settings', 'changes', 'diagnostics', 'metadata'}:
             if field == 'diagnostics' and search and isinstance(value, dict):
                 return compact_diagnostics(value)
             import copy

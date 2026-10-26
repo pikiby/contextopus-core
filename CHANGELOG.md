@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.0
+
+See the [release notes](docs/releases/1.8.0.md) for procedure contracts, context rules, compatibility and verification limits.
+
 ## 1.7.0
 
 See the [release notes](docs/releases/1.7.0.md) for changes, compatibility and verification.

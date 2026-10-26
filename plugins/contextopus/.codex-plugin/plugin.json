@@ -1,6 +1,6 @@
 {
   "name": "contextopus",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Persistent context through one local Contextopus application",
   "author": {
     "name": "pikiby"

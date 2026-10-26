@@ -1,5 +1,6 @@
 """File-authoritative shared instruction library; indexing is a derived view."""
 
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -118,17 +119,68 @@ class InstructionLibrary:
             raise ValueError("Ambiguous instruction: " + name)
         return self._record(matches[0])
 
-    def resolve(self, references):
+    def resolve(self, references, prepared=None):
         """Resolve exact required links recursively, dependencies first and once each."""
         if not isinstance(references, (list, tuple)):
             raise ValueError("references must be a list")
         references = ["[[" + self._reference(reference) + "]]" for reference in references]
-        documents = resolve_required(self._snapshot().documents, references)
-        records = [self._record(document) for document in documents]
+        documents = list(self._snapshot().documents)
+        pending = {}
+        for item in prepared or []:
+            document = parse_document(item["text"].encode("utf-8"), location=item["path"],
+                                      module="core", collection="instructions")
+            self._validate(document)
+            matches = [d for d in documents if d.key == document.key or d.location == document.location]
+            if matches:
+                if (len(matches) != 1 or matches[0].key != document.key
+                        or matches[0].location != document.location
+                        or self._record(matches[0])["revision"] != item["revision"]):
+                    raise ValueError("Prepared instruction conflicts with an existing document")
+            else:
+                documents.append(document)
+                pending[document.key] = {key: value for key, value in item.items() if key != "text"}
+        documents = resolve_required(documents, references)
+        records = [pending[document.key] if document.key in pending else self._record(document)
+                   for document in documents]
         revisions = [[record["id"], record["path"], record["revision"]] for record in records]
         revision = hashlib.sha256(json.dumps(revisions, ensure_ascii=False,
             separators=(",", ":")).encode("utf-8")).hexdigest()
         return {"instructions": records, "revision": revision}
+
+    def prepare_create(self, path, metadata, content):
+        """Render a new instruction for an owner's review without saving it."""
+        self._safe_root()
+        target = self._path(path)
+        if target.exists():
+            raise ValueError("Instruction already exists; select it instead of creating it")
+        if not isinstance(metadata, dict) or not isinstance(content, str):
+            raise ValueError("Expected metadata mapping and instruction text")
+        # Owners persist drafts as JSON; key order must survive that round trip.
+        metadata = json.loads(json.dumps(metadata, sort_keys=True, allow_nan=False))
+        raw = "---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False) + "---\n" + content
+        document = parse_document(raw.encode("utf-8"), location=path,
+                                  module="core", collection="instructions")
+        self._validate(document)
+        if any(d.key == document.key for d in self._snapshot().documents):
+            raise ValueError("Duplicate instruction identity: " + document.key.id)
+        return {"id": document.key.id, "type": "instruction", "path": path,
+                "title": metadata.get("title", document.key.id),
+                "description": metadata.get("description", ""),
+                "metadata": deepcopy(metadata), "content": content, "text": raw,
+                "revision": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
+
+    def bind(self, metadata, role, reference, prepared=None):
+        """Build one exact binding; the document owner reviews and persists it."""
+        if not isinstance(metadata, dict) or not isinstance(role, str) or not role.strip():
+            raise ValueError("Expected document metadata and a nonempty instruction role")
+        result = deepcopy(metadata)
+        bindings = result.setdefault("instructions", {})
+        if not isinstance(bindings, dict):
+            raise ValueError("instructions must map roles to wikilinks")
+        selected = self.resolve([reference], prepared=prepared)["instructions"][-1]
+        bindings[role] = "[[" + selected["id"] + "]]"
+        resolved = self.resolve(list(bindings.values()), prepared=prepared)
+        return {"metadata": result, **resolved}
 
     def list(self):
         """List instruction identities and descriptions without loading an embedding model."""

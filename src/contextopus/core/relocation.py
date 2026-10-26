@@ -1,4 +1,4 @@
-"""Verified copy relocation with retained source and fail-closed legacy namespace.
+"""Verified copy relocation with retained source and explicit destination selection.
 
 No serialized approval or proposal is rewritten. Absolute legacy coordinates are
 resolved using the checked relocation receipt, rather than text substitution.
@@ -440,8 +440,8 @@ def apply(proposal):
             raise ValueError("Destination belongs to another relocation")
         _verify_target(destination, json.loads(receipt.read_text(encoding="utf-8")))
         _write(
-            source / ".contextopus-redirect.json",
-            {"destination": str(destination), "revision": revision},
+            source / ".contextopus-freeze.json",
+            {"destination": str(destination), "revision": revision, "state": "complete"},
         )
         return {
             "status": "complete",
@@ -597,8 +597,8 @@ def apply(proposal):
         record = {**proposal, "state": "complete"}
         _write(receipt, record)
         _write(
-            source / ".contextopus-redirect.json",
-            {"destination": str(destination), "revision": revision},
+            freeze,
+            {"destination": str(destination), "revision": revision, "state": "complete"},
         )
     return {
         "status": "complete",
@@ -611,11 +611,14 @@ def apply(proposal):
 @_module_lifecycle
 def rollback(proposal):
     source, destination = _validate(proposal)
+    freeze = source / ".contextopus-freeze.json"
     if (source / ".contextopus-redirect.json").exists() or (
         destination / ".contextopus-receipt.json"
-    ).exists():
+    ).exists() or (
+        freeze.is_file()
+        and json.loads(freeze.read_text(encoding="utf-8")).get("state") == "complete"
+    ):
         raise ValueError("Published relocation cannot be rolled back")
-    freeze = source / ".contextopus-freeze.json"
     if freeze.exists():
         if (
             json.loads(freeze.read_text(encoding="utf-8")).get("revision")
